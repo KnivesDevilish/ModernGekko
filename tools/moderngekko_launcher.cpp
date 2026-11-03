@@ -762,11 +762,6 @@ int main(int argc, char** argv)
         if (current_metadata && !RequiredGameError(*current_metadata.metadata).empty())
           current_metadata = {{}, RequiredGameError(*current_metadata.metadata)};
         extraction.finished_game.reset();
-        if (ensure_controller())
-        {
-          launch_mode = LaunchMode::Solo;
-          done = true;
-        }
       }
     }
 
@@ -781,6 +776,10 @@ int main(int argc, char** argv)
                      ImGuiWindowFlags_NoSavedSettings);
     ImGui::TextUnformatted(MODERNGEKKO_FRONTEND_NAME);
     ImGui::Separator();
+    if (ImGui::BeginTabBar("##srzgs_tabs"))
+    {
+      if (ImGui::BeginTabItem("Play"))
+      {
 
     if (current_metadata)
     {
@@ -891,6 +890,25 @@ int main(int argc, char** argv)
     }
 
     ImGui::Spacing();
+    ImGui::TextUnformatted("Netplay");
+    ImGui::SetNextItemWidth(220 * scale);
+    ImGui::InputText("Nickname", netplay_nickname.data(), netplay_nickname.size());
+    ImGui::SetNextItemWidth(220 * scale);
+    ImGui::InputText("Host / IP", netplay_address.data(), netplay_address.size());
+    ImGui::SetNextItemWidth(120 * scale);
+    ImGui::InputInt("UDP port", &netplay_port);
+    netplay_port = std::clamp(netplay_port, 1, 65535);
+    ImGui::Checkbox("Automatic input buffer", &automatic_buffer);
+    if (!automatic_buffer)
+    {
+      ImGui::SetNextItemWidth(180 * scale);
+      ImGui::SliderInt("Buffer frames", &manual_buffer, 1, 20);
+    }
+      ImGui::EndTabItem();
+    }
+      if (ImGui::BeginTabItem("Settings"))
+      {
+    ImGui::Spacing();
     ImGui::TextUnformatted("Graphics backend");
     if (ImGui::BeginCombo("##graphics_backend",
                           graphics_backends[graphics_backend_index].text))
@@ -980,6 +998,10 @@ int main(int argc, char** argv)
         config.show_fps_in_title = show_fps_in_title;
       }
     }
+      ImGui::EndTabItem();
+    }
+      if (ImGui::BeginTabItem("Controls"))
+      {
     ImGui::Spacing();
     ImGui::TextUnformatted("Controller profile");
     const char* controller_preview = controller_index >= 0
@@ -1011,21 +1033,10 @@ int main(int argc, char** argv)
     if (ImGui::Button(replace_profile.c_str()))
       select_controller(controller_index);
     ImGui::EndDisabled();
-    ImGui::Spacing();
-    ImGui::TextUnformatted("Netplay");
-    ImGui::SetNextItemWidth(220 * scale);
-    ImGui::InputText("Nickname", netplay_nickname.data(), netplay_nickname.size());
-    ImGui::SetNextItemWidth(220 * scale);
-    ImGui::InputText("Host / IP", netplay_address.data(), netplay_address.size());
-    ImGui::SetNextItemWidth(120 * scale);
-    ImGui::InputInt("UDP port", &netplay_port);
-    netplay_port = std::clamp(netplay_port, 1, 65535);
-    ImGui::Checkbox("Automatic input buffer", &automatic_buffer);
-    if (!automatic_buffer)
-    {
-      ImGui::SetNextItemWidth(180 * scale);
-      ImGui::SliderInt("Buffer frames", &manual_buffer, 1, 20);
+      ImGui::EndTabItem();
     }
+      if (ImGui::BeginTabItem("Manage Game Files"))
+      {
     ImGui::Spacing();
     ImGui::TextUnformatted("Game disc image");
     if (selected_image)
@@ -1049,7 +1060,7 @@ int main(int argc, char** argv)
       if (selected_image)
       {
         ImGui::SameLine();
-        if (ImGui::Button("Extract and Play"))
+        if (ImGui::Button("Extract Game"))
         {
           extraction.completed = 0;
           extraction.total = 1;
@@ -1081,6 +1092,10 @@ int main(int argc, char** argv)
         ImGui::TextWrapped("%s", extraction.status.c_str());
       if (!extraction.error.empty())
         ImGui::TextColored(ImVec4(1.0f, 0.35f, 0.3f, 1.0f), "%s", extraction.error.c_str());
+    }
+      ImGui::EndTabItem();
+    }
+      ImGui::EndTabBar();
     }
     {
       std::lock_guard lock(dialog.mutex);
