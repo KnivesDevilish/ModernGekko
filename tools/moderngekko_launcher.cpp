@@ -780,132 +780,161 @@ int main(int argc, char** argv)
     {
       if (ImGui::BeginTabItem("Play"))
       {
-
-    if (current_metadata)
-    {
-      ImGui::Text("Ready: %s [%s]", current_metadata.metadata->game_name.c_str(),
-                  current_metadata.metadata->disc_id.c_str());
-      if (!launcher_savestates.empty())
-      {
-        ImGui::TextUnformatted("Start from savestate");
-        const std::string savestate_preview =
-            selected_savestate >= 0 ?
-                moderngekko::frontend::LauncherSavestateLabel(
-                    launcher_savestates[static_cast<std::size_t>(selected_savestate)],
-                    selected_savestate == 0) :
-                "Normal boot";
-        if (ImGui::BeginCombo("##launch_savestate", savestate_preview.c_str()))
-        {
-          const bool normal_boot_selected = selected_savestate < 0;
-          if (ImGui::Selectable("Normal boot", normal_boot_selected))
-            selected_savestate = -1;
-          if (normal_boot_selected)
-            ImGui::SetItemDefaultFocus();
-
-          for (std::size_t i = 0; i < launcher_savestates.size(); ++i)
-          {
-            const std::string label =
-                moderngekko::frontend::LauncherSavestateLabel(launcher_savestates[i], i == 0);
-            const bool selected = selected_savestate == static_cast<int>(i);
-            if (ImGui::Selectable(label.c_str(), selected))
-              selected_savestate = static_cast<int>(i);
-            if (selected)
-              ImGui::SetItemDefaultFocus();
-          }
-          ImGui::EndCombo();
-        }
-        // Netplay starts every player from the same boot, so a state chosen by
-        // one side would desync the session immediately.
-        ImGui::TextDisabled("Solo play only.");
         ImGui::Spacing();
-      }
-      if (ImGui::Button("Play", ImVec2(180 * scale, 42 * scale)))
-      {
-        if (ensure_controller())
-        {
-          launch_mode = LaunchMode::Solo;
-          done = true;
-        }
-      }
-      ImGui::SameLine();
-      if (ImGui::Button("Host Netplay", ImVec2(180 * scale, 42 * scale)))
-      {
-        if (ensure_controller())
-        {
-          config.netplay_nickname = netplay_nickname.data();
-          config.netplay_address = netplay_address.data();
-          config.netplay_port = static_cast<std::uint16_t>(netplay_port);
-          config.netplay_buffer = automatic_buffer ? "auto" : std::to_string(manual_buffer);
-          config.controllers = configured_controllers.empty()
-                                   ? std::vector<std::string>{selected_controller}
-                                   : configured_controllers;
-          config.controller = config.controllers.front();
-          config.resolution = resolutions[resolution_index].text;
-          config.show_fps_in_title = show_fps_in_title;
-          std::string error;
-          if (moderngekko::frontend::SaveConfig(user_directory, config, &error))
-          {
-            launch_mode = LaunchMode::Host;
-            done = true;
-          }
-          else
-          {
-            std::lock_guard lock(dialog.mutex);
-            dialog.error = std::move(error);
-          }
-        }
-      }
-      ImGui::SameLine();
-      if (ImGui::Button("Join Netplay", ImVec2(180 * scale, 42 * scale)))
-      {
-        if (ensure_controller())
-        {
-          config.netplay_nickname = netplay_nickname.data();
-          config.netplay_address = netplay_address.data();
-          config.netplay_port = static_cast<std::uint16_t>(netplay_port);
-          config.netplay_buffer = automatic_buffer ? "auto" : std::to_string(manual_buffer);
-          config.controllers = configured_controllers.empty()
-                                   ? std::vector<std::string>{selected_controller}
-                                   : configured_controllers;
-          config.controller = config.controllers.front();
-          config.resolution = resolutions[resolution_index].text;
-          config.show_fps_in_title = show_fps_in_title;
-          std::string error;
-          if (moderngekko::frontend::SaveConfig(user_directory, config, &error))
-          {
-            launch_mode = LaunchMode::Join;
-            done = true;
-          }
-          else
-          {
-            std::lock_guard lock(dialog.mutex);
-            dialog.error = std::move(error);
-          }
-        }
-      }
-    }
-    else
-    {
-      ImGui::TextUnformatted("No extracted game is configured yet.");
-    }
+        ImGui::TextColored(ImVec4(0.35f, 0.78f, 1.0f, 1.0f), "SONIC RIDERS");
+        ImGui::SameLine();
+        ImGui::TextDisabled("ZERO GRAVITY");
+        ImGui::TextDisabled("Static Recompilation");
+        ImGui::Separator();
+        ImGui::Spacing();
 
-    ImGui::Spacing();
-    ImGui::TextUnformatted("Netplay");
-    ImGui::SetNextItemWidth(220 * scale);
-    ImGui::InputText("Nickname", netplay_nickname.data(), netplay_nickname.size());
-    ImGui::SetNextItemWidth(220 * scale);
-    ImGui::InputText("Host / IP", netplay_address.data(), netplay_address.size());
-    ImGui::SetNextItemWidth(120 * scale);
-    ImGui::InputInt("UDP port", &netplay_port);
-    netplay_port = std::clamp(netplay_port, 1, 65535);
-    ImGui::Checkbox("Automatic input buffer", &automatic_buffer);
-    if (!automatic_buffer)
-    {
-      ImGui::SetNextItemWidth(180 * scale);
-      ImGui::SliderInt("Buffer frames", &manual_buffer, 1, 20);
-    }
-      ImGui::EndTabItem();
-    }
+        if (current_metadata)
+        {
+          ImGui::BeginChild("##game_status", ImVec2(0, 82 * scale), true);
+          ImGui::TextDisabled("GAME STATUS");
+          ImGui::TextColored(ImVec4(0.35f, 0.85f, 0.55f, 1.0f), "READY");
+          ImGui::SameLine();
+          ImGui::Text("%s", current_metadata.metadata->game_name.c_str());
+          ImGui::TextDisabled("Disc ID: %s",
+                              current_metadata.metadata->disc_id.c_str());
+          ImGui::EndChild();
+
+          ImGui::Spacing();
+          if (!launcher_savestates.empty())
+          {
+            ImGui::TextUnformatted("Start from savestate");
+            const std::string savestate_preview =
+                selected_savestate >= 0 ?
+                    moderngekko::frontend::LauncherSavestateLabel(
+                        launcher_savestates[static_cast<std::size_t>(selected_savestate)],
+                        selected_savestate == 0) :
+                    "Normal boot";
+            ImGui::SetNextItemWidth(-1);
+            if (ImGui::BeginCombo("##launch_savestate", savestate_preview.c_str()))
+            {
+              const bool normal_boot_selected = selected_savestate < 0;
+              if (ImGui::Selectable("Normal boot", normal_boot_selected))
+                selected_savestate = -1;
+              if (normal_boot_selected)
+                ImGui::SetItemDefaultFocus();
+
+              for (std::size_t i = 0; i < launcher_savestates.size(); ++i)
+              {
+                const std::string label =
+                    moderngekko::frontend::LauncherSavestateLabel(
+                        launcher_savestates[i], i == 0);
+                const bool selected = selected_savestate == static_cast<int>(i);
+                if (ImGui::Selectable(label.c_str(), selected))
+                  selected_savestate = static_cast<int>(i);
+                if (selected)
+                  ImGui::SetItemDefaultFocus();
+              }
+              ImGui::EndCombo();
+            }
+            // Netplay starts every player from the same boot, so a state chosen by
+            // one side would desync the session immediately.
+            ImGui::TextDisabled("Savestates are available for solo play only.");
+            ImGui::Spacing();
+          }
+
+          if (ImGui::Button("PLAY", ImVec2(-1, 48 * scale)))
+          {
+            if (ensure_controller())
+            {
+              launch_mode = LaunchMode::Solo;
+              done = true;
+            }
+          }
+
+          ImGui::Spacing();
+          ImGui::TextUnformatted("ONLINE PLAY");
+          ImGui::TextDisabled("Host a session or connect to another player.");
+          const float netplay_button_width =
+              (ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ItemSpacing.x) * 0.5f;
+          if (ImGui::Button("Host Netplay", ImVec2(netplay_button_width, 38 * scale)))
+          {
+            if (ensure_controller())
+            {
+              config.netplay_nickname = netplay_nickname.data();
+              config.netplay_address = netplay_address.data();
+              config.netplay_port = static_cast<std::uint16_t>(netplay_port);
+              config.netplay_buffer = automatic_buffer ? "auto" : std::to_string(manual_buffer);
+              config.controllers = configured_controllers.empty()
+                                       ? std::vector<std::string>{selected_controller}
+                                       : configured_controllers;
+              config.controller = config.controllers.front();
+              config.resolution = resolutions[resolution_index].text;
+              config.show_fps_in_title = show_fps_in_title;
+              std::string error;
+              if (moderngekko::frontend::SaveConfig(user_directory, config, &error))
+              {
+                launch_mode = LaunchMode::Host;
+                done = true;
+              }
+              else
+              {
+                std::lock_guard lock(dialog.mutex);
+                dialog.error = std::move(error);
+              }
+            }
+          }
+          ImGui::SameLine();
+          if (ImGui::Button("Join Netplay", ImVec2(netplay_button_width, 38 * scale)))
+          {
+            if (ensure_controller())
+            {
+              config.netplay_nickname = netplay_nickname.data();
+              config.netplay_address = netplay_address.data();
+              config.netplay_port = static_cast<std::uint16_t>(netplay_port);
+              config.netplay_buffer = automatic_buffer ? "auto" : std::to_string(manual_buffer);
+              config.controllers = configured_controllers.empty()
+                                       ? std::vector<std::string>{selected_controller}
+                                       : configured_controllers;
+              config.controller = config.controllers.front();
+              config.resolution = resolutions[resolution_index].text;
+              config.show_fps_in_title = show_fps_in_title;
+              std::string error;
+              if (moderngekko::frontend::SaveConfig(user_directory, config, &error))
+              {
+                launch_mode = LaunchMode::Join;
+                done = true;
+              }
+              else
+              {
+                std::lock_guard lock(dialog.mutex);
+                dialog.error = std::move(error);
+              }
+            }
+          }
+
+          ImGui::Spacing();
+          ImGui::Separator();
+          ImGui::TextUnformatted("NETPLAY CONNECTION");
+          ImGui::SetNextItemWidth(-1);
+          ImGui::InputText("Nickname", netplay_nickname.data(), netplay_nickname.size());
+          ImGui::SetNextItemWidth(-1);
+          ImGui::InputText("Host / IP", netplay_address.data(), netplay_address.size());
+          ImGui::SetNextItemWidth(150 * scale);
+          ImGui::InputInt("UDP port", &netplay_port);
+          netplay_port = std::clamp(netplay_port, 1, 65535);
+          ImGui::Checkbox("Automatic input buffer", &automatic_buffer);
+          if (!automatic_buffer)
+          {
+            ImGui::SetNextItemWidth(-1);
+            ImGui::SliderInt("Buffer frames", &manual_buffer, 1, 20);
+          }
+        }
+        else
+        {
+          ImGui::BeginChild("##game_status_missing", ImVec2(0, 96 * scale), true);
+          ImGui::TextDisabled("GAME NOT INSTALLED");
+          ImGui::TextUnformatted("No extracted game is configured yet.");
+          ImGui::TextDisabled("Open Manage Game Files to select and extract your game.");
+          ImGui::EndChild();
+        }
+
+        ImGui::EndTabItem();
+      }
       if (ImGui::BeginTabItem("Settings"))
       {
     ImGui::Spacing();
