@@ -227,6 +227,30 @@ int main() {
       return 24;
   }
 
+  // Language: "auto" until chosen, saved, kept by the short SaveConfig, read
+  // in other spellings, and an unknown language is refused.
+  {
+    const fs::path language = directory / "language";
+    if (moderngekko::frontend::LoadConfig(language, true).language != "auto")
+      return 25;
+    auto language_config = moderngekko::frontend::LoadConfig(language, false);
+    language_config.language = "es";
+    if (!moderngekko::frontend::SaveConfig(language, language_config, &error) ||
+        !moderngekko::frontend::SaveConfig(language, "1920x1080", true, controller,
+                                           &error) ||
+        moderngekko::frontend::LoadConfig(language, false).language != "es")
+      return 26;
+    language_config.language = "fr";
+    if (moderngekko::frontend::SaveConfig(language, language_config, &error))
+      return 27;
+    {
+      std::ofstream file(language / "config.ini", std::ios::trunc);
+      file << "[Launcher]\nlanguage = English\n[Video]\nresolution=1920x1080\n";
+    }
+    if (moderngekko::frontend::LoadConfig(language, false).language != "en")
+      return 28;
+  }
+
   fs::remove_all(directory);
   return 0;
 }

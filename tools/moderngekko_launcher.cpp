@@ -3,6 +3,7 @@
 #include "launcher_cjk_font.inc"
 #include "launcher_savestates.hpp"
 #include "launcher_summary.hpp"
+#include "launcher_text.hpp"
 #include "moderngekko/game.hpp"
 #include "netplay_session.hpp"
 
@@ -38,6 +39,9 @@
 #include <vector>
 
 namespace fs = std::filesystem;
+// Interface texts are written in English and drawn through Tr().
+using moderngekko::frontend::Format;
+using moderngekko::frontend::Tr;
 
 namespace
 {
@@ -890,6 +894,68 @@ bool DrawLinkButton(const char* label)
   return clicked;
 }
 
+// The system's first preferred language, such as "es" from es_VE.UTF-8, or
+// empty when SDL can't tell.
+std::string SystemLanguageCode()
+{
+  int count = 0;
+  SDL_Locale** locales = SDL_GetPreferredLocales(&count);
+  std::string language =
+      locales && count > 0 && locales[0]->language ? locales[0]->language : "";
+  SDL_free(locales);
+  return language;
+}
+
+// The language menu at the bottom of the sidebar. setting is config.ini's
+// "language" value; returns true when the player picks another one.
+bool DrawLanguageMenu(std::string& setting, std::string_view system_language, float scale)
+{
+  using moderngekko::frontend::Language;
+  using moderngekko::frontend::LanguageName;
+  const float height = ImGui::GetTextLineHeightWithSpacing() + ImGui::GetFrameHeight();
+  ImGui::SetCursorPosY(std::max(ImGui::GetCursorPosY(), ImGui::GetWindowHeight() - height));
+  ImGui::Indent(12.0f * scale);
+  ImGui::TextDisabled("%s", Tr("LANGUAGE"));
+  const std::string automatic = Format(
+      Tr("System (%s)"),
+      LanguageName(moderngekko::frontend::ResolveLanguage("auto", system_language)));
+  const std::array<std::pair<const char*, std::string>, 3> choices = {{
+      {"auto", automatic},
+      {"en", LanguageName(Language::English)},
+      {"es", LanguageName(Language::Spanish)},
+  }};
+  const auto current = std::ranges::find_if(
+      choices, [&](const auto& choice) { return setting == choice.first; });
+  bool changed = false;
+  ImGui::SetNextItemWidth(-1.0f);
+  if (ImGui::BeginCombo("##language",
+                        current != choices.end() ? current->second.c_str() : automatic.c_str()))
+  {
+    for (const auto& [value, label] : choices)
+    {
+      const bool selected = setting == value;
+      if (ImGui::Selectable(label.c_str(), selected) && !selected)
+      {
+        setting = value;
+        changed = true;
+      }
+      if (selected)
+        ImGui::SetItemDefaultFocus();
+    }
+    ImGui::EndCombo();
+  }
+  ImGui::Unindent(12.0f * scale);
+  return changed;
+}
+
+// The PLAY page's name for a savestate. The newest one is marked, as
+// LauncherSavestateLabel() does, in the interface's language.
+std::string SavestateLabel(const fs::path& path, bool latest)
+{
+  const std::string filename = moderngekko::frontend::PathText(path.filename());
+  return latest ? Format(Tr("Latest - %s"), filename.c_str()) : filename;
+}
+
 // One card of the PLAY page summary: a small heading over one value. With a
 // destination it is a button; the tooltip says where it leads.
 struct SummaryTile
@@ -924,42 +990,43 @@ struct PlaySummary
 std::array<SummaryTile, 4> BuildPlaySummaryTiles(const PlaySummary& summary)
 {
   std::array<SummaryTile, 4> tiles;
-  tiles[0] = {"##summary_time", "TIME PLAYED",
-              moderngekko::frontend::FormatTimePlayed(summary.time_played_ms), false, {}, false};
+  tiles[0] = {"##summary_time", Tr("TIME PLAYED"),
+              Tr(moderngekko::frontend::FormatTimePlayed(summary.time_played_ms)), false, {},
+              false};
 
   SummaryTile& controls = tiles[1];
-  controls = {"##summary_controls", "CONTROLS", {}, false, "Open Controls", true};
+  controls = {"##summary_controls", Tr("CONTROLS"), {}, false, Tr("Open Controls"), true};
   if (!summary.controller.empty())
     controls.value = summary.controller;
   else if (summary.keyboard_only)
-    controls.value = "Keyboard only";
+    controls.value = Tr("Keyboard only");
   else if (summary.keys_without_pad)
   {
-    controls.value = "Keyboard";
-    controls.tooltip = "Your controller isn't connected; the keyboard still works.\n"
-                       "Open Controls";
+    controls.value = Tr("Keyboard");
+    controls.tooltip = Tr("Your controller isn't connected; the keyboard still works.\n"
+                          "Open Controls");
   }
   else
   {
-    controls.value = "Not detected";
+    controls.value = Tr("Not detected");
     controls.warning = true;
   }
 
-  const std::string_view aspect = summary.aspect_ratio == "stretch" ? "Stretch"
-                                  : summary.aspect_ratio.empty()   ? "16:9"
-                                                                   : summary.aspect_ratio;
-  tiles[2] = {"##summary_display", "DISPLAY",
-              std::string(aspect) +
-                  (summary.fullscreen ? " \xC2\xB7 Fullscreen" : " \xC2\xB7 Window"),
-              false, "Open Settings", true,
-              std::string(aspect) + (summary.fullscreen ? " \xC2\xB7 Full" : " \xC2\xB7 Win")};
+  const std::string aspect = summary.aspect_ratio == "stretch" ? Tr("Stretch")
+                             : summary.aspect_ratio.empty()   ? std::string("16:9")
+                                                              : std::string(summary.aspect_ratio);
+  tiles[2] = {"##summary_display", Tr("DISPLAY"),
+              summary.fullscreen ? Format(Tr("%s \xC2\xB7 Fullscreen"), aspect.c_str())
+                                 : Format(Tr("%s \xC2\xB7 Window"), aspect.c_str()),
+              false, Tr("Open Settings"), true,
+              summary.fullscreen ? Format(Tr("%s \xC2\xB7 Full"), aspect.c_str())
+                                 : Format(Tr("%s \xC2\xB7 Win"), aspect.c_str())};
 
-  tiles[3] = {"##summary_mods", "MODS",
-              summary.installed_mods == 0 ? std::string("None")
-              : summary.installed_mods == 1
-                  ? std::string("1 installed")
-                  : std::to_string(summary.installed_mods) + " installed",
-              false, "Mods go in " + summary.mods_folder, false};
+  tiles[3] = {"##summary_mods", Tr("MODS"),
+              summary.installed_mods == 0   ? std::string(Tr("None"))
+              : summary.installed_mods == 1 ? std::string(Tr("1 installed"))
+                                            : Format(Tr("%d installed"), summary.installed_mods),
+              false, Format(Tr("Mods go in %s"), summary.mods_folder.c_str()), false};
   return tiles;
 }
 
@@ -1086,7 +1153,7 @@ void DrawWebLink(const char* label, const char* url)
     copied_url = url;
   }
   const bool just_copied = copied_url == url && ImGui::GetTime() - copied_at < 2.5;
-  ImGui::SetTooltip("%s", just_copied ? "Opened in your browser and copied to the clipboard"
+  ImGui::SetTooltip("%s", just_copied ? Tr("Opened in your browser and copied to the clipboard")
                                       : url);
 }
 
@@ -1103,11 +1170,11 @@ void DrawCreditsRows(const char* id, std::span<const std::array<const char*, 2>>
     ImGui::TableNextRow();
     ImGui::TableNextColumn();
     ImGui::PushFont(bold, 0.0f);
-    ImGui::TextUnformatted(name);
+    ImGui::TextUnformatted(Tr(name));
     ImGui::PopFont();
     ImGui::TableNextColumn();
     ImGui::PushTextWrapPos(0.0f);
-    ImGui::TextDisabled("%s", detail);
+    ImGui::TextDisabled("%s", Tr(detail));
     ImGui::PopTextWrapPos();
   }
   ImGui::EndTable();
@@ -1117,11 +1184,11 @@ void DrawCreditsRows(const char* id, std::span<const std::array<const char*, 2>>
 // itself (the READMEs of SR-ZGS and ModernGekko).
 void DrawCreditsPage(ImFont* bold)
 {
-  DrawPageHeader("Credits",
-                 "SR-ZGS is an independent fan project. It is not affiliated with or endorsed "
-                 "by SEGA.",
+  DrawPageHeader(Tr("Credits"),
+                 Tr("SR-ZGS is an independent fan project. It is not affiliated with or endorsed "
+                    "by SEGA."),
                  bold);
-  BeginSection("##credits_author", "CREATED BY");
+  BeginSection("##credits_author", Tr("CREATED BY"));
   // Naizu Akumateki, written in Japanese.
   ImGui::PushFont(bold, ImGui::GetStyle().FontSizeBase * 1.35f);
   ImGui::TextUnformatted("\xE5\xA5\x88\xE4\xBE\x9D\xE8\x8C\xB2\xE3\x83\xBB\xE6\x82\xAA\xE9\xAD\x94"
@@ -1131,36 +1198,37 @@ void DrawCreditsPage(ImFont* bold)
   DrawWebLink("github.com/KnivesDevilish/SR-ZGS", "https://github.com/KnivesDevilish/SR-ZGS");
   ImGui::Spacing();
   ImGui::PushTextWrapPos(0.0f);
-  ImGui::TextDisabled("With the SR-ZGS contributors and testers: research, development and "
-                      "testing.");
+  ImGui::TextDisabled("%s", Tr("With the SR-ZGS contributors and testers: research, "
+                               "development and testing."));
   ImGui::PopTextWrapPos();
   EndSection();
 
   static constexpr std::array<std::array<const char*, 2>, 5> BUILT_ON = {{
-      {"DolRecomp", "Static recompilation framework"},
-      {"ModernGekko", "Runtime for GameCube/Wii recomps, by Hyperway"},
+      {"DolRecomp", MODERNGEKKO_UI_TEXT("Static recompilation framework")},
+      {"ModernGekko", MODERNGEKKO_UI_TEXT("Runtime for GameCube/Wii recomps, by Hyperway")},
       {"RecompCore", "SpecialK / aharonahdoot"},
-      {"Recomp template", "Literally God / MrPoloGit, who also added macOS support"},
-      {"Dolphin", "The Dolphin Team and its contributors"},
+      {MODERNGEKKO_UI_TEXT("Recomp template"),
+       MODERNGEKKO_UI_TEXT("Literally God / MrPoloGit, who also added macOS support")},
+      {"Dolphin", MODERNGEKKO_UI_TEXT("The Dolphin Team and its contributors")},
   }};
-  BeginSection("##credits_built_on", "BUILT ON");
+  BeginSection("##credits_built_on", Tr("BUILT ON"));
   DrawCreditsRows("##credits_built_on_rows", BUILT_ON, bold);
   EndSection();
 
   static constexpr std::array<std::array<const char*, 2>, 5> LICENSES = {{
       {"SR-ZGS, ModernGekko", "GNU GPL v3"},
-      {"Dolphin", "GNU GPL v2 or later"},
-      {"SDL 3", "zlib License"},
-      {"Dear ImGui", "MIT License"},
+      {"Dolphin", MODERNGEKKO_UI_TEXT("GNU GPL v2 or later")},
+      {"SDL 3", MODERNGEKKO_UI_TEXT("zlib License")},
+      {"Dear ImGui", MODERNGEKKO_UI_TEXT("MIT License")},
       {"Noto Sans CJK", "SIL Open Font License 1.1"},
   }};
-  BeginSection("##credits_licenses", "LICENSES");
+  BeginSection("##credits_licenses", Tr("LICENSES"));
   DrawCreditsRows("##credits_license_rows", LICENSES, bold);
   EndSection();
 
   ImGui::PushTextWrapPos(0.0f);
-  ImGui::TextDisabled("Sonic Riders: Zero Gravity and its characters are trademarks of SEGA. "
-                      "Play with your own legally obtained copy of the game.");
+  ImGui::TextDisabled("%s", Tr("Sonic Riders: Zero Gravity and its characters are trademarks "
+                               "of SEGA. Play with your own legally obtained copy of the game."));
   ImGui::PopTextWrapPos();
 }
 
@@ -2286,6 +2354,10 @@ int main(int argc, char** argv)
     SDL_setenv_unsafe("SDL_JOYSTICK_DISABLE_UDEV", "1", 0);
   if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD))
     return 1;
+  // Interface language: config.ini's choice, or the system's one on "auto".
+  const std::string system_language = SystemLanguageCode();
+  moderngekko::frontend::ActiveLanguage() =
+      moderngekko::frontend::ResolveLanguage(config.language, system_language);
 
   const float scale = SDL_GetDisplayContentScale(SDL_GetPrimaryDisplay());
   SDL_Window* window = SDL_CreateWindow(MODERNGEKKO_FRONTEND_NAME, static_cast<int>(820 * scale),
@@ -2689,20 +2761,44 @@ int main(int argc, char** argv)
     ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
     ImGui::BeginChild("##navigation", ImVec2(170.0f * scale, body_height));
     ImGui::PopStyleColor();
-    if (DrawNavigationItem("PLAY", current_page == LauncherPage::Play, fonts.bold, scale))
+    if (DrawNavigationItem(Tr("PLAY"), current_page == LauncherPage::Play, fonts.bold, scale))
     {
       current_page = LauncherPage::Play;
       summary_stale = true;
     }
-    if (DrawNavigationItem("Settings", current_page == LauncherPage::Settings, fonts.bold, scale))
+    if (DrawNavigationItem(Tr("Settings"), current_page == LauncherPage::Settings, fonts.bold,
+                           scale))
       current_page = LauncherPage::Settings;
-    if (DrawNavigationItem("Controls", current_page == LauncherPage::Controls, fonts.bold, scale))
+    if (DrawNavigationItem(Tr("Controls"), current_page == LauncherPage::Controls, fonts.bold,
+                           scale))
       current_page = LauncherPage::Controls;
-    if (DrawNavigationItem("Game Files", current_page == LauncherPage::GameFiles, fonts.bold,
+    if (DrawNavigationItem(Tr("Game Files"), current_page == LauncherPage::GameFiles, fonts.bold,
                            scale))
       current_page = LauncherPage::GameFiles;
-    if (DrawNavigationItem("Credits", current_page == LauncherPage::Credits, fonts.bold, scale))
+    if (DrawNavigationItem(Tr("Credits"), current_page == LauncherPage::Credits, fonts.bold,
+                           scale))
       current_page = LauncherPage::Credits;
+    {
+      const std::string previous = config.language;
+      if (DrawLanguageMenu(config.language, system_language, scale))
+      {
+        config.resolution = resolutions[resolution_index].text;
+        config.show_fps_in_title = show_fps_in_title;
+        config.controller = selected_controller;
+        std::string error;
+        if (moderngekko::frontend::SaveConfig(user_directory, config, &error))
+        {
+          moderngekko::frontend::ActiveLanguage() =
+              moderngekko::frontend::ResolveLanguage(config.language, system_language);
+        }
+        else
+        {
+          config.language = previous;
+          std::lock_guard lock(dialog.mutex);
+          dialog.error = std::move(error);
+        }
+      }
+    }
     ImGui::EndChild();
     ImGui::SameLine();
     ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
@@ -2721,34 +2817,32 @@ int main(int argc, char** argv)
 
         if (current_metadata)
         {
-          const std::string ready =
-              "GAME READY \xC2\xB7 " + current_metadata.metadata->disc_id;
+          const std::string ready = Format(Tr("GAME READY \xC2\xB7 %s"),
+                                           current_metadata.metadata->disc_id.c_str());
           DrawStatusPill(ready.c_str(), LAUNCHER_ACCENT, scale, false);
           ImGui::Spacing();
           ImGui::Spacing();
           if (!launcher_savestates.empty())
           {
-            ImGui::TextUnformatted("Start from savestate");
+            ImGui::TextUnformatted(Tr("Start from savestate"));
             const std::string savestate_preview =
                 selected_savestate >= 0 ?
-                    moderngekko::frontend::LauncherSavestateLabel(
+                    SavestateLabel(
                         launcher_savestates[static_cast<std::size_t>(selected_savestate)],
                         selected_savestate == 0) :
-                    "Normal boot";
+                    std::string(Tr("Normal boot"));
             ImGui::SetNextItemWidth(-1);
             if (ImGui::BeginCombo("##launch_savestate", savestate_preview.c_str()))
             {
               const bool normal_boot_selected = selected_savestate < 0;
-              if (ImGui::Selectable("Normal boot", normal_boot_selected))
+              if (ImGui::Selectable(Tr("Normal boot"), normal_boot_selected))
                 selected_savestate = -1;
               if (normal_boot_selected)
                 ImGui::SetItemDefaultFocus();
 
               for (std::size_t i = 0; i < launcher_savestates.size(); ++i)
               {
-                const std::string label =
-                    moderngekko::frontend::LauncherSavestateLabel(
-                        launcher_savestates[i], i == 0);
+                const std::string label = SavestateLabel(launcher_savestates[i], i == 0);
                 const bool selected = selected_savestate == static_cast<int>(i);
                 if (ImGui::Selectable(label.c_str(), selected))
                   selected_savestate = static_cast<int>(i);
@@ -2759,11 +2853,11 @@ int main(int argc, char** argv)
             }
             // Netplay starts every player from the same boot, so a state chosen by
             // one side would desync the session immediately.
-            ImGui::TextDisabled("Savestates are available for solo play only.");
+            ImGui::TextDisabled("%s", Tr("Savestates are available for solo play only."));
             ImGui::Spacing();
           }
 
-          if (DrawPrimaryButton("PLAY", fonts.bold, 52 * scale))
+          if (DrawPrimaryButton(Tr("PLAY"), fonts.bold, 52 * scale))
           {
             if (ensure_controller())
             {
@@ -2775,7 +2869,7 @@ int main(int argc, char** argv)
           // Netplay: two quiet buttons under PLAY. Each opens a small window
           // with the connection fields and the button that starts the session.
           ImGui::Spacing();
-          if (DrawLinkButton("Host Netplay"))
+          if (DrawLinkButton(Tr("Host Netplay")))
           {
             netplay_dialog_mode = LaunchMode::Host;
             ImGui::OpenPopup("Netplay##session");
@@ -2783,7 +2877,7 @@ int main(int argc, char** argv)
           ImGui::SameLine(0.0f, 0.0f);
           ImGui::TextDisabled("\xC2\xB7");
           ImGui::SameLine(0.0f, 0.0f);
-          if (DrawLinkButton("Join Netplay"))
+          if (DrawLinkButton(Tr("Join Netplay")))
           {
             netplay_dialog_mode = LaunchMode::Join;
             ImGui::OpenPopup("Netplay##session");
@@ -2796,35 +2890,38 @@ int main(int argc, char** argv)
           {
             const bool hosting = netplay_dialog_mode == LaunchMode::Host;
             ImGui::PushFont(fonts.bold, 0.0f);
-            ImGui::TextUnformatted(hosting ? "Host a session" : "Join a session");
+            ImGui::TextUnformatted(hosting ? Tr("Host a session") : Tr("Join a session"));
             ImGui::PopFont();
             ImGui::PushTextWrapPos(0.0f);
-            ImGui::TextDisabled(hosting ?
-                                    "Other players connect to this computer's address and "
-                                    "UDP port." :
-                                    "Enter the address and UDP port of the player who hosts.");
-            ImGui::TextDisabled("Every player needs the same SR-ZGS release and game files. "
-                                "Everyone plays with the host's CPU core.");
+            ImGui::TextDisabled(
+                "%s", hosting ? Tr("Other players connect to this computer's address and "
+                                   "UDP port.")
+                              : Tr("Enter the address and UDP port of the player who hosts."));
+            ImGui::TextDisabled("%s", Tr("Every player needs the same SR-ZGS release and game "
+                                         "files. Everyone plays with the host's CPU core."));
             ImGui::PopTextWrapPos();
             ImGui::Spacing();
             // A negative width of the widest label leaves room for all of them.
-            const float netplay_label_width = ImGui::CalcTextSize("Buffer frames").x +
-                                              ImGui::GetStyle().ItemInnerSpacing.x;
+            float netplay_label_width = 0.0f;
+            for (const char* label : {Tr("Nickname"), Tr("Host / IP"), Tr("UDP port"),
+                                      Tr("Buffer frames")})
+              netplay_label_width = std::max(netplay_label_width, ImGui::CalcTextSize(label).x);
+            netplay_label_width += ImGui::GetStyle().ItemInnerSpacing.x;
             ImGui::SetNextItemWidth(-netplay_label_width);
-            ImGui::InputText("Nickname", netplay_nickname.data(), netplay_nickname.size());
+            ImGui::InputText(Tr("Nickname"), netplay_nickname.data(), netplay_nickname.size());
             if (!hosting)
             {
               ImGui::SetNextItemWidth(-netplay_label_width);
-              ImGui::InputText("Host / IP", netplay_address.data(), netplay_address.size());
+              ImGui::InputText(Tr("Host / IP"), netplay_address.data(), netplay_address.size());
             }
             ImGui::SetNextItemWidth(150 * scale);
-            ImGui::InputInt("UDP port", &netplay_port);
+            ImGui::InputInt(Tr("UDP port"), &netplay_port);
             netplay_port = std::clamp(netplay_port, 1, 65535);
-            ImGui::Checkbox("Automatic input buffer", &automatic_buffer);
+            ImGui::Checkbox(Tr("Automatic input buffer"), &automatic_buffer);
             if (!automatic_buffer)
             {
               ImGui::SetNextItemWidth(-netplay_label_width);
-              ImGui::SliderInt("Buffer frames", &manual_buffer, 1, 20);
+              ImGui::SliderInt(Tr("Buffer frames"), &manual_buffer, 1, 20);
             }
             ImGui::Spacing();
             ImGui::Separator();
@@ -2835,7 +2932,7 @@ int main(int argc, char** argv)
             ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.80f, 1.0f, 0.40f, 1.0f));
             ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.62f, 0.90f, 0.10f, 1.0f));
             ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.04f, 0.05f, 0.02f, 1.0f));
-            const bool start = ImGui::Button(hosting ? "Host" : "Join",
+            const bool start = ImGui::Button(hosting ? Tr("Host") : Tr("Join"),
                                              ImVec2(button_width, 38 * scale));
             ImGui::PopStyleColor(4);
             if (start)
@@ -2869,7 +2966,7 @@ int main(int argc, char** argv)
               ImGui::CloseCurrentPopup();
             }
             ImGui::SameLine();
-            if (ImGui::Button("Cancel", ImVec2(button_width, 38 * scale)))
+            if (ImGui::Button(Tr("Cancel"), ImVec2(button_width, 38 * scale)))
               ImGui::CloseCurrentPopup();
             ImGui::EndPopup();
           }
@@ -2916,28 +3013,28 @@ int main(int argc, char** argv)
         }
         else
         {
-          DrawStatusPill("GAME NOT INSTALLED", ImVec4(1.0f, 0.75f, 0.3f, 1.0f), scale, false);
+          DrawStatusPill(Tr("GAME NOT INSTALLED"), ImVec4(1.0f, 0.75f, 0.3f, 1.0f), scale, false);
           ImGui::Spacing();
-          ImGui::TextUnformatted("No extracted game is configured yet.");
-          ImGui::TextDisabled("Open Game Files to select and extract your game.");
+          ImGui::TextUnformatted(Tr("No extracted game is configured yet."));
+          ImGui::TextDisabled("%s", Tr("Open Game Files to select and extract your game."));
           ImGui::Spacing();
-          if (ImGui::Button("Go to Game Files"))
+          if (ImGui::Button(Tr("Go to Game Files")))
             current_page = LauncherPage::GameFiles;
         }
       }
       if (current_page == LauncherPage::Settings)
       {
-    DrawPageHeader("Settings",
-                   "Changes are saved right away and apply the next time you press PLAY.",
+    DrawPageHeader(Tr("Settings"),
+                   Tr("Changes are saved right away and apply the next time you press PLAY."),
                    fonts.bold);
-    BeginSection("##settings_cpu", "CPU CORE");
+    BeginSection("##settings_cpu", Tr("CPU CORE"));
     ImGui::SetNextItemWidth(-1.0f);
-    if (ImGui::BeginCombo("##cpu_core", cpu_cores[cpu_core_index].text))
+    if (ImGui::BeginCombo("##cpu_core", Tr(cpu_cores[cpu_core_index].text)))
     {
       for (std::size_t i = 0; i < cpu_cores.size(); ++i)
       {
         const bool selected = cpu_core_index == static_cast<int>(i);
-        if (ImGui::Selectable(cpu_cores[i].text, selected))
+        if (ImGui::Selectable(Tr(cpu_cores[i].text), selected))
         {
           const std::string previous = config.cpu_core;
           config.cpu_core = cpu_cores[i].value;
@@ -2962,20 +3059,21 @@ int main(int argc, char** argv)
       ImGui::EndCombo();
     }
     ImGui::PushTextWrapPos(0.0f);
-    ImGui::TextDisabled("JIT64 is the validated full-speed mode. StaticRecomp runs the "
-                        "recompiled game code and is still being optimized.");
-    ImGui::TextDisabled("Netplay: everyone plays with the host's CPU core.");
+    ImGui::TextDisabled("%s", Tr("JIT64 is the validated full-speed mode. StaticRecomp runs the "
+                                 "recompiled game code and is still being optimized."));
+    ImGui::TextDisabled("%s", Tr("Netplay: everyone plays with the host's CPU core."));
     if (!cpu_core_override.empty())
     {
-      ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.3f, 1.0f),
-                         "MODERNGEKKO_STATICRECOMP=%s is set in the environment and "
-                         "overrides this setting.",
-                         cpu_core_override.c_str());
+      ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.3f, 1.0f), "%s",
+                         Format(Tr("MODERNGEKKO_STATICRECOMP=%s is set in the environment and "
+                                   "overrides this setting."),
+                                cpu_core_override.c_str())
+                             .c_str());
     }
     ImGui::PopTextWrapPos();
     EndSection();
-    BeginSection("##settings_graphics", "GRAPHICS");
-    ImGui::TextUnformatted("Graphics backend");
+    BeginSection("##settings_graphics", Tr("GRAPHICS"));
+    ImGui::TextUnformatted(Tr("Graphics backend"));
     ImGui::SetNextItemWidth(-1.0f);
     if (ImGui::BeginCombo("##graphics_backend",
                           graphics_backends[graphics_backend_index].text))
@@ -3008,7 +3106,7 @@ int main(int argc, char** argv)
       ImGui::EndCombo();
     }
     ImGui::Spacing();
-    ImGui::TextUnformatted("Internal resolution (Dolphin EFB upscale)");
+    ImGui::TextUnformatted(Tr("Internal resolution (Dolphin EFB upscale)"));
     ImGui::SetNextItemWidth(-1.0f);
     if (ImGui::BeginCombo("##resolution", resolutions[resolution_index].text))
     {
@@ -3034,17 +3132,17 @@ int main(int argc, char** argv)
       ImGui::EndCombo();
     }
     EndSection();
-    BeginSection("##settings_display", "DISPLAY");
+    BeginSection("##settings_display", Tr("DISPLAY"));
     ImGui::AlignTextToFramePadding();
-    ImGui::TextUnformatted("Aspect ratio");
+    ImGui::TextUnformatted(Tr("Aspect ratio"));
     ImGui::SameLine(0.0f, 16.0f * scale);
     ImGui::SetNextItemWidth(-1.0f);
-    if (ImGui::BeginCombo("##aspect_ratio", aspect_ratios[aspect_ratio_index].text))
+    if (ImGui::BeginCombo("##aspect_ratio", Tr(aspect_ratios[aspect_ratio_index].text)))
     {
       for (std::size_t i = 0; i < aspect_ratios.size(); ++i)
       {
         const bool selected = aspect_ratio_index == static_cast<int>(i);
-        if (ImGui::Selectable(aspect_ratios[i].text, selected))
+        if (ImGui::Selectable(Tr(aspect_ratios[i].text), selected))
         {
           const std::string previous = config.aspect_ratio;
           config.aspect_ratio = aspect_ratios[i].value;
@@ -3069,16 +3167,17 @@ int main(int argc, char** argv)
         // enough for the default window.
         ImGui::Indent(12.0f * scale);
         ImGui::PushTextWrapPos(0.0f);
-        ImGui::TextDisabled("%s", aspect_ratios[i].description);
+        ImGui::TextDisabled("%s", Tr(aspect_ratios[i].description));
         ImGui::PopTextWrapPos();
         ImGui::Unindent(12.0f * scale);
       }
       ImGui::EndCombo();
     }
-    ImGui::SetItemTooltip("Netplay: the host's 16:9 or 4:3 choice applies to every player.");
+    ImGui::SetItemTooltip("%s",
+                          Tr("Netplay: the host's 16:9 or 4:3 choice applies to every player."));
     ImGui::Spacing();
     const bool previous_fullscreen = fullscreen;
-    if (ImGui::Checkbox("Start in fullscreen", &fullscreen))
+    if (ImGui::Checkbox(Tr("Start in fullscreen"), &fullscreen))
     {
       config.fullscreen = fullscreen;
       config.resolution = resolutions[resolution_index].text;
@@ -3095,7 +3194,7 @@ int main(int argc, char** argv)
     }
     ImGui::SameLine(0.0f, 40.0f * scale);
     const bool previous_show_fps_in_title = show_fps_in_title;
-    if (ImGui::Checkbox("Show FPS in window title", &show_fps_in_title))
+    if (ImGui::Checkbox(Tr("Show FPS in window title"), &show_fps_in_title))
     {
       std::string error;
       if (!moderngekko::frontend::SaveConfig(user_directory, resolutions[resolution_index].text,
@@ -3289,7 +3388,7 @@ int main(int argc, char** argv)
     }
     ImGui::Spacing();
     ImGui::Separator();
-    ImGui::TextWrapped("Controller: %s", controller_status.c_str());
+    ImGui::TextWrapped("%s", Format(Tr("Controller: %s"), controller_status.c_str()).c_str());
     ImGui::End();
 
     ImGui::Render();

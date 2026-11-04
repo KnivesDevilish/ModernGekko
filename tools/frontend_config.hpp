@@ -42,6 +42,8 @@ struct ConfigResult {
   bool fullscreen = false;
   // "16:9", "4:3" or "stretch" (see SupportedAspectRatios).
   std::string aspect_ratio = "16:9";
+  // The launcher's language: "auto" (the system's), "en" or "es".
+  std::string language = "auto";
   std::string netplay_nickname = "Player";
   std::string netplay_address = "127.0.0.1";
   std::uint16_t netplay_port = 2626;

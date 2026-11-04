@@ -4,6 +4,8 @@
 // are read from the files the runtime itself uses, so the launcher never keeps
 // its own copy of either.
 
+#include "ui_text.hpp"
+
 #include <algorithm>
 #include <cerrno>
 #include <cstdint>
@@ -81,14 +83,15 @@ inline std::uint64_t ReadTimePlayed(const fs::path& user_directory, std::string_
   return 0;
 }
 
-// "12 h 34 min", "34 min", "Under a minute", or "Not played yet" for 0.
+// "12 h 34 min", "34 min", "Under a minute", or "Not played yet" for 0. The
+// two sentences are English; the launcher translates them when it shows them.
 inline std::string FormatTimePlayed(std::uint64_t milliseconds)
 {
   if (milliseconds == 0)
-    return "Not played yet";
+    return MODERNGEKKO_UI_TEXT("Not played yet");
   const std::uint64_t minutes = milliseconds / 60000;
   if (minutes == 0)
-    return "Under a minute";
+    return MODERNGEKKO_UI_TEXT("Under a minute");
   const std::uint64_t hours = minutes / 60;
   if (hours == 0)
     return std::to_string(minutes) + " min";

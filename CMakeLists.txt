@@ -529,6 +529,11 @@ if(MODERNGEKKO_ENABLE_DOLPHIN_RUNTIME)
         "${CMAKE_CURRENT_SOURCE_DIR}/tools"
         "${CMAKE_CURRENT_SOURCE_DIR}/vendor/dolphin/Source/Core"
         "${CMAKE_CURRENT_SOURCE_DIR}/vendor/dolphin/Externals/imgui/imgui/backends")
+    # The interface translations (tools/launcher_text.hpp) are written in
+    # UTF-8; MSVC otherwise reads sources in the system's code page.
+    if(MSVC)
+        target_compile_options(moderngekko-launcher PRIVATE /utf-8)
+    endif()
     # The launcher only calls the game-inspection surface directly, but the
     # Dolphin static libraries still require the Host_* callbacks implemented
     # in the runtime object. Keep that object from being discarded by the
@@ -736,6 +741,21 @@ if(BUILD_TESTING)
     target_compile_features(moderngekko_launcher_summary_test PRIVATE cxx_std_23)
     add_test(NAME moderngekko.launcher_summary
              COMMAND moderngekko_launcher_summary_test)
+
+    # Every interface text in the sources has a translation, and every
+    # translation is still used, with the same placeholders.
+    add_executable(moderngekko_launcher_text_test
+        tests/launcher_text_test.cpp)
+    target_include_directories(moderngekko_launcher_text_test PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/tools")
+    target_compile_features(moderngekko_launcher_text_test PRIVATE cxx_std_23)
+    target_compile_definitions(moderngekko_launcher_text_test PRIVATE
+        MODERNGEKKO_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+    if(MSVC)
+        target_compile_options(moderngekko_launcher_text_test PRIVATE /utf-8)
+    endif()
+    add_test(NAME moderngekko.launcher_text
+             COMMAND moderngekko_launcher_text_test)
 
     add_executable(moderngekko_pgo_support_test
         tests/pgo_support_test.cpp
