@@ -2168,6 +2168,39 @@ int main(int argc, char** argv)
     controller_tester.loaded = false;
     return true;
   };
+#ifdef MODERNGEKKO_GAMECUBE_CONTROLLERS
+  // Without a gamepad the profile is written for the keyboard alone. A gamepad
+  // connected later takes the keyboard's place as the profile's device
+  // (retarget_controller), and the keys keep working.
+  const std::string keyboard_device(moderngekko::frontend::KeyboardDevice());
+  const std::string keyboard_only_status =
+      "Keyboard only. A controller you connect is added to the same profile.";
+  const auto select_keyboard_only = [&]
+  {
+    std::string message;
+    std::string error;
+    if (!moderngekko::frontend::GenerateControllerConfig(user_directory, keyboard_device,
+                                                         &message) ||
+        !moderngekko::frontend::SaveConfig(user_directory, resolutions[resolution_index].text,
+                                           show_fps_in_title, keyboard_device, &error))
+    {
+      std::lock_guard lock(dialog.mutex);
+      dialog.error = error.empty() ? std::move(message) : std::move(error);
+      return false;
+    }
+    selected_controller = keyboard_device;
+    configured_controllers = {selected_controller};
+    config.controller = selected_controller;
+    config.controllers = configured_controllers;
+    config.resolution = resolutions[resolution_index].text;
+    config.show_fps_in_title = show_fps_in_title;
+    controller_profile_exists = true;
+    controller_index = -1;
+    controller_status = keyboard_only_status;
+    controller_tester.loaded = false;
+    return true;
+  };
+#endif
   const auto ensure_controller = [&]
   {
     if (moderngekko::frontend::ControllerConfigExists(user_directory))
@@ -2192,9 +2225,13 @@ int main(int argc, char** argv)
     }
     if (controller_index < 0)
     {
+#ifdef MODERNGEKKO_GAMECUBE_CONTROLLERS
+      return select_keyboard_only();
+#else
       std::lock_guard lock(dialog.mutex);
       dialog.error = "Connect an SDL-compatible controller before playing";
       return false;
+#endif
     }
     return select_controller(controller_index);
   };
@@ -2212,12 +2249,22 @@ int main(int argc, char** argv)
       if (controller_index >= 0)
         select_controller(controller_index);
       else
+#ifdef MODERNGEKKO_GAMECUBE_CONTROLLERS
+        select_keyboard_only();
+#else
         controller_status = "No SDL gamepad detected";
+#endif
     }
     else if (controller_index < 0 && controllers.size() == 1)
     {
       retarget_controller(0);  // same rule as ensure_controller
     }
+#ifdef MODERNGEKKO_GAMECUBE_CONTROLLERS
+    else if (selected_controller == keyboard_device)
+    {
+      controller_status = keyboard_only_status;
+    }
+#endif
     else
     {
       controller_status = "Using existing " + std::string(CONTROLLER_PROFILE_NAME);
@@ -2678,14 +2725,22 @@ int main(int argc, char** argv)
                    "mapping for you.",
                    fonts.bold);
     BeginSection("##controls_controller", "CONTROLLER");
+#ifdef MODERNGEKKO_GAMECUBE_CONTROLLERS
+    const bool keyboard_only = controller_index < 0 && selected_controller == keyboard_device;
+#else
+    const bool keyboard_only = false;
+#endif
     if (controller_index >= 0)
       DrawStatusPill("CONNECTED", LAUNCHER_ACCENT, scale, false);
+    else if (keyboard_only)
+      DrawStatusPill("KEYBOARD ONLY", LAUNCHER_ACCENT, scale, false);
     else
       DrawStatusPill("NOT DETECTED", ImVec4(1.0f, 0.75f, 0.3f, 1.0f), scale, false);
     ImGui::Spacing();
     ImGui::SetNextItemWidth(-1.0f);
     const char* controller_preview = controller_index >= 0
                                          ? controllers[controller_index].label.c_str()
+                                     : keyboard_only ? "Keyboard only"
                                      : selected_controller.empty() ? "No SDL gamepad detected"
                                                                    : selected_controller.c_str();
     if (ImGui::BeginCombo("##controller", controller_preview))
@@ -2728,11 +2783,23 @@ int main(int argc, char** argv)
     if (controller_profile_exists)
       DrawControllerTester(controller_tester, controller_art, keyboard_art, fonts.bold, scale);
     ImGui::Spacing();
+#ifdef MODERNGEKKO_GAMECUBE_CONTROLLERS
+    // Without a gamepad this writes the keyboard-only profile.
+    ImGui::BeginDisabled(false);
+#else
     ImGui::BeginDisabled(controller_index < 0);
+#endif
     const std::string replace_profile =
         "Replace with generated " + std::string(GENERATED_PROFILE_LABEL);
     if (ImGui::Button(replace_profile.c_str()))
-      select_controller(controller_index);
+    {
+#ifdef MODERNGEKKO_GAMECUBE_CONTROLLERS
+      if (controller_index < 0)
+        select_keyboard_only();
+      else
+#endif
+        select_controller(controller_index);
+    }
     ImGui::EndDisabled();
     EndSection();
     }

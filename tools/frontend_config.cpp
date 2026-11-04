@@ -605,4 +605,7 @@ bool EnsureControllerConfig(const fs::path &user_directory,
   return EnsureControllerConfig(
       user_directory, std::span<const std::string>(&value, 1), message);
 }
+#ifdef MODERNGEKKO_GAMECUBE_CONTROLLERS
+std::string_view KeyboardDevice() { return KEYBOARD_DEVICE; }
+#endif
 } // namespace moderngekko::frontend

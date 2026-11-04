@@ -293,10 +293,17 @@ int RunMain(int argc, char **argv) {
     config.mod_directories.push_back(config.user_directory / "Mods");
   }
 
-  if (!netplay_role && !frontend_config.controller.empty()) {
+  std::string solo_controller = frontend_config.controller;
+#ifdef MODERNGEKKO_GAMECUBE_CONTROLLERS
+  // Without a configured gamepad the profile is written for the keyboard, as
+  // the launcher does; a gamepad chosen later takes its place.
+  if (solo_controller.empty())
+    solo_controller = moderngekko::frontend::KeyboardDevice();
+#endif
+  if (!netplay_role && !solo_controller.empty()) {
     std::string controller_message;
     if (!moderngekko::frontend::EnsureControllerConfig(
-            config.user_directory, frontend_config.controller,
+            config.user_directory, solo_controller,
             &controller_message)) {
       std::cerr << "controller configuration: " << controller_message << '\n';
       return 2;

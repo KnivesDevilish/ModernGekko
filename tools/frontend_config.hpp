@@ -69,4 +69,10 @@ bool EnsureControllerConfig(const std::filesystem::path &user_directory,
                             std::string *message);
 bool EnsureControllerConfig(const std::filesystem::path &user_directory,
                             std::string_view controller, std::string *message);
+#ifdef MODERNGEKKO_GAMECUBE_CONTROLLERS
+// Dolphin's name for the keyboard on this platform. Without a gamepad the
+// profile is written for this device: the first GameCube controller reads
+// its keys either way, and a gamepad connected later takes the device's place.
+std::string_view KeyboardDevice();
+#endif
 } // namespace moderngekko::frontend

@@ -174,6 +174,24 @@ int main() {
           directory, netplay_config.controllers, &error) ||
       read_wii_remotes() != own)
     return 16;
+
+  // Without a gamepad the profile is written for the keyboard: it stays
+  // connected and reads the same keys.
+  {
+    const fs::path keyboard_only = directory / "keyboard-only";
+    const std::string keyboard(moderngekko::frontend::KeyboardDevice());
+    if (keyboard.empty() ||
+        !moderngekko::frontend::GenerateControllerConfig(keyboard_only, keyboard, &error))
+      return 17;
+    std::ifstream input(keyboard_only / "Config" / CONTROLLER_CONFIG_NAME);
+    const std::string profile((std::istreambuf_iterator<char>(input)),
+                              std::istreambuf_iterator<char>());
+    if (!profile.starts_with("[GCPad1]\nDevice = " + keyboard +
+                             "\nOptions/Always Connected = True\n"
+                             "Buttons/A = `Button A` | `" + keyboard + ":") ||
+        moderngekko::frontend::ReadConfiguredController(keyboard_only) != keyboard)
+      return 18;
+  }
 #endif
 
   fs::remove_all(directory);
