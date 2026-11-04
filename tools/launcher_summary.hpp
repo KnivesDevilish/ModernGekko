@@ -1,0 +1,125 @@
+#pragma once
+
+// What the PLAY page summarises: the time played and the installed mods. Both
+// are read from the files the runtime itself uses, so the launcher never keeps
+// its own copy of either.
+
+#include <algorithm>
+#include <charconv>
+#include <cstdint>
+#include <filesystem>
+#include <fstream>
+#include <string>
+#include <string_view>
+#include <system_error>
+#include <vector>
+
+namespace moderngekko::frontend
+{
+namespace fs = std::filesystem;
+
+namespace summary_detail
+{
+inline std::string_view Trim(std::string_view text)
+{
+  const auto first = text.find_first_not_of(" \t\r\n");
+  if (first == std::string_view::npos)
+    return {};
+  const auto last = text.find_last_not_of(" \t\r\n");
+  return text.substr(first, last - first + 1);
+}
+
+// Same suffix the runtime's ModManager looks for.
+inline std::string_view ModLibrarySuffix()
+{
+#if defined(_WIN32)
+  return ".dll";
+#elif defined(__APPLE__)
+  return ".dylib";
+#else
+  return ".so";
+#endif
+}
+}  // namespace summary_detail
+
+// Milliseconds Dolphin has counted for game_id. Dolphin's play time tracker
+// (Core/TimePlayed.cpp) adds to Config/TimePlayed.ini every 30 seconds while
+// the game runs, under [TimePlayed] as "<game id> = <milliseconds>". A disc ID
+// such as RS9E8P is written as is. 0 when there is no entry yet.
+inline std::uint64_t ReadTimePlayed(const fs::path& user_directory, std::string_view game_id)
+{
+  std::ifstream file(user_directory / "Config" / "TimePlayed.ini");
+  std::string line;
+  bool in_section = false;
+  while (std::getline(file, line))
+  {
+    const std::string_view text = summary_detail::Trim(line);
+    if (text.starts_with('['))
+    {
+      in_section = text == "[TimePlayed]";
+      continue;
+    }
+    const auto separator = text.find('=');
+    if (!in_section || separator == std::string_view::npos)
+      continue;
+    if (summary_detail::Trim(text.substr(0, separator)) != game_id)
+      continue;
+    const std::string_view value = summary_detail::Trim(text.substr(separator + 1));
+    std::uint64_t milliseconds = 0;
+    const auto parsed = std::from_chars(value.data(), value.data() + value.size(), milliseconds);
+    if (parsed.ec == std::errc{} && parsed.ptr == value.data() + value.size())
+      return milliseconds;
+    return 0;
+  }
+  return 0;
+}
+
+// "12 h 34 min", "34 min", "Under a minute", or "Not played yet" for 0.
+inline std::string FormatTimePlayed(std::uint64_t milliseconds)
+{
+  if (milliseconds == 0)
+    return "Not played yet";
+  const std::uint64_t minutes = milliseconds / 60000;
+  if (minutes == 0)
+    return "Under a minute";
+  const std::uint64_t hours = minutes / 60;
+  if (hours == 0)
+    return std::to_string(minutes) + " min";
+  return std::to_string(hours) + " h " + std::to_string(minutes % 60) + " min";
+}
+
+// Mod packages the runtime will try to load from these folders, by the same
+// rules as ModManager::LoadDirectories: "<name>.mgm" folders that hold the
+// platform's mod library, and "<name>.mgm.so" (.dll, .dylib) files. A folder
+// listed twice, or the same package reached through both, counts once.
+inline int CountInstalledMods(const std::vector<fs::path>& directories)
+{
+  const std::string_view suffix = summary_detail::ModLibrarySuffix();
+  const std::string packaged_suffix = ".mgm" + std::string(suffix);
+  std::vector<fs::path> packages;
+  for (const fs::path& directory : directories)
+  {
+    std::error_code ec;
+    if (!fs::is_directory(directory, ec))
+      continue;
+    for (fs::directory_iterator it(directory, ec), end; !ec && it != end; it.increment(ec))
+    {
+      const fs::path& path = it->path();
+      std::error_code entry_ec;
+      const bool package_folder =
+          it->is_directory(entry_ec) && path.extension() == ".mgm" &&
+          fs::is_regular_file(path / ("mod" + std::string(suffix)), entry_ec);
+      const bool package_file =
+          it->is_regular_file(entry_ec) && path.filename().string().ends_with(packaged_suffix);
+      if (!package_folder && !package_file)
+        continue;
+      std::error_code canonical_ec;
+      const fs::path canonical = fs::weakly_canonical(path, canonical_ec);
+      packages.push_back(canonical_ec ? path : canonical);
+    }
+  }
+  std::sort(packages.begin(), packages.end());
+  packages.erase(std::unique(packages.begin(), packages.end()), packages.end());
+  return static_cast<int>(packages.size());
+}
+}  // namespace moderngekko::frontend

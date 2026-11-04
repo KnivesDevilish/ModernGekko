@@ -1,6 +1,7 @@
 #include "frontend_config.hpp"
 #include "dol_patch.hpp"
 #include "launcher_savestates.hpp"
+#include "launcher_summary.hpp"
 #include "moderngekko/game.hpp"
 #include "netplay_session.hpp"
 
@@ -17,6 +18,7 @@
 #include <array>
 #include <atomic>
 #include <cctype>
+#include <cfloat>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -868,6 +870,178 @@ bool DrawLinkButton(const char* label)
   ImGui::PushStyleColor(ImGuiCol_Text, style.Colors[ImGuiCol_TextDisabled]);
   const bool clicked = ImGui::Button(label);
   ImGui::PopStyleColor(4);
+  return clicked;
+}
+
+// One card of the PLAY page summary: a small heading over one value. With a
+// destination it is a button; the tooltip says where it leads.
+struct SummaryTile
+{
+  const char* id = "";
+  const char* heading = "";
+  std::string value;
+  bool warning = false;  // the value is drawn in amber
+  std::string tooltip;
+  bool clickable = false;
+  // Shown instead of value when value doesn't fit; "..." cuts it otherwise.
+  std::string short_value;
+};
+
+// What the PLAY page shows below the button, built from plain values so the
+// page code only gathers them.
+struct PlaySummary
+{
+  std::uint64_t time_played_ms = 0;
+  // The connected gamepad's name, or empty when the profile's pad is missing.
+  std::string controller;
+  bool keyboard_only = false;
+  // GameCube mode: the first controller also answers to the keyboard, so the
+  // game is playable while the pad is unplugged.
+  bool keys_without_pad = false;
+  std::string_view aspect_ratio;  // "16:9", "4:3" or "stretch"
+  bool fullscreen = false;
+  int installed_mods = 0;
+  std::string mods_folder;
+};
+
+std::array<SummaryTile, 4> BuildPlaySummaryTiles(const PlaySummary& summary)
+{
+  std::array<SummaryTile, 4> tiles;
+  tiles[0] = {"##summary_time", "TIME PLAYED",
+              moderngekko::frontend::FormatTimePlayed(summary.time_played_ms), false, {}, false};
+
+  SummaryTile& controls = tiles[1];
+  controls = {"##summary_controls", "CONTROLS", {}, false, "Open Controls", true};
+  if (!summary.controller.empty())
+    controls.value = summary.controller;
+  else if (summary.keyboard_only)
+    controls.value = "Keyboard only";
+  else if (summary.keys_without_pad)
+  {
+    controls.value = "Keyboard";
+    controls.tooltip = "Your controller isn't connected; the keyboard still works.\n"
+                       "Open Controls";
+  }
+  else
+  {
+    controls.value = "Not detected";
+    controls.warning = true;
+  }
+
+  const std::string_view aspect = summary.aspect_ratio == "stretch" ? "Stretch"
+                                  : summary.aspect_ratio.empty()   ? "16:9"
+                                                                   : summary.aspect_ratio;
+  tiles[2] = {"##summary_display", "DISPLAY",
+              std::string(aspect) +
+                  (summary.fullscreen ? " \xC2\xB7 Fullscreen" : " \xC2\xB7 Window"),
+              false, "Open Settings", true,
+              std::string(aspect) + (summary.fullscreen ? " \xC2\xB7 Full" : " \xC2\xB7 Win")};
+
+  tiles[3] = {"##summary_mods", "MODS",
+              summary.installed_mods == 0 ? std::string("None")
+              : summary.installed_mods == 1
+                  ? std::string("1 installed")
+                  : std::to_string(summary.installed_mods) + " installed",
+              false, "Mods go in " + summary.mods_folder, false};
+  return tiles;
+}
+
+// Cuts text to max_width with "...", one whole UTF-8 character at a time.
+std::string FitTextToWidth(ImFont* font, float size, const std::string& text, float max_width)
+{
+  if (font->CalcTextSizeA(size, FLT_MAX, 0.0f, text.c_str()).x <= max_width)
+    return text;
+  std::string fitted = text;
+  while (!fitted.empty())
+  {
+    std::size_t cut = fitted.size() - 1;
+    while (cut > 0 && (static_cast<unsigned char>(fitted[cut]) & 0xC0) == 0x80)
+      --cut;
+    fitted.erase(cut);
+    while (!fitted.empty() && fitted.back() == ' ')
+      fitted.pop_back();
+    const std::string candidate = fitted + "...";
+    if (font->CalcTextSizeA(size, FLT_MAX, 0.0f, candidate.c_str()).x <= max_width)
+      return candidate;
+  }
+  return "...";
+}
+
+float SummaryTileHeight(float scale)
+{
+  const float value_size = ImGui::GetFontSize();
+  return 9.0f * scale * 2.0f + value_size * 0.78f + 3.0f * scale + value_size;
+}
+
+// Draws one card at the cursor. Returns true when a clickable card is clicked.
+bool DrawSummaryTile(const SummaryTile& tile, float width, ImFont* bold, float scale)
+{
+  const ImGuiStyle& style = ImGui::GetStyle();
+  ImFont* font = ImGui::GetFont();
+  const float value_size = ImGui::GetFontSize();
+  const float heading_size = value_size * 0.78f;
+  const ImVec2 padding(12.0f * scale, 9.0f * scale);
+  const ImVec2 size(width, SummaryTileHeight(scale));
+  const ImVec2 min = ImGui::GetCursorScreenPos();
+  const ImVec2 max(min.x + size.x, min.y + size.y);
+  const bool pressed = ImGui::InvisibleButton(tile.id, size);
+  const bool hovered = ImGui::IsItemHovered();
+  const bool highlight = tile.clickable && hovered;
+
+  ImDrawList* draw_list = ImGui::GetWindowDrawList();
+  draw_list->AddRectFilled(min, max,
+                           ImGui::GetColorU32(highlight ? ImGuiCol_FrameBgHovered : ImGuiCol_ChildBg),
+                           style.ChildRounding);
+  ImVec4 border = style.Colors[ImGuiCol_Border];
+  if (highlight)
+  {
+    border = LAUNCHER_ACCENT;
+    border.w = 0.55f;
+  }
+  draw_list->AddRect(min, max, ImGui::GetColorU32(border), style.ChildRounding, 0,
+                     std::max(1.0f, style.ChildBorderSize));
+  draw_list->AddText(font, heading_size, ImVec2(min.x + padding.x, min.y + padding.y),
+                     ImGui::GetColorU32(ImGuiCol_TextDisabled), tile.heading);
+  const float text_width = size.x - padding.x * 2.0f;
+  const bool use_short =
+      !tile.short_value.empty() &&
+      bold->CalcTextSizeA(value_size, FLT_MAX, 0.0f, tile.value.c_str()).x > text_width;
+  const std::string shown =
+      FitTextToWidth(bold, value_size, use_short ? tile.short_value : tile.value, text_width);
+  const ImVec4 value_color =
+      tile.warning ? ImVec4(1.0f, 0.75f, 0.3f, 1.0f) : style.Colors[ImGuiCol_Text];
+  draw_list->AddText(bold, value_size,
+                     ImVec2(min.x + padding.x, min.y + padding.y + heading_size + 3.0f * scale),
+                     ImGui::GetColorU32(value_color), shown.c_str());
+  if (hovered)
+  {
+    if (tile.clickable)
+      ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
+    // A cut value is shown whole in the tooltip.
+    std::string tooltip = shown != tile.value ? tile.value : std::string();
+    if (!tile.tooltip.empty())
+      tooltip += (tooltip.empty() ? "" : "\n") + tile.tooltip;
+    if (!tooltip.empty())
+      ImGui::SetTooltip("%s", tooltip.c_str());
+  }
+  return tile.clickable && pressed;
+}
+
+// The four cards in one row. Returns the index of a clicked card, or -1.
+int DrawSummaryRow(const std::array<SummaryTile, 4>& tiles, ImFont* bold, float scale)
+{
+  const float spacing = ImGui::GetStyle().ItemSpacing.x;
+  const float width =
+      std::floor((ImGui::GetContentRegionAvail().x - spacing * (tiles.size() - 1)) /
+                 static_cast<float>(tiles.size()));
+  int clicked = -1;
+  for (std::size_t i = 0; i < tiles.size(); ++i)
+  {
+    if (i > 0)
+      ImGui::SameLine(0.0f, spacing);
+    if (DrawSummaryTile(tiles[i], width, bold, scale))
+      clicked = static_cast<int>(i);
+  }
   return clicked;
 }
 
@@ -2083,6 +2257,13 @@ int main(int argc, char** argv)
     if (config.cpu_core == cpu_cores[i].value)
       cpu_core_index = static_cast<int>(i);
   }
+  const auto& aspect_ratios = moderngekko::frontend::SupportedAspectRatios();
+  int aspect_ratio_index = 0;
+  for (std::size_t i = 0; i < aspect_ratios.size(); ++i)
+  {
+    if (config.aspect_ratio == aspect_ratios[i].value)
+      aspect_ratio_index = static_cast<int>(i);
+  }
   // The runner gives MODERNGEKKO_STATICRECOMP priority over config.ini and
   // inherits this process' environment, so say so when it is set.
   const char* cpu_core_environment_value = std::getenv("MODERNGEKKO_STATICRECOMP");
@@ -2285,6 +2466,11 @@ int main(int argc, char** argv)
   LauncherPage current_page = LauncherPage::Play;
   // Which session the Netplay window is about to start (Host or Join).
   LaunchMode netplay_dialog_mode = LaunchMode::Host;
+  // PLAY page summary, read again whenever the page is opened: the time
+  // played changes while the game runs and mods are added by hand.
+  std::uint64_t summary_time_played = 0;
+  int summary_installed_mods = 0;
+  bool summary_stale = true;
   while (!done)
   {
     bool controllers_changed = false;
@@ -2385,7 +2571,10 @@ int main(int argc, char** argv)
     ImGui::BeginChild("##navigation", ImVec2(170.0f * scale, body_height));
     ImGui::PopStyleColor();
     if (DrawNavigationItem("PLAY", current_page == LauncherPage::Play, fonts.bold, scale))
+    {
       current_page = LauncherPage::Play;
+      summary_stale = true;
+    }
     if (DrawNavigationItem("Settings", current_page == LauncherPage::Settings, fonts.bold, scale))
       current_page = LauncherPage::Settings;
     if (DrawNavigationItem("Controls", current_page == LauncherPage::Controls, fonts.bold, scale))
@@ -2562,6 +2751,46 @@ int main(int argc, char** argv)
               ImGui::CloseCurrentPopup();
             ImGui::EndPopup();
           }
+
+          // Summary cards along the bottom of the page: how long the game has
+          // been played and what the next PLAY will use.
+          if (summary_stale)
+          {
+            summary_time_played = moderngekko::frontend::ReadTimePlayed(
+                user_directory, current_metadata.metadata->disc_id);
+            // The same two folders the runner loads mods from.
+            summary_installed_mods = moderngekko::frontend::CountInstalledMods(
+                {release_directory / "Mods", user_directory / "Mods"});
+            summary_stale = false;
+          }
+          PlaySummary summary;
+          summary.time_played_ms = summary_time_played;
+          if (controller_index >= 0)
+            summary.controller = controllers[controller_index].label;
+#ifdef MODERNGEKKO_GAMECUBE_CONTROLLERS
+          summary.keyboard_only =
+              controller_index < 0 && selected_controller == keyboard_device;
+          summary.keys_without_pad = true;
+#endif
+          summary.aspect_ratio = config.aspect_ratio;
+          summary.fullscreen = fullscreen;
+          summary.installed_mods = summary_installed_mods;
+          summary.mods_folder = moderngekko::frontend::PathText(user_directory / "Mods");
+          const float tiles_top = ImGui::GetCursorPosY() + ImGui::GetContentRegionAvail().y -
+                                  SummaryTileHeight(scale);
+          ImGui::SetCursorPosY(std::max(
+              ImGui::GetCursorPosY() + ImGui::GetStyle().ItemSpacing.y * 2.0f, tiles_top));
+          switch (DrawSummaryRow(BuildPlaySummaryTiles(summary), fonts.bold, scale))
+          {
+          case 1:
+            current_page = LauncherPage::Controls;
+            break;
+          case 2:
+            current_page = LauncherPage::Settings;
+            break;
+          default:
+            break;
+          }
         }
         else
         {
@@ -2684,6 +2913,48 @@ int main(int argc, char** argv)
     }
     EndSection();
     BeginSection("##settings_display", "DISPLAY");
+    ImGui::AlignTextToFramePadding();
+    ImGui::TextUnformatted("Aspect ratio");
+    ImGui::SameLine(0.0f, 16.0f * scale);
+    ImGui::SetNextItemWidth(-1.0f);
+    if (ImGui::BeginCombo("##aspect_ratio", aspect_ratios[aspect_ratio_index].text))
+    {
+      for (std::size_t i = 0; i < aspect_ratios.size(); ++i)
+      {
+        const bool selected = aspect_ratio_index == static_cast<int>(i);
+        if (ImGui::Selectable(aspect_ratios[i].text, selected))
+        {
+          const std::string previous = config.aspect_ratio;
+          config.aspect_ratio = aspect_ratios[i].value;
+          config.resolution = resolutions[resolution_index].text;
+          config.show_fps_in_title = show_fps_in_title;
+          config.controller = selected_controller;
+          std::string error;
+          if (moderngekko::frontend::SaveConfig(user_directory, config, &error))
+          {
+            aspect_ratio_index = static_cast<int>(i);
+          }
+          else
+          {
+            config.aspect_ratio = previous;
+            std::lock_guard lock(dialog.mutex);
+            dialog.error = std::move(error);
+          }
+        }
+        if (selected)
+          ImGui::SetItemDefaultFocus();
+        // Each choice explains itself in the list, so the page stays short
+        // enough for the default window.
+        ImGui::Indent(12.0f * scale);
+        ImGui::PushTextWrapPos(0.0f);
+        ImGui::TextDisabled("%s", aspect_ratios[i].description);
+        ImGui::PopTextWrapPos();
+        ImGui::Unindent(12.0f * scale);
+      }
+      ImGui::EndCombo();
+    }
+    ImGui::SetItemTooltip("Netplay: the host's 16:9 or 4:3 choice applies to every player.");
+    ImGui::Spacing();
     const bool previous_fullscreen = fullscreen;
     if (ImGui::Checkbox("Start in fullscreen", &fullscreen))
     {
@@ -2700,6 +2971,7 @@ int main(int argc, char** argv)
         dialog.error = std::move(error);
       }
     }
+    ImGui::SameLine(0.0f, 40.0f * scale);
     const bool previous_show_fps_in_title = show_fps_in_title;
     if (ImGui::Checkbox("Show FPS in window title", &show_fps_in_title))
     {

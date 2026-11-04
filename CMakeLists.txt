@@ -720,6 +720,15 @@ if(BUILD_TESTING)
     add_test(NAME moderngekko.launcher_savestates
              COMMAND moderngekko_launcher_savestates_test)
 
+    # Header-only as well: the PLAY page summary (time played, mods).
+    add_executable(moderngekko_launcher_summary_test
+        tests/launcher_summary_test.cpp)
+    target_include_directories(moderngekko_launcher_summary_test PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/tools")
+    target_compile_features(moderngekko_launcher_summary_test PRIVATE cxx_std_23)
+    add_test(NAME moderngekko.launcher_summary
+             COMMAND moderngekko_launcher_summary_test)
+
     add_executable(moderngekko_pgo_support_test
         tests/pgo_support_test.cpp
         tools/pgo_support.cpp)
