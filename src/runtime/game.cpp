@@ -69,7 +69,8 @@ std::optional<std::string> HashDirectorySha256(const std::filesystem::path& root
   return Sha256(std::move(manifest));
 }
 
-GameInspectResult InspectGame(const std::filesystem::path& input_root)
+GameInspectResult InspectGame(const std::filesystem::path& input_root,
+                              GameInspectOptions options)
 {
   std::error_code ec;
   const auto root = std::filesystem::weakly_canonical(input_root, ec);
@@ -143,10 +144,13 @@ GameInspectResult InspectGame(const std::filesystem::path& input_root)
       return {{}, "can't hash files/_Main.rel"};
     metadata.rel_sha256 = *rel_hash;
   }
-  const auto assets_hash = HashDirectorySha256(root / "files");
-  if (!assets_hash)
-    return {{}, "can't hash the files directory"};
-  metadata.assets_sha256 = *assets_hash;
+  if (options.hash_assets)
+  {
+    const auto assets_hash = HashDirectorySha256(root / "files");
+    if (!assets_hash)
+      return {{}, "can't hash the files directory"};
+    metadata.assets_sha256 = *assets_hash;
+  }
   return {std::move(metadata), {}};
 }
 }  // namespace moderngekko

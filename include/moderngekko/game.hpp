@@ -35,7 +35,16 @@ struct GameInspectResult
   explicit operator bool() const { return metadata.has_value(); }
 };
 
-GameInspectResult InspectGame(const std::filesystem::path& root);
+struct GameInspectOptions
+{
+  // Hashing every file under files/ dominates an inspection: tens of seconds
+  // for a multi-GB Wii game. Callers that never compare assets_sha256 can turn
+  // it off; assets_sha256 is then left empty. The default keeps the full check.
+  bool hash_assets = true;
+};
+
+GameInspectResult InspectGame(const std::filesystem::path& root,
+                              GameInspectOptions options = {});
 std::optional<std::string> HashFileSha256(const std::filesystem::path& path);
 std::optional<std::string> HashDirectorySha256(const std::filesystem::path& root);
 }  // namespace moderngekko

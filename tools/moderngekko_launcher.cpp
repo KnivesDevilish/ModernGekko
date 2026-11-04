@@ -101,6 +101,19 @@ std::string RequiredGameError(const moderngekko::GameMetadata& metadata)
   return {};
 }
 
+// The launcher only compares assets_sha256 when a build pins it (see
+// RequiredGameError). Without a pin, hashing the whole files/ tree just blocks
+// the window for tens of seconds on a multi-GB game, so skip it. The disc ID,
+// boot.bin, DOL and REL checks still run.
+moderngekko::GameInspectResult InspectForLauncher(const fs::path& root)
+{
+  moderngekko::GameInspectOptions options;
+#ifndef MODERNGEKKO_REQUIRED_ASSETS_SHA256
+  options.hash_assets = false;
+#endif
+  return moderngekko::InspectGame(root, options);
+}
+
 std::vector<ControllerOption> EnumerateControllers()
 {
   std::vector<ControllerOption> result;
@@ -394,7 +407,7 @@ bool ExtractDisc(const fs::path& image, const fs::path& user_directory,
     if (!ApplyBundledDolPatch(output, release_directory, &changed, &patch_error))
       return fail("existing extraction patching failed: " + patch_error);
   }
-  const auto existing = moderngekko::InspectGame(output);
+  const auto existing = InspectForLauncher(output);
   if (existing && RequiredGameError(*existing.metadata).empty())
   {
     std::string error;
@@ -446,7 +459,7 @@ bool ExtractDisc(const fs::path& image, const fs::path& user_directory,
     return fail("extracted DOL patching failed: " + dol_patch_error);
   }
 
-  const auto inspected = moderngekko::InspectGame(staging);
+  const auto inspected = InspectForLauncher(staging);
   if (!inspected)
   {
     fs::remove_all(staging, ec);
@@ -587,7 +600,7 @@ int main(int argc, char** argv)
   auto current_metadata =
       ApplyBundledDolPatch(current_game, release_directory, &current_dol_changed,
                            &current_dol_error) ?
-          moderngekko::InspectGame(current_game) :
+          InspectForLauncher(current_game) :
           moderngekko::GameInspectResult{{}, current_dol_error};
   if (current_metadata && !RequiredGameError(*current_metadata.metadata).empty())
     current_metadata = {{}, RequiredGameError(*current_metadata.metadata)};
@@ -770,7 +783,7 @@ int main(int argc, char** argv)
       if (extraction.finished_game)
       {
         current_game = *extraction.finished_game;
-        current_metadata = moderngekko::InspectGame(current_game);
+        current_metadata = InspectForLauncher(current_game);
         if (current_metadata && !RequiredGameError(*current_metadata.metadata).empty())
           current_metadata = {{}, RequiredGameError(*current_metadata.metadata)};
         extraction.finished_game.reset();
@@ -780,6 +793,15 @@ int main(int argc, char** argv)
     ImGui_ImplSDLRenderer3_NewFrame();
     ImGui_ImplSDL3_NewFrame();
     ImGui::NewFrame();
+    // An error stays on screen until the next thing the user does. Cleared
+    // before the widgets run, so an action that fails again this frame shows
+    // its fresh message instead of an outdated one.
+    if (ImGui::IsMouseClicked(ImGuiMouseButton_Left) || ImGui::IsKeyPressed(ImGuiKey_Enter) ||
+        ImGui::IsKeyPressed(ImGuiKey_KeypadEnter) || ImGui::IsKeyPressed(ImGuiKey_Space))
+    {
+      std::lock_guard lock(dialog.mutex);
+      dialog.error.clear();
+    }
     const ImGuiViewport* viewport = ImGui::GetMainViewport();
     ImGui::SetNextWindowPos(viewport->WorkPos);
     ImGui::SetNextWindowSize(viewport->WorkSize);
@@ -922,9 +944,13 @@ int main(int argc, char** argv)
           ImGui::Spacing();
           ImGui::Separator();
           ImGui::TextUnformatted("NETPLAY CONNECTION");
-          ImGui::SetNextItemWidth(-1);
+          // A width of -1 pushes each label past the right edge of the window.
+          // A negative width of the widest label leaves room for all of them.
+          const float netplay_label_width = ImGui::CalcTextSize("Buffer frames").x +
+                                            ImGui::GetStyle().ItemInnerSpacing.x;
+          ImGui::SetNextItemWidth(-netplay_label_width);
           ImGui::InputText("Nickname", netplay_nickname.data(), netplay_nickname.size());
-          ImGui::SetNextItemWidth(-1);
+          ImGui::SetNextItemWidth(-netplay_label_width);
           ImGui::InputText("Host / IP", netplay_address.data(), netplay_address.size());
           ImGui::SetNextItemWidth(150 * scale);
           ImGui::InputInt("UDP port", &netplay_port);
@@ -932,7 +958,7 @@ int main(int argc, char** argv)
           ImGui::Checkbox("Automatic input buffer", &automatic_buffer);
           if (!automatic_buffer)
           {
-            ImGui::SetNextItemWidth(-1);
+            ImGui::SetNextItemWidth(-netplay_label_width);
             ImGui::SliderInt("Buffer frames", &manual_buffer, 1, 20);
           }
         }
