@@ -1199,6 +1199,7 @@ enum ProfileInput : std::size_t
   INPUT_L,
   INPUT_R,
   INPUT_START,
+  INPUT_C,  // the drawing's extra button, kept for mods; not a GameCube input
   INPUT_STICK_UP,
   INPUT_STICK_DOWN,
   INPUT_STICK_LEFT,
@@ -1219,6 +1220,7 @@ constexpr std::array<std::array<std::string_view, 3>, INPUT_COUNT> PROFILE_INPUT
     {"Triggers/L", "Triggers/L-Analog"},
     {"Triggers/R", "Triggers/R-Analog"},
     {"Buttons/Start"},
+    {"Extra/C"},
     {"Main Stick/Up"},
     {"Main Stick/Down"},
     {"Main Stick/Left"},
@@ -1234,11 +1236,11 @@ constexpr const char* PROFILE_LEGEND_TITLE = "GameCube";
 // What a keyboard key shows on the keyboard drawing: the button's name, or
 // an arrow (1 up, 2 down, 3 left, 4 right) for the stick and the D-pad.
 constexpr std::array<const char*, INPUT_COUNT> INPUT_KEY_LABELS = {
-    "A", "B", "X", "Y", "Z", "L", "R", "START", "", "", "", "", "", "", "", ""};
-constexpr std::array<int, INPUT_COUNT> INPUT_KEY_ARROWS = {0, 0, 0, 0, 0, 0, 0, 0,
+    "A", "B", "X", "Y", "Z", "L", "R", "START", "C", "", "", "", "", "", "", "", ""};
+constexpr std::array<int, INPUT_COUNT> INPUT_KEY_ARROWS = {0, 0, 0, 0, 0, 0, 0, 0, 0,
                                                            1, 2, 3, 4, 1, 2, 3, 4};
 
-constexpr std::array<LegendRow, 9> LEGEND_ROWS = {{
+constexpr std::array<LegendRow, 10> LEGEND_ROWS = {{
     {"A", INPUT_A, INPUT_A},
     {"B", INPUT_B, INPUT_B},
     {"X", INPUT_X, INPUT_X},
@@ -1248,18 +1250,19 @@ constexpr std::array<LegendRow, 9> LEGEND_ROWS = {{
     {"R", INPUT_R, INPUT_R},
     {"Start", INPUT_START, INPUT_START},
     {"Stick", INPUT_STICK_UP, INPUT_DPAD_RIGHT},  // stick and D-pad
+    {"C", INPUT_C, INPUT_C},
 }};
 
-// The drawing's six face buttons are A, B, C and X, Y, Z; GameCube has no C,
-// so C is the R trigger, like the right shoulder. The D-pad arms light for
-// the stick as well as for the D-pad.
+// The drawing's six face buttons are A, B, C and X, Y, Z, and its shoulders
+// are L and R. GameCube has no C: the profile keeps it apart (Extra/C) for
+// mods. The D-pad arms light for the stick as well as for the D-pad.
 constexpr std::array<ArtHotspot, 17> CONTROLLER_ART_HOTSPOTS = {{
     {INPUT_A, 1, {{{646, 605}}}, 42},
     {INPUT_B, 1, {{{735, 553}}}, 42},
     {INPUT_X, 1, {{{599, 515}}}, 42},
     {INPUT_Y, 1, {{{688, 461}}}, 42},
     {INPUT_Z, 1, {{{786, 427}}}, 42},
-    {INPUT_R, 1, {{{831, 518}}}, 42},  // C
+    {INPUT_C, 1, {{{831, 518}}}, 42},
     {INPUT_R, 6, ART_RIGHT_SHOULDER, 0},
     {INPUT_L, 6, ART_LEFT_SHOULDER, 0},
     {INPUT_START, 1, {{{595, 405}}}, 22},  // +
@@ -1895,32 +1898,48 @@ void DrawControllerTester(ControllerTester& tester, const LauncherImage& control
     return;
   }
 
-  if (controller_art.texture)
+  // How to use the tester, or why it can't light anything up.
+  const auto draw_hint = [&]
   {
-    DrawControllerArt(tester, controller_art,
-                      std::floor(ImGui::GetContentRegionAvail().x * 0.56f), scale);
-    ImGui::SameLine(0.0f, style.ItemSpacing.x * 2.0f);
-  }
-  DrawInputLegend(tester, false, bold);
-  // Last line: how to use the tester, or why it can't light anything up.
-  ImGui::PushTextWrapPos(0.0f);
-  if (tester.gamepad)
+    if (tester.gamepad)
+    {
+      ImGui::TextColored(LAUNCHER_ACCENT, "Press buttons to test them.");
+    }
+    else if (tester.device.empty())
+    {
+      ImGui::TextDisabled("No controller in %s.", std::string(CONTROLLER_PROFILE_NAME).c_str());
+    }
+    else
+    {
+      // "SDL/0/PS3 Controller" -> "PS3 Controller"
+      const std::size_t name_start = tester.device.find('/', tester.device.find('/') + 1);
+      const std::string name =
+          name_start == std::string::npos ? tester.device : tester.device.substr(name_start + 1);
+      ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.3f, 1.0f), "Connect %s.", name.c_str());
+    }
+  };
+  if (!controller_art.texture)
   {
-    ImGui::TextColored(LAUNCHER_ACCENT, "Press buttons to test them.");
+    DrawInputLegend(tester, false, bold);
+    ImGui::PushTextWrapPos(0.0f);
+    draw_hint();
+    ImGui::PopTextWrapPos();
+    EndInputLegend();
+    return;
   }
-  else if (tester.device.empty())
-  {
-    ImGui::TextDisabled("No controller in %s.", std::string(CONTROLLER_PROFILE_NAME).c_str());
-  }
-  else
-  {
-    // "SDL/0/PS3 Controller" -> "PS3 Controller"
-    const std::size_t name_start = tester.device.find('/', tester.device.find('/') + 1);
-    const std::string name =
-        name_start == std::string::npos ? tester.device : tester.device.substr(name_start + 1);
-    ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.3f, 1.0f), "Connect %s to test it.", name.c_str());
-  }
+  // The drawing with the hint under it, and the list beside them. The drawing
+  // is sized so that both columns stay as tall as the list.
+  const float width = std::floor(ImGui::GetContentRegionAvail().x * 0.5f);
+  ImGui::BeginGroup();
+  ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(style.ItemSpacing.x, 0.0f));
+  DrawControllerArt(tester, controller_art, width, scale);
+  ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + width);
+  draw_hint();
   ImGui::PopTextWrapPos();
+  ImGui::PopStyleVar();
+  ImGui::EndGroup();
+  ImGui::SameLine(0.0f, style.ItemSpacing.x * 2.0f);
+  DrawInputLegend(tester, false, bold);
   EndInputLegend();
 }
 } // namespace

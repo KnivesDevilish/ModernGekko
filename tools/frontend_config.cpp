@@ -82,11 +82,11 @@ std::string_view ControllerSectionPrefix() {
 }
 
 #ifdef MODERNGEKKO_GAMECUBE_CONTROLLERS
-// The first GameCube controller also answers to the keyboard: A, S, D and
-// Q, W, E for the buttons laid out as A, B, R and X, Y, Z, left Shift for L,
-// Enter for Start and the arrows for the control stick. Device and key names
-// are the ones Dolphin's keyboard backend uses on each platform; on Linux that
-// is the X11 backend, which the runner uses unless started with --wayland.
+// The first GameCube controller also answers to the keyboard: S, D, A for
+// A, B, X, W for Y, Q for Z, left Shift and E for L and R, Enter for Start and
+// the arrows for the control stick. Device and key names are the ones
+// Dolphin's keyboard backend uses on each platform; on Linux that is the X11
+// backend, which the runner uses unless started with --wayland.
 #if defined(_WIN32)
 constexpr std::string_view KEYBOARD_DEVICE = "DInput/0/Keyboard Mouse";
 constexpr std::string_view KEY_START = "RETURN";
@@ -104,6 +104,35 @@ constexpr std::string_view KEY_START = "Return";
 constexpr std::string_view KEY_LEFT_SHIFT = "Shift_L";
 constexpr std::array<std::string_view, 4> KEY_ARROWS = {"Up", "Down", "Left", "Right"};
 #endif
+
+// The game is played with the GameCube controller, so the emulated Wii Remote
+// is left disconnected (Source = 0). Without that, a missing or empty
+// WiimoteNew.ini makes Dolphin bind its default keys to the Wii Remote, and
+// several overlap the GameCube keys: Enter would also press HOME, Q minus and
+// E plus. The slot keeps a key because Dolphin rewrites the file when the
+// game closes and drops sections that have none. A file that already sets up
+// [Wiimote1] is the player's and is left alone.
+void DisconnectWiiRemotes(const fs::path &config_directory) {
+  const fs::path path = config_directory / "WiimoteNew.ini";
+  std::error_code ec;
+  if (fs::exists(path, ec)) {
+    std::ifstream input(path);
+    std::string line;
+    bool in_first_slot = false;
+    while (std::getline(input, line)) {
+      const std::string trimmed = Trim(line);
+      if (trimmed.starts_with('[')) {
+        in_first_slot = trimmed == "[Wiimote1]";
+        continue;
+      }
+      if (in_first_slot && !trimmed.empty())
+        return;
+    }
+  }
+  fs::create_directories(config_directory, ec);
+  std::ofstream output(path, std::ios::trunc);
+  output << "[Wiimote1]\nSource = 0\n";
+}
 #endif
 
 } // namespace
@@ -437,12 +466,16 @@ bool GenerateControllerConfig(const fs::path &user_directory,
       return " | `" + std::string(KEYBOARD_DEVICE) + ':' + std::string(name) +
              '`';
     };
-    output << "Device = " << controllers[i] << '\n'
-           << "Buttons/A = `Button A`" << key("A") << '\n'
-           << "Buttons/B = `Button B`" << key("S") << '\n'
-           << "Buttons/X = `Button X`" << key("Q") << '\n'
+    output << "Device = " << controllers[i] << '\n';
+    // The first controller also answers to the keyboard, so it stays connected
+    // when the gamepad isn't; Dolphin otherwise reports it unplugged.
+    if (i == 0)
+      output << "Options/Always Connected = True\n";
+    output << "Buttons/A = `Button A`" << key("S") << '\n'
+           << "Buttons/B = `Button B`" << key("D") << '\n'
+           << "Buttons/X = `Button X`" << key("A") << '\n'
            << "Buttons/Y = `Button Y`" << key("W") << '\n'
-           << "Buttons/Z = `Shoulder R`" << key("E") << '\n'
+           << "Buttons/Z = `Trigger R`" << key("Q") << '\n'
            << "Buttons/Start = Start" << key(KEY_START) << '\n'
            << "Main Stick/Up = `Left Y+`" << key(KEY_ARROWS[0]) << '\n'
            << "Main Stick/Down = `Left Y-`" << key(KEY_ARROWS[1]) << '\n'
@@ -454,15 +487,21 @@ bool GenerateControllerConfig(const fs::path &user_directory,
               "C-Stick/Left = `Right X-`\n"
               "C-Stick/Right = `Right X+`\n"
               "C-Stick/Calibration = 100.00\n"
-           << "Triggers/L = `Trigger L`" << key(KEY_LEFT_SHIFT) << '\n'
-           << "Triggers/R = `Trigger R`" << key("D") << '\n'
-           << "Triggers/L-Analog = `Trigger L`" << key(KEY_LEFT_SHIFT) << '\n'
-           << "Triggers/R-Analog = `Trigger R`" << key("D") << '\n'
+           // L and R sit on the shoulder buttons. They are digital, so the
+           // analog value is all or nothing, as on a fully pressed trigger.
+           << "Triggers/L = `Shoulder L`" << key(KEY_LEFT_SHIFT) << '\n'
+           << "Triggers/R = `Shoulder R`" << key("E") << '\n'
+           << "Triggers/L-Analog = `Shoulder L`" << key(KEY_LEFT_SHIFT) << '\n'
+           << "Triggers/R-Analog = `Shoulder R`" << key("E") << '\n'
            << "D-Pad/Up = `Pad N`\n"
               "D-Pad/Down = `Pad S`\n"
               "D-Pad/Left = `Pad W`\n"
               "D-Pad/Right = `Pad E`\n"
-              "Rumble/Motor = `Motor L` | `Motor R`\n";
+              "Rumble/Motor = `Motor L` | `Motor R`\n"
+              // Not a GameCube input, and Dolphin ignores it: the left trigger
+              // is kept as the extra C button of the SR-ZGS controller drawing,
+              // for mods. The launcher's tester shows it.
+              "Extra/C = `Trigger L`\n";
 #else
     output << "[Wiimote" << i + 1 << "]\n";
     if (i >= controllers.size())
@@ -524,16 +563,7 @@ bool GenerateControllerConfig(const fs::path &user_directory,
     return false;
   }
 #ifdef MODERNGEKKO_GAMECUBE_CONTROLLERS
-  // Without WiimoteNew.ini Dolphin gives the emulated Wii Remote its keyboard
-  // defaults, which overlap the GameCube keys above: Enter would also press
-  // HOME and Q the minus button. An idle profile keeps the Wii Remote
-  // connected, in case the game expects one, but with nothing bound. An
-  // existing file is the player's and is left alone.
-  const fs::path wii_remotes = destination.parent_path() / "WiimoteNew.ini";
-  if (!fs::exists(wii_remotes, ec)) {
-    std::ofstream idle(wii_remotes);
-    idle << "[Wiimote1]\n[Wiimote2]\n[Wiimote3]\n[Wiimote4]\n[BalanceBoard]\n";
-  }
+  DisconnectWiiRemotes(destination.parent_path());
 #endif
   if (message)
     *message = std::to_string(controllers.size()) +
@@ -558,6 +588,10 @@ bool EnsureControllerConfig(const fs::path &user_directory,
                             std::span<const std::string> controllers,
                             std::string *message) {
   if (ControllerConfigExists(user_directory)) {
+#ifdef MODERNGEKKO_GAMECUBE_CONTROLLERS
+    // Checked on every start: Dolphin may have emptied the file on exit.
+    DisconnectWiiRemotes(ControllerConfigPath(user_directory).parent_path());
+#endif
     if (message)
       *message = "using existing controller profile";
     return true;

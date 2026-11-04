@@ -89,31 +89,34 @@ int main() {
   }
 #ifdef MODERNGEKKO_GAMECUBE_CONTROLLERS
   if (!generated.contains("Buttons/A = `Button A`\n") ||
-      !generated.contains("Buttons/Z = `Shoulder R`\n") ||
+      !generated.contains("Buttons/Z = `Trigger R`\n") ||
       !generated.contains("Main Stick/Up = `Left Y+`\n") ||
       !generated.contains("C-Stick/Up = `Right Y+`\n") ||
-      !generated.contains("Triggers/L-Analog = `Trigger L`\n") ||
+      !generated.contains("Triggers/L-Analog = `Shoulder L`\n") ||
+      !generated.contains("Extra/C = `Trigger L`\n") ||
       !generated.contains("Rumble/Motor = `Motor L` | `Motor R`\n") ||
       !generated.contains("[GCPad2]\nDevice = SDL/1/Second Controller\n") ||
-      // Only the first controller also answers to the keyboard.
+      // Only the first controller also answers to the keyboard, and so stays
+      // connected without its gamepad.
       !generated.contains("[GCPad1]\nDevice = SDL/0/Test Controller\n"
+                          "Options/Always Connected = True\n"
                           "Buttons/A = `Button A` | `") ||
       !generated.contains("Device = SDL/1/Second Controller\n"
                           "Buttons/A = `Button A`\n") ||
-      // Its R trigger is also the D key; the D-pad has no keys.
-      !generated.contains(":D`\nTriggers/L-Analog") ||
+      // Its R trigger is also the E key; the D-pad has no keys.
+      !generated.contains(":E`\nTriggers/L-Analog") ||
       generated.contains("D-Pad/Up = `Pad N` | `") ||
       generated.contains("[Wiimote") || generated.contains("[BalanceBoard]")) {
     return 5;
   }
-  // The Wii Remote stays connected with nothing bound.
-  {
-    std::ifstream idle(directory / "Config" / "WiimoteNew.ini");
-    const std::string wii_remotes((std::istreambuf_iterator<char>(idle)),
-                                  std::istreambuf_iterator<char>());
-    if (wii_remotes != "[Wiimote1]\n[Wiimote2]\n[Wiimote3]\n[Wiimote4]\n[BalanceBoard]\n")
-      return 14;
-  }
+  // The Wii Remote is left disconnected.
+  const auto read_wii_remotes = [&] {
+    std::ifstream input(directory / "Config" / "WiimoteNew.ini");
+    return std::string((std::istreambuf_iterator<char>(input)),
+                       std::istreambuf_iterator<char>());
+  };
+  if (read_wii_remotes() != "[Wiimote1]\nSource = 0\n")
+    return 14;
 #else
   if (!generated.contains("Buttons/A = `Shoulder L`\n") ||
       !generated.contains("Buttons/1 = `Button W`\n") ||
@@ -153,6 +156,25 @@ int main() {
   if (preserved != custom || moderngekko::frontend::ReadConfiguredController(
                                  directory) != "SDL/9/Custom Controller")
     return 12;
+
+#ifdef MODERNGEKKO_GAMECUBE_CONTROLLERS
+  // Dolphin empties WiimoteNew.ini on exit when its sections have no keys;
+  // the next start disconnects the Wii Remote again. A player's own Wii Remote
+  // setup is left alone.
+  for (const std::string& emptied : {std::string{}, std::string("[Wiimote1]\n[Wiimote2]\n")}) {
+    std::ofstream(directory / "Config" / "WiimoteNew.ini", std::ios::trunc) << emptied;
+    if (!moderngekko::frontend::EnsureControllerConfig(
+            directory, netplay_config.controllers, &error) ||
+        read_wii_remotes() != "[Wiimote1]\nSource = 0\n")
+      return 15;
+  }
+  const std::string own = "[Wiimote1]\nDevice = SDL/0/Test Controller\n";
+  std::ofstream(directory / "Config" / "WiimoteNew.ini", std::ios::trunc) << own;
+  if (!moderngekko::frontend::EnsureControllerConfig(
+          directory, netplay_config.controllers, &error) ||
+      read_wii_remotes() != own)
+    return 16;
+#endif
 
   fs::remove_all(directory);
   return 0;
