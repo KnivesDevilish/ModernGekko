@@ -539,6 +539,8 @@ void ApplyAspectRatio(AspectRatio aspect_ratio) {
                                                 ? AspectMode::Stretch
                                                 : AspectMode::Auto);
 }
+
+PowerPC::CPUCore SelectedCPUCore() { return SelectCPUCore(); }
 } // namespace detail
 
 ModuleSource ModuleSource::DynamicPath(std::filesystem::path path) {

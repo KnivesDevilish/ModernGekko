@@ -2803,7 +2803,8 @@ int main(int argc, char** argv)
                                     "Other players connect to this computer's address and "
                                     "UDP port." :
                                     "Enter the address and UDP port of the player who hosts.");
-            ImGui::TextDisabled("Every player must use the same CPU core and game files.");
+            ImGui::TextDisabled("Every player needs the same SR-ZGS release and game files. "
+                                "Everyone plays with the host's CPU core.");
             ImGui::PopTextWrapPos();
             ImGui::Spacing();
             // A negative width of the widest label leaves room for all of them.
@@ -2963,7 +2964,7 @@ int main(int argc, char** argv)
     ImGui::PushTextWrapPos(0.0f);
     ImGui::TextDisabled("JIT64 is the validated full-speed mode. StaticRecomp runs the "
                         "recompiled game code and is still being optimized.");
-    ImGui::TextDisabled("Netplay: every player must use the same CPU core.");
+    ImGui::TextDisabled("Netplay: everyone plays with the host's CPU core.");
     if (!cpu_core_override.empty())
     {
       ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.3f, 1.0f),

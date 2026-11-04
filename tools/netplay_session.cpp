@@ -5,6 +5,8 @@
 #include "Core/Boot/Boot.h"
 #include "Core/Config/MainSettings.h"
 #include "Core/Config/NetplaySettings.h"
+#include "Core/Config/WiimoteSettings.h"
+#include "Core/HW/Wiimote.h"
 #include "Core/IOS/FS/FileSystem.h"
 #include "Core/NetPlay/NetPlayClient.h"
 #include "Core/NetPlay/NetPlayServer.h"
@@ -39,6 +41,36 @@ namespace fs = std::filesystem;
 
 namespace moderngekko::frontend {
 namespace {
+#ifdef MODERNGEKKO_GAMECUBE_CONTROLLERS
+// The game reads GameCube controllers. The server hands out seats in its Wii
+// Remote table, which also sets the room size and when Start is allowed, so
+// the host gives each seat the GameCube port with the same number and the Wii
+// Remotes stay off in the game, as in solo play.
+constexpr bool GAMECUBE_PORTS = true;
+#else
+constexpr bool GAMECUBE_PORTS = false;
+#endif
+
+#ifdef MODERNGEKKO_DEFAULT_WINDOW_TITLE
+constexpr const char *LOBBY_WINDOW_TITLE =
+    MODERNGEKKO_DEFAULT_WINDOW_TITLE " - Netplay";
+#else
+constexpr const char *LOBBY_WINDOW_TITLE = "ModernGekko - Netplay";
+#endif
+
+const char *CPUCoreLabel(PowerPC::CPUCore core) {
+  switch (core) {
+  case PowerPC::CPUCore::StaticRecomp:
+    return "StaticRecomp";
+  case PowerPC::CPUCore::JITARM64:
+    return "JITARM64";
+  case PowerPC::CPUCore::JIT64:
+    return "JIT64";
+  default:
+    return "Interpreter";
+  }
+}
+
 struct ControllerOption {
   std::string label;
   std::string device;
@@ -275,7 +307,7 @@ public:
       return false;
     const float scale = SDL_GetDisplayContentScale(SDL_GetPrimaryDisplay());
     m_window = SDL_CreateWindow(
-        "KirbyRecomp Netplay Lobby", static_cast<int>(820 * scale),
+        LOBBY_WINDOW_TITLE, static_cast<int>(820 * scale),
         static_cast<int>(600 * scale),
         SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY);
     if (!m_window)
@@ -380,8 +412,26 @@ bool RunLobbyWindow(RuntimeConfig &runtime_config,
       SaveConfig(runtime_config.user_directory, frontend_config, &ignored);
     }
 
-    if (ui.TakeStartRequest())
+    // Host: every seat also owns the GameCube port with the same number. The
+    // server sends the ports to all players, as Dolphin does for its pad
+    // mapping, before anyone can be ready to start.
+    if (GAMECUBE_PORTS && server) {
+      const NetPlay::PadMappingArray seats = server->GetWiimoteMapping();
+      if (server->GetPadMapping() != seats)
+        server->SetPadMapping(seats);
+    }
+
+    if (ui.TakeStartRequest()) {
       client.StartGame(runtime_config.game_root.string() + "/sys/main.dol");
+      // StartGame turns on an emulated Wii Remote for every seat. The seats
+      // play on GameCube ports here, so the Wii Remotes go back off on every
+      // machine alike (the current-run layer outranks netplay's settings).
+      if (GAMECUBE_PORTS) {
+        for (int i = 0; i < 4; ++i)
+          Config::SetCurrent(Config::GetInfoForWiimoteSource(i),
+                             WiimoteSource::None);
+      }
+    }
     auto boot_data = ui.TakeBootData();
     if (boot_data) {
       detail::SetBootSessionData(std::move(boot_data));
@@ -392,7 +442,7 @@ bool RunLobbyWindow(RuntimeConfig &runtime_config,
     const ImGuiViewport *viewport = ImGui::GetMainViewport();
     ImGui::SetNextWindowPos(viewport->WorkPos);
     ImGui::SetNextWindowSize(viewport->WorkSize);
-    ImGui::Begin("KirbyRecomp Netplay", nullptr,
+    ImGui::Begin("Netplay", nullptr,
                  ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove |
                      ImGuiWindowFlags_NoSavedSettings);
     ImGui::TextUnformatted(server ? "Hosting direct-IP netplay"
@@ -407,6 +457,11 @@ bool RunLobbyWindow(RuntimeConfig &runtime_config,
     }
     ImGui::Text("Input buffer: %u frames%s", ui.BufferSize(),
                 server && options.buffer == "auto" ? " (auto)" : "");
+    if (server)
+      ImGui::Text("CPU core for every player: %s",
+                  CPUCoreLabel(detail::SelectedCPUCore()));
+    else
+      ImGui::TextUnformatted("CPU core: the host's choice");
     ImGui::Separator();
 
     if (ImGui::BeginTable("players", 5,
@@ -430,7 +485,7 @@ bool RunLobbyWindow(RuntimeConfig &runtime_config,
             continue;
           if (!slots.empty())
             slots += ", ";
-          slots += "Wii " + std::to_string(i + 1);
+          slots += (GAMECUBE_PORTS ? "Port " : "Wii ") + std::to_string(i + 1);
         }
         ImGui::TextUnformatted(slots.empty() ? "None" : slots.c_str());
         ImGui::TableSetColumnIndex(3);
@@ -445,7 +500,10 @@ bool RunLobbyWindow(RuntimeConfig &runtime_config,
     }
 
     ImGui::Spacing();
-    ImGui::TextUnformatted("Local sideways Wii Remotes");
+    ImGui::TextUnformatted(GAMECUBE_PORTS
+                               ? "Controllers on this computer (the first one "
+                                 "also answers to the keyboard)"
+                               : "Local sideways Wii Remotes");
     std::size_t total_assigned = 0;
     for (const NetPlay::Player &player : players)
       total_assigned += player.controller_count;
@@ -457,6 +515,13 @@ bool RunLobbyWindow(RuntimeConfig &runtime_config,
       ImGui::BeginDisabled(!selected &&
                            options.controllers.size() >= local_limit);
       if (ImGui::Checkbox(controller.label.c_str(), &selected)) {
+#ifdef MODERNGEKKO_GAMECUBE_CONTROLLERS
+        // A keyboard-only player who ticks a gamepad switches to it rather
+        // than taking a second seat; the gamepad's port keeps the keys.
+        if (selected && options.controllers.size() == 1 &&
+            options.controllers.front() == KeyboardDevice())
+          options.controllers.clear();
+#endif
         if (selected)
           options.controllers.push_back(controller.device);
         else if (options.controllers.size() > 1)
@@ -524,7 +589,9 @@ int RunNetplayLobby(RuntimeConfig runtime_config, ConfigResult frontend_config,
   detail::SetExternalUICommon(true);
 
   Config::SetBase(Config::MAIN_CPU_THREAD, true);
-  Config::SetBase(Config::MAIN_CPU_CORE, PowerPC::CPUCore::StaticRecomp);
+  // The server sends the host's core to every player when the match starts,
+  // so the host's choice in config.ini (Settings) is the one everyone plays.
+  Config::SetBase(Config::MAIN_CPU_CORE, detail::SelectedCPUCore());
   Config::SetBase(Config::NETPLAY_SAVEDATA_LOAD, true);
   Config::SetBase(Config::NETPLAY_SAVEDATA_WRITE, true);
   Config::SetBase(Config::NETPLAY_SAVEDATA_SYNC_ALL_WII, false);

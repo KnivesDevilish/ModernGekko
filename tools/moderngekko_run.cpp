@@ -419,6 +419,11 @@ int RunMain(int argc, char **argv) {
             : netplay_controllers;
     if (options.controllers.empty() && !frontend_config.controller.empty())
       options.controllers.push_back(frontend_config.controller);
+#ifdef MODERNGEKKO_GAMECUBE_CONTROLLERS
+    // As in solo play: with nothing configured the player uses the keyboard.
+    if (options.controllers.empty())
+      options.controllers.emplace_back(moderngekko::frontend::KeyboardDevice());
+#endif
     if (options.controllers.empty()) {
       std::cerr << "netplay requires at least one selected controller\n";
       return 2;
