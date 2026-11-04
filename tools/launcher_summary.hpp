@@ -5,8 +5,9 @@
 // its own copy of either.
 
 #include <algorithm>
-#include <charconv>
+#include <cerrno>
 #include <cstdint>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -44,8 +45,8 @@ inline std::string_view ModLibrarySuffix()
 
 // Milliseconds Dolphin has counted for game_id. Dolphin's play time tracker
 // (Core/TimePlayed.cpp) adds to Config/TimePlayed.ini every 30 seconds while
-// the game runs, under [TimePlayed] as "<game id> = <milliseconds>". A disc ID
-// such as RS9E8P is written as is. 0 when there is no entry yet.
+// the game runs, under [TimePlayed] as "<game id> = 0x<16 hex digits>". A
+// disc ID such as RS9E8P is written as is. 0 when there is no entry yet.
 inline std::uint64_t ReadTimePlayed(const fs::path& user_directory, std::string_view game_id)
 {
   std::ifstream file(user_directory / "Config" / "TimePlayed.ini");
@@ -64,12 +65,18 @@ inline std::uint64_t ReadTimePlayed(const fs::path& user_directory, std::string_
       continue;
     if (summary_detail::Trim(text.substr(0, separator)) != game_id)
       continue;
-    const std::string_view value = summary_detail::Trim(text.substr(separator + 1));
-    std::uint64_t milliseconds = 0;
-    const auto parsed = std::from_chars(value.data(), value.data() + value.size(), milliseconds);
-    if (parsed.ec == std::errc{} && parsed.ptr == value.data() + value.size())
-      return milliseconds;
-    return 0;
+    // Dolphin writes a u64 as "0x" and 16 hex digits (Common::ValueToString)
+    // and reads it back with strtoull in base 0 (Common::TryParse), which also
+    // takes plain decimal. Read it the same way.
+    const std::string value(summary_detail::Trim(text.substr(separator + 1)));
+    if (value.empty() || value.front() == '-' || value.front() == '+')
+      return 0;
+    errno = 0;
+    char* end = nullptr;
+    const unsigned long long milliseconds = std::strtoull(value.c_str(), &end, 0);
+    if (end == nullptr || *end != '\0' || errno == ERANGE)
+      return 0;
+    return static_cast<std::uint64_t>(milliseconds);
   }
   return 0;
 }

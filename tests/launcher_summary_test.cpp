@@ -42,21 +42,30 @@ int main()
   if (ReadTimePlayed(root, "RS9E8P") != 0)
     return 1;
 
-  // The layout Dolphin's IniFile writes, with another game and another section.
+  // The layout Dolphin's IniFile writes: u64 values as "0x" and 16 hex digits
+  // (a real file from a play session), with another game and another section.
   WriteFile(root / "Config" / "TimePlayed.ini",
-            "[Other]\nRS9E8P = 5\n"
-            "[TimePlayed]\nGALE01 = 1000\nRS9E8P = 45240000\n");
-  if (ReadTimePlayed(root, "RS9E8P") != 45240000 || ReadTimePlayed(root, "GALE01") != 1000 ||
+            "[Other]\nRS9E8P = 0x0000000000000005\n"
+            "[TimePlayed]\nGALE01 = 0x00000000000003e8\nRS9E8P = 0x00000000003465e0\n");
+  if (ReadTimePlayed(root, "RS9E8P") != 3433952 || ReadTimePlayed(root, "GALE01") != 1000 ||
       ReadTimePlayed(root, "RSBE01") != 0)
     return 2;
+  // Dolphin also reads plain decimal back, so the launcher does too.
+  WriteFile(root / "Config" / "TimePlayed.ini", "[TimePlayed]\nRS9E8P = 45240000\n");
+  if (ReadTimePlayed(root, "RS9E8P") != 45240000)
+    return 8;
 
   // A damaged value reads as nothing played instead of failing.
-  WriteFile(root / "Config" / "TimePlayed.ini", "[TimePlayed]\nRS9E8P = lots\n");
-  if (ReadTimePlayed(root, "RS9E8P") != 0)
-    return 3;
+  for (const char* damaged : {"lots", "0x12zz", "-5", ""})
+  {
+    WriteFile(root / "Config" / "TimePlayed.ini",
+              std::string("[TimePlayed]\nRS9E8P = ") + damaged + "\n");
+    if (ReadTimePlayed(root, "RS9E8P") != 0)
+      return 3;
+  }
 
   if (FormatTimePlayed(0) != "Not played yet" || FormatTimePlayed(59999) != "Under a minute" ||
-      FormatTimePlayed(34 * 60000) != "34 min" ||
+      FormatTimePlayed(34 * 60000) != "34 min" || FormatTimePlayed(3433952) != "57 min" ||
       FormatTimePlayed(45240000) != "12 h 34 min" || FormatTimePlayed(3600000) != "1 h 0 min")
     return 4;
 
