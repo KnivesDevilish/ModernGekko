@@ -75,6 +75,10 @@ struct RuntimeConfig
   // Boot straight into a savestate instead of from the title screen.
   std::optional<std::filesystem::path> load_state_path;
   AutomationSettings automation;
+  // Hash the whole files/ tree when Create() inspects the game. That hash only
+  // ends up in GetGameMetadata().assets_sha256; when false it is left empty
+  // and the boot skips tens of seconds of hashing on a multi-GB game.
+  bool hash_game_assets = true;
 };
 
 enum class RuntimeErrorCode

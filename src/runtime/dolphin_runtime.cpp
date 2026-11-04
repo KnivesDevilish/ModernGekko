@@ -554,7 +554,8 @@ RuntimeCreateResult Runtime::Create(RuntimeConfig config) {
         RuntimeError{RuntimeErrorCode::AlreadyActive,
                      "only one ModernGekko runtime may be active per process"}};
 
-  GameInspectResult inspected = InspectGame(config.game_root);
+  GameInspectResult inspected =
+      InspectGame(config.game_root, {.hash_assets = config.hash_game_assets});
   if (!inspected)
     return {{}, RuntimeError{RuntimeErrorCode::InvalidGame, inspected.error}};
 

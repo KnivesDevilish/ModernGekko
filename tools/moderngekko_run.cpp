@@ -317,7 +317,17 @@ int RunMain(int argc, char **argv) {
   if (dol_changed)
     std::cout << "Applied native DOL patches\n";
 #endif
-  const auto inspected = moderngekko::InspectGame(config.game_root);
+  // Hashing every file under files/ takes tens of seconds on a multi-GB game.
+  // The runner only needs that hash for a pinned asset check, and the runtime
+  // never needs it to boot. Netplay is unaffected: RunNetplayLobby inspects the
+  // game again with the full hash for its compatibility fingerprint.
+  moderngekko::GameInspectOptions inspect_options;
+#ifndef MODERNGEKKO_REQUIRED_ASSETS_SHA256
+  inspect_options.hash_assets = false;
+#endif
+  config.hash_game_assets = false;
+  const auto inspected =
+      moderngekko::InspectGame(config.game_root, inspect_options);
   if (!inspected) {
     std::cerr << "invalid game: " << inspected.error << '\n';
     return 2;
