@@ -810,6 +810,38 @@ bool DrawPrimaryButton(const char* label, ImFont* bold, float height)
   return clicked;
 }
 
+// Title of the Settings, Controls and Game Files pages, with one line of help.
+void DrawPageHeader(const char* title, const char* subtitle, ImFont* bold)
+{
+  ImGui::PushFont(bold, ImGui::GetStyle().FontSizeBase * 1.35f);
+  ImGui::TextUnformatted(title);
+  ImGui::PopFont();
+  ImGui::PushTextWrapPos(0.0f);
+  ImGui::TextDisabled("%s", subtitle);
+  ImGui::PopTextWrapPos();
+  ImGui::Spacing();
+}
+
+// A bordered panel that grows with its content, headed by a small caps label.
+// Every BeginSection() needs a matching EndSection().
+void BeginSection(const char* id, const char* heading)
+{
+  // A little less vertical padding than other panels, so that a page with
+  // three sections (Settings) still fits the default window without scrolling.
+  const ImVec2 padding = ImGui::GetStyle().WindowPadding;
+  ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(padding.x, padding.y * 0.75f));
+  ImGui::BeginChild(id, ImVec2(0.0f, 0.0f),
+                    ImGuiChildFlags_Borders | ImGuiChildFlags_AutoResizeY);
+  ImGui::PopStyleVar();
+  ImGui::TextDisabled("%s", heading);
+}
+
+void EndSection()
+{
+  ImGui::EndChild();
+  ImGui::Spacing();
+}
+
 // A quiet text button, such as "Host Netplay" under PLAY.
 bool DrawLinkButton(const char* label)
 {
@@ -1357,8 +1389,11 @@ int main(int argc, char** argv)
       }
       if (current_page == LauncherPage::Settings)
       {
-    ImGui::Spacing();
-    ImGui::TextUnformatted("CPU core");
+    DrawPageHeader("Settings",
+                   "Changes are saved right away and apply the next time you press PLAY.",
+                   fonts.bold);
+    BeginSection("##settings_cpu", "CPU CORE");
+    ImGui::SetNextItemWidth(-1.0f);
     if (ImGui::BeginCombo("##cpu_core", cpu_cores[cpu_core_index].text))
     {
       for (std::size_t i = 0; i < cpu_cores.size(); ++i)
@@ -1400,8 +1435,10 @@ int main(int argc, char** argv)
                          cpu_core_override.c_str());
     }
     ImGui::PopTextWrapPos();
-    ImGui::Spacing();
+    EndSection();
+    BeginSection("##settings_graphics", "GRAPHICS");
     ImGui::TextUnformatted("Graphics backend");
+    ImGui::SetNextItemWidth(-1.0f);
     if (ImGui::BeginCombo("##graphics_backend",
                           graphics_backends[graphics_backend_index].text))
     {
@@ -1433,24 +1470,8 @@ int main(int argc, char** argv)
       ImGui::EndCombo();
     }
     ImGui::Spacing();
-    const bool previous_fullscreen = fullscreen;
-    if (ImGui::Checkbox("Start in fullscreen", &fullscreen))
-    {
-      config.fullscreen = fullscreen;
-      config.resolution = resolutions[resolution_index].text;
-      config.show_fps_in_title = show_fps_in_title;
-      config.controller = selected_controller;
-      std::string error;
-      if (!moderngekko::frontend::SaveConfig(user_directory, config, &error))
-      {
-        fullscreen = previous_fullscreen;
-        config.fullscreen = previous_fullscreen;
-        std::lock_guard lock(dialog.mutex);
-        dialog.error = std::move(error);
-      }
-    }
-    ImGui::Spacing();
     ImGui::TextUnformatted("Internal resolution (Dolphin EFB upscale)");
+    ImGui::SetNextItemWidth(-1.0f);
     if (ImGui::BeginCombo("##resolution", resolutions[resolution_index].text))
     {
       for (std::size_t i = 0; i < resolutions.size(); ++i)
@@ -1474,6 +1495,24 @@ int main(int argc, char** argv)
       }
       ImGui::EndCombo();
     }
+    EndSection();
+    BeginSection("##settings_display", "DISPLAY");
+    const bool previous_fullscreen = fullscreen;
+    if (ImGui::Checkbox("Start in fullscreen", &fullscreen))
+    {
+      config.fullscreen = fullscreen;
+      config.resolution = resolutions[resolution_index].text;
+      config.show_fps_in_title = show_fps_in_title;
+      config.controller = selected_controller;
+      std::string error;
+      if (!moderngekko::frontend::SaveConfig(user_directory, config, &error))
+      {
+        fullscreen = previous_fullscreen;
+        config.fullscreen = previous_fullscreen;
+        std::lock_guard lock(dialog.mutex);
+        dialog.error = std::move(error);
+      }
+    }
     const bool previous_show_fps_in_title = show_fps_in_title;
     if (ImGui::Checkbox("Show FPS in window title", &show_fps_in_title))
     {
@@ -1490,11 +1529,21 @@ int main(int argc, char** argv)
         config.show_fps_in_title = show_fps_in_title;
       }
     }
+    EndSection();
     }
       if (current_page == LauncherPage::Controls)
       {
+    DrawPageHeader("Controls",
+                   "Choose the controller to play with. The launcher writes its button "
+                   "mapping for you.",
+                   fonts.bold);
+    BeginSection("##controls_controller", "CONTROLLER");
+    if (controller_index >= 0)
+      DrawStatusPill("CONNECTED", LAUNCHER_ACCENT, scale, false);
+    else
+      DrawStatusPill("NOT DETECTED", ImVec4(1.0f, 0.75f, 0.3f, 1.0f), scale, false);
     ImGui::Spacing();
-    ImGui::TextUnformatted("Controller profile");
+    ImGui::SetNextItemWidth(-1.0f);
     const char* controller_preview = controller_index >= 0
                                          ? controllers[controller_index].label.c_str()
                                      : selected_controller.empty() ? "No SDL gamepad detected"
@@ -1518,22 +1567,57 @@ int main(int argc, char** argv)
       }
       ImGui::EndCombo();
     }
+    ImGui::PushTextWrapPos(0.0f);
+    ImGui::TextDisabled("%s", controller_status.c_str());
+    ImGui::PopTextWrapPos();
+    EndSection();
+    BeginSection("##controls_mapping", "BUTTON MAPPING");
+    ImGui::PushTextWrapPos(0.0f);
+    if (controller_profile_exists)
+      ImGui::TextDisabled("Using %s from your user folder.", std::string(CONTROLLER_PROFILE_NAME).c_str());
+    else
+      ImGui::TextDisabled("%s is created the first time you play.", std::string(CONTROLLER_PROFILE_NAME).c_str());
+    ImGui::PopTextWrapPos();
+    ImGui::Spacing();
     ImGui::BeginDisabled(controller_index < 0);
     const std::string replace_profile =
         "Replace with generated " + std::string(GENERATED_PROFILE_LABEL);
     if (ImGui::Button(replace_profile.c_str()))
       select_controller(controller_index);
     ImGui::EndDisabled();
+    EndSection();
     }
       if (current_page == LauncherPage::GameFiles)
       {
-    ImGui::Spacing();
-    ImGui::TextUnformatted("Game disc image");
+    DrawPageHeader("Game Files",
+                   "Use your own copy of the game as an ISO, WBFS or RVZ image. It is "
+                   "extracted once and reused afterwards.",
+                   fonts.bold);
+    BeginSection("##files_installed", "INSTALLED GAME");
+    if (current_metadata)
+    {
+      const std::string ready =
+          "GAME READY \xC2\xB7 " + current_metadata.metadata->disc_id;
+      DrawStatusPill(ready.c_str(), LAUNCHER_ACCENT, scale, false);
+      ImGui::Spacing();
+      ImGui::TextUnformatted(current_metadata.metadata->game_name.c_str());
+      ImGui::PushTextWrapPos(0.0f);
+      ImGui::TextDisabled("%s", current_game.string().c_str());
+      ImGui::PopTextWrapPos();
+    }
+    else
+    {
+      DrawStatusPill("NOT INSTALLED", ImVec4(1.0f, 0.75f, 0.3f, 1.0f), scale, false);
+      ImGui::Spacing();
+      ImGui::TextDisabled("Select a disc image below and extract it.");
+    }
+    EndSection();
+    BeginSection("##files_image", "DISC IMAGE");
     if (selected_image)
       ImGui::TextWrapped("%s", selected_image->string().c_str());
     else
       ImGui::TextDisabled("No ISO, WBFS, or RVZ selected");
-
+    ImGui::Spacing();
     if (!extraction.running)
     {
       if (ImGui::Button("Browse for ISO / WBFS / RVZ"))
@@ -1575,7 +1659,6 @@ int main(int argc, char** argv)
           std::min(1.0f, static_cast<float>(extraction.completed.load()) / extraction.total.load());
       ImGui::ProgressBar(progress, ImVec2(-1, 0));
     }
-
     {
       std::lock_guard lock(extraction.mutex);
       if (!extraction.status.empty())
@@ -1583,6 +1666,7 @@ int main(int argc, char** argv)
       if (!extraction.error.empty())
         ImGui::TextColored(ImVec4(1.0f, 0.35f, 0.3f, 1.0f), "%s", extraction.error.c_str());
     }
+    EndSection();
     }
     }
     ImGui::EndChild();
