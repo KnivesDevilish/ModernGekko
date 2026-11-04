@@ -691,6 +691,9 @@ RuntimeCreateResult Runtime::Create(RuntimeConfig config) {
     Config::SetBase(Config::MAIN_AUDIO_VOLUME, 0);
   Config::SetBase(Config::MAIN_INPUT_BACKGROUND_INPUT,
                   impl->config.input.background_input);
+  // Dolphin's on-screen messages ("Wii Remote 1 connected", savestate
+  // notices...) are not shown over the game.
+  Config::SetBase(Config::MAIN_OSD_MESSAGES, false);
 
   auto &jit = Core::System::GetInstance().GetJitInterface();
   StaticRecompModuleSource recomp_source;
