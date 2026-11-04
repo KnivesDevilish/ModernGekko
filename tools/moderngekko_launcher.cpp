@@ -16,6 +16,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
@@ -581,6 +582,14 @@ void ApplyLauncherTheme(ImGuiStyle& style)
   colors[ImGuiCol_NavCursor] = accent;
   colors[ImGuiCol_ResizeGrip] = ImVec4(0.0f, 0.0f, 0.0f, 0.0f);
   colors[ImGuiCol_ModalWindowDimBg] = ImVec4(0.0f, 0.0f, 0.0f, 0.6f);
+  // StyleColorsDark() defaults that would still show up blue: the title bar of
+  // popup windows (Netplay), selected text in input fields, the resize grip.
+  colors[ImGuiCol_TitleBg] = colors[ImGuiCol_ChildBg];
+  colors[ImGuiCol_TitleBgActive] = ImVec4(0.110f, 0.110f, 0.122f, 1.0f);
+  colors[ImGuiCol_TitleBgCollapsed] = colors[ImGuiCol_ChildBg];
+  colors[ImGuiCol_TextSelectedBg] = with_alpha(accent, 0.30f);
+  colors[ImGuiCol_ResizeGripHovered] = with_alpha(accent, 0.5f);
+  colors[ImGuiCol_ResizeGripActive] = with_alpha(accent, 0.8f);
 }
 
 // stb_truetype (used by ImGui) reads TrueType outlines only, and a file it cannot
@@ -737,6 +746,82 @@ void DrawStatusPill(const char* text, ImVec4 color, float scale, bool in_top_bar
                      ImGui::GetColorU32(color), text);
   ImGui::Dummy(size);
 }
+
+// Optional header image for the Play page. The build copies it next to the
+// launcher when MODERNGEKKO_LAUNCHER_BANNER is set; a missing or unreadable
+// file just means no image, and the page shows its text header alone.
+struct LauncherBanner
+{
+  SDL_Texture* texture = nullptr;
+  float aspect = 0.0f;  // height / width
+};
+
+LauncherBanner LoadLauncherBanner(SDL_Renderer* renderer, const fs::path& release_directory)
+{
+  LauncherBanner banner;
+  const fs::path path = release_directory / "Resources" / "launcher-banner.png";
+  std::error_code ec;
+  if (!fs::is_regular_file(path, ec))
+    return banner;
+  SDL_Surface* surface = SDL_LoadPNG(path.string().c_str());
+  if (!surface)
+  {
+    std::cout << "launcher banner: can't load " << path.string() << ": " << SDL_GetError()
+              << '\n';
+    return banner;
+  }
+  if (surface->w > 0 && surface->h > 0)
+  {
+    banner.texture = SDL_CreateTextureFromSurface(renderer, surface);
+    if (banner.texture)
+    {
+      banner.aspect = static_cast<float>(surface->h) / static_cast<float>(surface->w);
+      std::cout << "launcher banner: " << path.string() << '\n';
+    }
+  }
+  SDL_DestroySurface(surface);
+  return banner;
+}
+
+// Draws the banner across the full content width with the panels' rounding.
+void DrawLauncherBanner(const LauncherBanner& banner)
+{
+  const float width = ImGui::GetContentRegionAvail().x;
+  const ImVec2 size(width, width * banner.aspect);
+  const ImVec2 position = ImGui::GetCursorScreenPos();
+  ImGui::GetWindowDrawList()->AddImageRounded(
+      ImTextureRef(static_cast<ImTextureID>(reinterpret_cast<std::uintptr_t>(banner.texture))),
+      position, ImVec2(position.x + size.x, position.y + size.y), ImVec2(0.0f, 0.0f),
+      ImVec2(1.0f, 1.0f), IM_COL32_WHITE, ImGui::GetStyle().ChildRounding);
+  ImGui::Dummy(size);
+}
+
+// The page's main action: full width, accent colour, dark bold label.
+bool DrawPrimaryButton(const char* label, ImFont* bold, float height)
+{
+  ImGui::PushStyleColor(ImGuiCol_Button, LAUNCHER_ACCENT);
+  ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.80f, 1.0f, 0.40f, 1.0f));
+  ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.62f, 0.90f, 0.10f, 1.0f));
+  ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.04f, 0.05f, 0.02f, 1.0f));
+  ImGui::PushFont(bold, ImGui::GetStyle().FontSizeBase * 1.2f);
+  const bool clicked = ImGui::Button(label, ImVec2(-1.0f, height));
+  ImGui::PopFont();
+  ImGui::PopStyleColor(4);
+  return clicked;
+}
+
+// A quiet text button, such as "Host Netplay" under PLAY.
+bool DrawLinkButton(const char* label)
+{
+  const ImGuiStyle& style = ImGui::GetStyle();
+  ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
+  ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(1.0f, 1.0f, 1.0f, 0.06f));
+  ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(1.0f, 1.0f, 1.0f, 0.10f));
+  ImGui::PushStyleColor(ImGuiCol_Text, style.Colors[ImGuiCol_TextDisabled]);
+  const bool clicked = ImGui::Button(label);
+  ImGui::PopStyleColor(4);
+  return clicked;
+}
 } // namespace
 
 int main(int argc, char** argv)
@@ -823,6 +908,7 @@ int main(int argc, char** argv)
   const LauncherFonts fonts = LoadInterfaceFont(release_directory, 18.0f);
   ImGui_ImplSDL3_InitForSDLRenderer(window, renderer);
   ImGui_ImplSDLRenderer3_Init(renderer);
+  const LauncherBanner banner = LoadLauncherBanner(renderer, release_directory);
 
   std::vector<fs::path> images = FindDiscImages();
   std::optional<fs::path> selected_image = images.empty() ? std::nullopt : std::optional(images[0]);
@@ -985,6 +1071,8 @@ int main(int argc, char** argv)
   bool done = false;
   LaunchMode launch_mode = LaunchMode::None;
   LauncherPage current_page = LauncherPage::Play;
+  // Which session the Netplay window is about to start (Host or Join).
+  LaunchMode netplay_dialog_mode = LaunchMode::Host;
   while (!done)
   {
     bool controllers_changed = false;
@@ -1092,26 +1180,22 @@ int main(int argc, char** argv)
     {
       if (current_page == LauncherPage::Play)
       {
-        ImGui::Spacing();
-        ImGui::TextColored(LAUNCHER_ACCENT, "SONIC RIDERS");
-        ImGui::SameLine();
-        ImGui::TextColored(LAUNCHER_ACCENT, "ZERO GRAVITY");
-        ImGui::TextDisabled("Static Recompilation");
-        ImGui::Separator();
-        ImGui::Spacing();
+        // Header: the project banner when the build bundled one, then the title.
+        if (banner.texture)
+        {
+          DrawLauncherBanner(banner);
+          ImGui::Spacing();
+        }
+        ImGui::PushFont(fonts.bold, ImGui::GetStyle().FontSizeBase * 1.35f);
+        ImGui::TextColored(LAUNCHER_ACCENT, "SONIC RIDERS: ZERO GRAVITY");
+        ImGui::PopFont();
 
         if (current_metadata)
         {
-          ImGui::BeginChild("##game_status", ImVec2(0, 0),
-                            ImGuiChildFlags_Borders | ImGuiChildFlags_AutoResizeY);
-          ImGui::TextDisabled("GAME STATUS");
-          ImGui::TextColored(LAUNCHER_ACCENT, "READY");
-          ImGui::SameLine();
-          ImGui::Text("%s", current_metadata.metadata->game_name.c_str());
-          ImGui::TextDisabled("Disc ID: %s",
-                              current_metadata.metadata->disc_id.c_str());
-          ImGui::EndChild();
-
+          const std::string ready =
+              "GAME READY \xC2\xB7 " + current_metadata.metadata->disc_id;
+          DrawStatusPill(ready.c_str(), LAUNCHER_ACCENT, scale, false);
+          ImGui::Spacing();
           ImGui::Spacing();
           if (!launcher_savestates.empty())
           {
@@ -1150,7 +1234,7 @@ int main(int argc, char** argv)
             ImGui::Spacing();
           }
 
-          if (ImGui::Button("PLAY", ImVec2(-1, 48 * scale)))
+          if (DrawPrimaryButton("PLAY", fonts.bold, 52 * scale))
           {
             if (ensure_controller())
             {
@@ -1159,98 +1243,117 @@ int main(int argc, char** argv)
             }
           }
 
+          // Netplay: two quiet buttons under PLAY. Each opens a small window
+          // with the connection fields and the button that starts the session.
           ImGui::Spacing();
-          ImGui::TextUnformatted("ONLINE PLAY");
-          ImGui::TextDisabled("Host a session or connect to another player.");
-          const float netplay_button_width =
-              (ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ItemSpacing.x) * 0.5f;
-          if (ImGui::Button("Host Netplay", ImVec2(netplay_button_width, 38 * scale)))
+          if (DrawLinkButton("Host Netplay"))
           {
-            if (ensure_controller())
-            {
-              config.netplay_nickname = netplay_nickname.data();
-              config.netplay_address = netplay_address.data();
-              config.netplay_port = static_cast<std::uint16_t>(netplay_port);
-              config.netplay_buffer = automatic_buffer ? "auto" : std::to_string(manual_buffer);
-              config.controllers = configured_controllers.empty()
-                                       ? std::vector<std::string>{selected_controller}
-                                       : configured_controllers;
-              config.controller = config.controllers.front();
-              config.resolution = resolutions[resolution_index].text;
-              config.show_fps_in_title = show_fps_in_title;
-              std::string error;
-              if (moderngekko::frontend::SaveConfig(user_directory, config, &error))
-              {
-                launch_mode = LaunchMode::Host;
-                done = true;
-              }
-              else
-              {
-                std::lock_guard lock(dialog.mutex);
-                dialog.error = std::move(error);
-              }
-            }
+            netplay_dialog_mode = LaunchMode::Host;
+            ImGui::OpenPopup("Netplay##session");
           }
-          ImGui::SameLine();
-          if (ImGui::Button("Join Netplay", ImVec2(netplay_button_width, 38 * scale)))
+          ImGui::SameLine(0.0f, 0.0f);
+          ImGui::TextDisabled("\xC2\xB7");
+          ImGui::SameLine(0.0f, 0.0f);
+          if (DrawLinkButton("Join Netplay"))
           {
-            if (ensure_controller())
-            {
-              config.netplay_nickname = netplay_nickname.data();
-              config.netplay_address = netplay_address.data();
-              config.netplay_port = static_cast<std::uint16_t>(netplay_port);
-              config.netplay_buffer = automatic_buffer ? "auto" : std::to_string(manual_buffer);
-              config.controllers = configured_controllers.empty()
-                                       ? std::vector<std::string>{selected_controller}
-                                       : configured_controllers;
-              config.controller = config.controllers.front();
-              config.resolution = resolutions[resolution_index].text;
-              config.show_fps_in_title = show_fps_in_title;
-              std::string error;
-              if (moderngekko::frontend::SaveConfig(user_directory, config, &error))
-              {
-                launch_mode = LaunchMode::Join;
-                done = true;
-              }
-              else
-              {
-                std::lock_guard lock(dialog.mutex);
-                dialog.error = std::move(error);
-              }
-            }
+            netplay_dialog_mode = LaunchMode::Join;
+            ImGui::OpenPopup("Netplay##session");
           }
 
-          ImGui::Spacing();
-          ImGui::Separator();
-          ImGui::TextUnformatted("NETPLAY CONNECTION");
-          // A width of -1 pushes each label past the right edge of the window.
-          // A negative width of the widest label leaves room for all of them.
-          const float netplay_label_width = ImGui::CalcTextSize("Buffer frames").x +
-                                            ImGui::GetStyle().ItemInnerSpacing.x;
-          ImGui::SetNextItemWidth(-netplay_label_width);
-          ImGui::InputText("Nickname", netplay_nickname.data(), netplay_nickname.size());
-          ImGui::SetNextItemWidth(-netplay_label_width);
-          ImGui::InputText("Host / IP", netplay_address.data(), netplay_address.size());
-          ImGui::SetNextItemWidth(150 * scale);
-          ImGui::InputInt("UDP port", &netplay_port);
-          netplay_port = std::clamp(netplay_port, 1, 65535);
-          ImGui::Checkbox("Automatic input buffer", &automatic_buffer);
-          if (!automatic_buffer)
+          ImGui::SetNextWindowPos(ImGui::GetMainViewport()->GetCenter(), ImGuiCond_Appearing,
+                                  ImVec2(0.5f, 0.5f));
+          ImGui::SetNextWindowSize(ImVec2(460 * scale, 0.0f));
+          if (ImGui::BeginPopupModal("Netplay##session", nullptr, ImGuiWindowFlags_NoResize))
           {
+            const bool hosting = netplay_dialog_mode == LaunchMode::Host;
+            ImGui::PushFont(fonts.bold, 0.0f);
+            ImGui::TextUnformatted(hosting ? "Host a session" : "Join a session");
+            ImGui::PopFont();
+            ImGui::PushTextWrapPos(0.0f);
+            ImGui::TextDisabled(hosting ?
+                                    "Other players connect to this computer's address and "
+                                    "UDP port." :
+                                    "Enter the address and UDP port of the player who hosts.");
+            ImGui::TextDisabled("Every player must use the same CPU core and game files.");
+            ImGui::PopTextWrapPos();
+            ImGui::Spacing();
+            // A negative width of the widest label leaves room for all of them.
+            const float netplay_label_width = ImGui::CalcTextSize("Buffer frames").x +
+                                              ImGui::GetStyle().ItemInnerSpacing.x;
             ImGui::SetNextItemWidth(-netplay_label_width);
-            ImGui::SliderInt("Buffer frames", &manual_buffer, 1, 20);
+            ImGui::InputText("Nickname", netplay_nickname.data(), netplay_nickname.size());
+            if (!hosting)
+            {
+              ImGui::SetNextItemWidth(-netplay_label_width);
+              ImGui::InputText("Host / IP", netplay_address.data(), netplay_address.size());
+            }
+            ImGui::SetNextItemWidth(150 * scale);
+            ImGui::InputInt("UDP port", &netplay_port);
+            netplay_port = std::clamp(netplay_port, 1, 65535);
+            ImGui::Checkbox("Automatic input buffer", &automatic_buffer);
+            if (!automatic_buffer)
+            {
+              ImGui::SetNextItemWidth(-netplay_label_width);
+              ImGui::SliderInt("Buffer frames", &manual_buffer, 1, 20);
+            }
+            ImGui::Spacing();
+            ImGui::Separator();
+            ImGui::Spacing();
+            const float button_width =
+                (ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ItemSpacing.x) * 0.5f;
+            ImGui::PushStyleColor(ImGuiCol_Button, LAUNCHER_ACCENT);
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.80f, 1.0f, 0.40f, 1.0f));
+            ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.62f, 0.90f, 0.10f, 1.0f));
+            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.04f, 0.05f, 0.02f, 1.0f));
+            const bool start = ImGui::Button(hosting ? "Host" : "Join",
+                                             ImVec2(button_width, 38 * scale));
+            ImGui::PopStyleColor(4);
+            if (start)
+            {
+              if (ensure_controller())
+              {
+                config.netplay_nickname = netplay_nickname.data();
+                config.netplay_address = netplay_address.data();
+                config.netplay_port = static_cast<std::uint16_t>(netplay_port);
+                config.netplay_buffer = automatic_buffer ? "auto" : std::to_string(manual_buffer);
+                config.controllers = configured_controllers.empty()
+                                         ? std::vector<std::string>{selected_controller}
+                                         : configured_controllers;
+                config.controller = config.controllers.front();
+                config.resolution = resolutions[resolution_index].text;
+                config.show_fps_in_title = show_fps_in_title;
+                std::string error;
+                if (moderngekko::frontend::SaveConfig(user_directory, config, &error))
+                {
+                  launch_mode = netplay_dialog_mode;
+                  done = true;
+                }
+                else
+                {
+                  std::lock_guard lock(dialog.mutex);
+                  dialog.error = std::move(error);
+                }
+              }
+              // Close either way: on success the launcher leaves to start the
+              // session, on failure the footer shows the error.
+              ImGui::CloseCurrentPopup();
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("Cancel", ImVec2(button_width, 38 * scale)))
+              ImGui::CloseCurrentPopup();
+            ImGui::EndPopup();
           }
         }
         else
         {
-          ImGui::BeginChild("##game_status_missing", ImVec2(0, 0),
-                            ImGuiChildFlags_Borders | ImGuiChildFlags_AutoResizeY);
-          ImGui::TextDisabled("GAME NOT INSTALLED");
+          DrawStatusPill("GAME NOT INSTALLED", ImVec4(1.0f, 0.75f, 0.3f, 1.0f), scale, false);
+          ImGui::Spacing();
           ImGui::TextUnformatted("No extracted game is configured yet.");
           ImGui::TextDisabled("Open Game Files to select and extract your game.");
-          ImGui::EndChild();
+          ImGui::Spacing();
+          if (ImGui::Button("Go to Game Files"))
+            current_page = LauncherPage::GameFiles;
         }
-
       }
       if (current_page == LauncherPage::Settings)
       {
@@ -1667,6 +1770,8 @@ int main(int argc, char** argv)
   ImGui_ImplSDLRenderer3_Shutdown();
   ImGui_ImplSDL3_Shutdown();
   ImGui::DestroyContext();
+  if (banner.texture)
+    SDL_DestroyTexture(banner.texture);
   SDL_DestroyRenderer(renderer);
   SDL_DestroyWindow(window);
   SDL_Quit();

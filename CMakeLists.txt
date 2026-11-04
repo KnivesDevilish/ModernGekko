@@ -56,6 +56,8 @@ set(MODERNGEKKO_GAME_SETTINGS_OVERRIDE "" CACHE FILEPATH
     "Optional game INI copied over the bundled Dolphin settings")
 set(MODERNGEKKO_ACCEPTED_SOURCE_DISC_ID "" CACHE STRING
     "Source disc ID accepted by the optional disc preparer")
+set(MODERNGEKKO_LAUNCHER_BANNER "" CACHE FILEPATH
+    "Optional PNG shown at the top of the launcher's Play page")
 option(MODERNGEKKO_USER_DIRECTORY_IN_DOCUMENTS
        "Place the branded user directory in Documents" OFF)
 set(MODERNGEKKO_FRONTEND_SDK "" CACHE PATH
@@ -585,6 +587,16 @@ if(MODERNGEKKO_ENABLE_DOLPHIN_RUNTIME)
     if(MODERNGEKKO_ACCEPTED_SOURCE_DISC_ID)
         target_compile_definitions(moderngekko-launcher PRIVATE
             MODERNGEKKO_ACCEPTED_SOURCE_DISC_ID="${MODERNGEKKO_ACCEPTED_SOURCE_DISC_ID}")
+    endif()
+    # The launcher looks for Resources/launcher-banner.png next to itself and
+    # shows it at the top of the Play page; without it the page is text only.
+    if(MODERNGEKKO_LAUNCHER_BANNER)
+        add_custom_command(TARGET moderngekko-launcher POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E make_directory
+                    "$<TARGET_FILE_DIR:moderngekko-launcher>/Resources"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                    "${MODERNGEKKO_LAUNCHER_BANNER}"
+                    "$<TARGET_FILE_DIR:moderngekko-launcher>/Resources/launcher-banner.png")
     endif()
     if(MODERNGEKKO_FRONTEND_SDK AND UNIX AND NOT APPLE AND
        MODERNGEKKO_PORTABLE_DEFAULT_GAME)
