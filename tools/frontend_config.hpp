@@ -18,10 +18,18 @@ struct GraphicsBackendOption {
   const char *value;
 };
 
+struct CpuCoreOption {
+  const char *text;
+  const char *value;
+};
+
 struct ConfigResult {
   int dolphin_scale = 0;
   std::string resolution;
   std::string graphics_backend = "Vulkan";
+  // "jit64" or "staticrecomp". JIT64 is the default because it is the mode
+  // validated at full speed; MODERNGEKKO_STATICRECOMP still overrides it.
+  std::string cpu_core = "jit64";
   std::string controller;
   std::vector<std::string> controllers;
   bool show_fps_in_title = true;
@@ -37,6 +45,7 @@ struct ConfigResult {
 
 const std::vector<ResolutionOption> &SupportedResolutions();
 const std::vector<GraphicsBackendOption> &SupportedGraphicsBackends();
+const std::vector<CpuCoreOption> &SupportedCpuCores();
 ConfigResult LoadConfig(const std::filesystem::path &user_directory,
                         bool create_if_missing);
 bool SaveConfig(const std::filesystem::path &user_directory,

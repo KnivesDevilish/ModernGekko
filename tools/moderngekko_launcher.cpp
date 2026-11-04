@@ -617,6 +617,18 @@ int main(int argc, char** argv)
     if (config.graphics_backend == graphics_backends[i].value)
       graphics_backend_index = static_cast<int>(i);
   }
+  const auto& cpu_cores = moderngekko::frontend::SupportedCpuCores();
+  int cpu_core_index = 0;
+  for (std::size_t i = 0; i < cpu_cores.size(); ++i)
+  {
+    if (config.cpu_core == cpu_cores[i].value)
+      cpu_core_index = static_cast<int>(i);
+  }
+  // The runner gives MODERNGEKKO_STATICRECOMP priority over config.ini and
+  // inherits this process' environment, so say so when it is set.
+  const char* cpu_core_environment_value = std::getenv("MODERNGEKKO_STATICRECOMP");
+  const std::string cpu_core_override =
+      cpu_core_environment_value ? cpu_core_environment_value : "";
 
   // StateSaves is Dolphin's own state directory, so states written in-game land
   // here without any extra configuration and show up on the next launch.
@@ -937,6 +949,49 @@ int main(int argc, char** argv)
       }
       if (ImGui::BeginTabItem("Settings"))
       {
+    ImGui::Spacing();
+    ImGui::TextUnformatted("CPU core");
+    if (ImGui::BeginCombo("##cpu_core", cpu_cores[cpu_core_index].text))
+    {
+      for (std::size_t i = 0; i < cpu_cores.size(); ++i)
+      {
+        const bool selected = cpu_core_index == static_cast<int>(i);
+        if (ImGui::Selectable(cpu_cores[i].text, selected))
+        {
+          const std::string previous = config.cpu_core;
+          config.cpu_core = cpu_cores[i].value;
+          config.resolution = resolutions[resolution_index].text;
+          config.show_fps_in_title = show_fps_in_title;
+          config.controller = selected_controller;
+          std::string error;
+          if (moderngekko::frontend::SaveConfig(user_directory, config, &error))
+          {
+            cpu_core_index = static_cast<int>(i);
+          }
+          else
+          {
+            config.cpu_core = previous;
+            std::lock_guard lock(dialog.mutex);
+            dialog.error = std::move(error);
+          }
+        }
+        if (selected)
+          ImGui::SetItemDefaultFocus();
+      }
+      ImGui::EndCombo();
+    }
+    ImGui::PushTextWrapPos(0.0f);
+    ImGui::TextDisabled("JIT64 is the validated full-speed mode. StaticRecomp runs the "
+                        "recompiled game code and is still being optimized.");
+    ImGui::TextDisabled("Netplay: every player must use the same CPU core.");
+    if (!cpu_core_override.empty())
+    {
+      ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.3f, 1.0f),
+                         "MODERNGEKKO_STATICRECOMP=%s is set in the environment and "
+                         "overrides this setting.",
+                         cpu_core_override.c_str());
+    }
+    ImGui::PopTextWrapPos();
     ImGui::Spacing();
     ImGui::TextUnformatted("Graphics backend");
     if (ImGui::BeginCombo("##graphics_backend",

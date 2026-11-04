@@ -257,6 +257,37 @@ int RunMain(int argc, char **argv) {
     config.graphics.backend = frontend_config.graphics_backend;
   config.fullscreen = frontend_config.fullscreen;
   config.show_fps_in_title = frontend_config.show_fps_in_title;
+
+  // CPU core: config.ini decides unless MODERNGEKKO_STATICRECOMP is already set,
+  // so the shell can still force either core for testing. The runtime reads
+  // the variable once, in Runtime::Create, so it must be set before that call
+  // (solo and netplay both reach it below).
+  {
+    const char *forced = std::getenv("MODERNGEKKO_STATICRECOMP");
+    const bool forced_by_environment = forced && *forced;
+    if (!forced_by_environment) {
+      const char *value =
+          frontend_config.cpu_core == "staticrecomp" ? "1" : "0";
+#if defined(_WIN32)
+      _putenv_s("MODERNGEKKO_STATICRECOMP", value);
+#else
+      setenv("MODERNGEKKO_STATICRECOMP", value, 1);
+#endif
+    }
+    // Same rule as SelectCPUCore() in the runtime: only a leading '0' is JIT.
+    const char *effective = std::getenv("MODERNGEKKO_STATICRECOMP");
+    const bool static_recomp = !effective || !*effective || *effective != '0';
+#ifdef _M_ARM_64
+    const char *jit_name = "JITARM64";
+#else
+    const char *jit_name = "JIT64";
+#endif
+    std::cout << "cpu core: " << (static_recomp ? "StaticRecomp" : jit_name)
+              << (forced_by_environment ? " (from MODERNGEKKO_STATICRECOMP)"
+                                        : " (from config.ini)")
+              << '\n';
+  }
+
   if (use_default_mods) {
     config.mod_directories.push_back(executable_directory / "Mods");
     config.mod_directories.push_back(config.user_directory / "Mods");

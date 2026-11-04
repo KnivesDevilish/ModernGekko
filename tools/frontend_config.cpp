@@ -43,6 +43,15 @@ std::string NormalizeGraphicsBackend(std::string value) {
   return {};
 }
 
+std::string NormalizeCpuCore(std::string value) {
+  const std::string lower = Lower(Trim(std::move(value)));
+  if (lower == "jit64" || lower == "jit")
+    return "jit64";
+  if (lower == "staticrecomp" || lower == "static_recomp" || lower == "static")
+    return "staticrecomp";
+  return {};
+}
+
 bool ParseBoolean(const std::string &value, bool *result) {
   if (value == "true" || value == "1" || value == "yes" || value == "on") {
     *result = true;
@@ -91,6 +100,15 @@ const std::vector<GraphicsBackendOption> &SupportedGraphicsBackends() {
   return backends;
 }
 
+const std::vector<CpuCoreOption> &SupportedCpuCores() {
+  // The first entry is the default used when config.ini has no cpu_core line.
+  static const std::vector<CpuCoreOption> cores = {
+      {"JIT64 (recommended)", "jit64"},
+      {"StaticRecomp (experimental)", "staticrecomp"},
+  };
+  return cores;
+}
+
 ConfigResult LoadConfig(const fs::path &user_directory,
                         bool create_if_missing) {
   const fs::path path = user_directory / "config.ini";
@@ -125,6 +143,11 @@ ConfigResult LoadConfig(const fs::path &user_directory,
       config.graphics_backend = NormalizeGraphicsBackend(raw_value);
       if (config.graphics_backend.empty())
         return {.error = "graphics backend must be Vulkan or OpenGL"};
+    }
+    else if (key == "cpu_core") {
+      config.cpu_core = NormalizeCpuCore(raw_value);
+      if (config.cpu_core.empty())
+        return {.error = "cpu_core must be jit64 or staticrecomp"};
     }
     else if (key == "controller")
       config.controller = raw_value;
@@ -235,6 +258,12 @@ bool SaveConfig(const fs::path &user_directory, const ConfigResult &config,
       return false;
     }
   }
+  const std::string cpu_core = NormalizeCpuCore(config.cpu_core);
+  if (cpu_core.empty()) {
+    if (error)
+      *error = "cpu_core must be jit64 or staticrecomp";
+    return false;
+  }
   std::error_code ec;
   fs::create_directories(user_directory, ec);
   if (ec) {
@@ -257,6 +286,9 @@ bool SaveConfig(const fs::path &user_directory, const ConfigResult &config,
        << "fullscreen=" << (config.fullscreen ? "true" : "false") << '\n'
        << "show_fps_in_title=" << (config.show_fps_in_title ? "true" : "false")
        << '\n'
+       << "[Core]\n"
+       << "# jit64 or staticrecomp. MODERNGEKKO_STATICRECOMP overrides it.\n"
+       << "cpu_core=" << cpu_core << '\n'
        << "[Input]\n";
   for (std::size_t i = 0; i < config.controllers.size() && i < 4; ++i) {
     if (config.controllers[i].find_first_of("\r\n") != std::string::npos) {
