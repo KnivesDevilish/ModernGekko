@@ -1161,11 +1161,12 @@ int main(int argc, char** argv)
     ImGui::Begin(MODERNGEKKO_FRONTEND_NAME " Launcher", nullptr,
                  ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove |
                      ImGuiWindowFlags_NoSavedSettings);
-    // Top bar: frontend name on the left, the CPU core PLAY will use on the
-    // right (MODERNGEKKO_STATICRECOMP wins over config.ini, as in the runner).
+    // Top bar: "Launcher" on the left (the game's name is already in the
+    // window title and the banner), the CPU core PLAY will use on the right
+    // (MODERNGEKKO_STATICRECOMP wins over config.ini, as in the runner).
     ImGui::PushFont(fonts.bold, 0.0f);
     ImGui::AlignTextToFramePadding();
-    ImGui::TextUnformatted(MODERNGEKKO_FRONTEND_NAME);
+    ImGui::TextUnformatted("Launcher");
     ImGui::PopFont();
     ImGui::SameLine();
     {
@@ -1212,15 +1213,13 @@ int main(int argc, char** argv)
     {
       if (current_page == LauncherPage::Play)
       {
-        // Header: the project banner when the build bundled one, then the title.
+        // Header: the project banner when the build bundled one. The banner
+        // already shows the game's name, so no text title follows it.
         if (banner.texture)
         {
           DrawLauncherBanner(banner);
           ImGui::Spacing();
         }
-        ImGui::PushFont(fonts.bold, ImGui::GetStyle().FontSizeBase * 1.35f);
-        ImGui::TextColored(LAUNCHER_ACCENT, "SONIC RIDERS: ZERO GRAVITY");
-        ImGui::PopFont();
 
         if (current_metadata)
         {
