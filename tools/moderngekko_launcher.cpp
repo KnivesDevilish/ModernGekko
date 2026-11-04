@@ -1,10 +1,11 @@
 #include "frontend_config.hpp"
 #include "dol_patch.hpp"
-#include "launcher_cjk_font.inc"
 #include "launcher_savestates.hpp"
 #include "launcher_summary.hpp"
 #include "launcher_text.hpp"
+#include "launcher_ui.hpp"
 #include "moderngekko/game.hpp"
+#include "netplay_address.hpp"
 #include "netplay_session.hpp"
 
 #include "DiscIO/DiscExtractor.h"
@@ -546,186 +547,34 @@ fs::path SiblingRunner(const char* argv0)
   return fs::is_regular_file(sibling) ? sibling : runner;
 }
 
-// SR-ZGS accent: a neon lime green. Shared by the theme and the few texts that
-// pick a colour explicitly (the Play header and the READY status).
-constexpr ImVec4 LAUNCHER_ACCENT(0.72f, 1.0f, 0.18f, 1.0f);
+// The look shared with the Netplay lobby (theme, fonts, status pills, panels,
+// buttons, images) lives in launcher_ui.hpp.
+using namespace moderngekko::frontend::ui;
 
-// Launcher colours and shapes: near-black neutral background, soft grey panels
-// and the lime accent. Sizes are unscaled; the caller applies ScaleAllSizes()
-// for the display's DPI afterwards.
-void ApplyLauncherTheme(ImGuiStyle& style)
+// Launcher-only drawing helpers.
+
+// A Netplay dialog row that can hold an address or invite code: [field] [Show]
+// Label. The field shows asterisks until Show is clicked, for players who
+// stream. label_width is the dialog's label column, so the label lines up
+// with the other rows. Returns true when an edit of the field has finished.
+bool DrawHiddenField(const char* id, char* buffer, std::size_t size, const char* label,
+                     float label_width, bool* shown)
 {
-  style.WindowPadding = ImVec2(18.0f, 16.0f);
-  style.FramePadding = ImVec2(10.0f, 6.0f);
-  style.ItemSpacing = ImVec2(10.0f, 8.0f);
-  style.ItemInnerSpacing = ImVec2(8.0f, 6.0f);
-  style.ScrollbarSize = 12.0f;
-  style.WindowRounding = 0.0f;
-  style.ChildRounding = 10.0f;
-  style.FrameRounding = 6.0f;
-  style.PopupRounding = 8.0f;
-  style.ScrollbarRounding = 8.0f;
-  style.GrabRounding = 6.0f;
-  style.TabRounding = 6.0f;
-  style.WindowBorderSize = 0.0f;
-  style.ChildBorderSize = 1.0f;
-  style.PopupBorderSize = 1.0f;
-  style.FrameBorderSize = 0.0f;
-
-  const ImVec4 accent = LAUNCHER_ACCENT;
-  const auto with_alpha = [](ImVec4 color, float alpha) {
-    color.w = alpha;
-    return color;
-  };
-  ImVec4* colors = style.Colors;
-  colors[ImGuiCol_Text] = ImVec4(0.94f, 0.94f, 0.94f, 1.0f);
-  colors[ImGuiCol_TextDisabled] = ImVec4(0.58f, 0.58f, 0.60f, 1.0f);
-  colors[ImGuiCol_WindowBg] = ImVec4(0.031f, 0.031f, 0.035f, 1.0f);
-  colors[ImGuiCol_ChildBg] = ImVec4(0.067f, 0.067f, 0.075f, 1.0f);
-  colors[ImGuiCol_PopupBg] = ImVec4(0.075f, 0.075f, 0.082f, 0.98f);
-  colors[ImGuiCol_Border] = ImVec4(0.157f, 0.157f, 0.169f, 1.0f);
-  colors[ImGuiCol_BorderShadow] = ImVec4(0.0f, 0.0f, 0.0f, 0.0f);
-  colors[ImGuiCol_FrameBg] = ImVec4(0.098f, 0.098f, 0.110f, 1.0f);
-  colors[ImGuiCol_FrameBgHovered] = ImVec4(0.133f, 0.133f, 0.149f, 1.0f);
-  colors[ImGuiCol_FrameBgActive] = ImVec4(0.165f, 0.165f, 0.184f, 1.0f);
-  colors[ImGuiCol_Button] = ImVec4(0.110f, 0.110f, 0.122f, 1.0f);
-  colors[ImGuiCol_ButtonHovered] = ImVec4(0.153f, 0.153f, 0.169f, 1.0f);
-  colors[ImGuiCol_ButtonActive] = ImVec4(0.196f, 0.196f, 0.216f, 1.0f);
-  colors[ImGuiCol_Header] = with_alpha(accent, 0.18f);
-  colors[ImGuiCol_HeaderHovered] = with_alpha(accent, 0.28f);
-  colors[ImGuiCol_HeaderActive] = with_alpha(accent, 0.38f);
-  colors[ImGuiCol_CheckMark] = accent;
-  colors[ImGuiCol_SliderGrab] = accent;
-  colors[ImGuiCol_SliderGrabActive] = ImVec4(0.82f, 1.0f, 0.45f, 1.0f);
-  colors[ImGuiCol_Separator] = colors[ImGuiCol_Border];
-  colors[ImGuiCol_SeparatorHovered] = with_alpha(accent, 0.6f);
-  colors[ImGuiCol_SeparatorActive] = accent;
-  colors[ImGuiCol_Tab] = colors[ImGuiCol_ChildBg];
-  colors[ImGuiCol_TabHovered] = with_alpha(accent, 0.25f);
-  colors[ImGuiCol_TabSelected] = ImVec4(0.14f, 0.19f, 0.06f, 1.0f);
-  colors[ImGuiCol_TabSelectedOverline] = accent;
-  colors[ImGuiCol_TabDimmed] = colors[ImGuiCol_ChildBg];
-  colors[ImGuiCol_TabDimmedSelected] = ImVec4(0.11f, 0.14f, 0.06f, 1.0f);
-  colors[ImGuiCol_ScrollbarBg] = ImVec4(0.0f, 0.0f, 0.0f, 0.0f);
-  colors[ImGuiCol_ScrollbarGrab] = ImVec4(0.20f, 0.20f, 0.22f, 1.0f);
-  colors[ImGuiCol_ScrollbarGrabHovered] = ImVec4(0.26f, 0.26f, 0.29f, 1.0f);
-  colors[ImGuiCol_ScrollbarGrabActive] = ImVec4(0.32f, 0.32f, 0.35f, 1.0f);
-  colors[ImGuiCol_PlotHistogram] = accent;
-  colors[ImGuiCol_TextLink] = accent;
-  colors[ImGuiCol_NavCursor] = accent;
-  colors[ImGuiCol_ResizeGrip] = ImVec4(0.0f, 0.0f, 0.0f, 0.0f);
-  colors[ImGuiCol_ModalWindowDimBg] = ImVec4(0.0f, 0.0f, 0.0f, 0.6f);
-  // StyleColorsDark() defaults that would still show up blue: the title bar of
-  // popup windows (Netplay), selected text in input fields, the resize grip.
-  colors[ImGuiCol_TitleBg] = colors[ImGuiCol_ChildBg];
-  colors[ImGuiCol_TitleBgActive] = ImVec4(0.110f, 0.110f, 0.122f, 1.0f);
-  colors[ImGuiCol_TitleBgCollapsed] = colors[ImGuiCol_ChildBg];
-  colors[ImGuiCol_TextSelectedBg] = with_alpha(accent, 0.30f);
-  colors[ImGuiCol_ResizeGripHovered] = with_alpha(accent, 0.5f);
-  colors[ImGuiCol_ResizeGripActive] = with_alpha(accent, 0.8f);
-}
-
-// stb_truetype (used by ImGui) reads TrueType outlines only, and a file it cannot
-// parse would trip an assert. Check the header before handing a file over.
-bool IsTrueTypeFont(const fs::path& path)
-{
-  std::ifstream file(path, std::ios::binary);
-  std::array<unsigned char, 4> tag{};
-  if (!file.read(reinterpret_cast<char*>(tag.data()), tag.size()))
-    return false;
-  constexpr std::array<unsigned char, 4> version_1 = {0x00, 0x01, 0x00, 0x00};
-  constexpr std::array<unsigned char, 4> apple_true = {'t', 'r', 'u', 'e'};
-  return tag == version_1 || tag == apple_true;
-}
-
-struct LauncherFonts
-{
-  ImFont* regular = nullptr;
-  ImFont* bold = nullptr;  // the regular font when no bold face of its family exists
-};
-
-// A clean sans-serif for the interface: the system's usual UI fonts first
-// (Windows, Fedora/Bazzite and its Distrobox mount, Debian/Ubuntu, Arch), then
-// the font Dolphin ships in Sys/, then ImGui's built-in bitmap font. The bold
-// face is taken from the same family as the regular one so the two match.
-LauncherFonts LoadInterfaceFont(const fs::path& release_directory, float size)
-{
-  struct Candidate
-  {
-    fs::path regular;
-    fs::path bold;
-  };
-  std::vector<Candidate> candidates;
-#if defined(_WIN32)
-  if (const char* windows = std::getenv("WINDIR"))
-  {
-    candidates.push_back({fs::path(windows) / "Fonts" / "segoeui.ttf",
-                          fs::path(windows) / "Fonts" / "segoeuib.ttf"});
-  }
-#endif
-  for (const char* directory : {"/usr/share/fonts/google-noto", "/usr/local/share/fonts/google-noto",
-                                "/usr/share/fonts/noto", "/usr/share/fonts/truetype/noto"})
-  {
-    candidates.push_back({fs::path(directory) / "NotoSans-Regular.ttf",
-                          fs::path(directory) / "NotoSans-Bold.ttf"});
-  }
-  for (const char* directory : {"/usr/share/fonts/liberation-sans-fonts",
-                                "/usr/local/share/fonts/liberation-sans-fonts",
-                                "/usr/share/fonts/truetype/liberation"})
-  {
-    candidates.push_back({fs::path(directory) / "LiberationSans-Regular.ttf",
-                          fs::path(directory) / "LiberationSans-Bold.ttf"});
-  }
-  for (const char* directory : {"/usr/share/fonts/TTF", "/usr/share/fonts/truetype/dejavu",
-                                "/usr/share/fonts/dejavu-sans-fonts"})
-  {
-    candidates.push_back(
-        {fs::path(directory) / "DejaVuSans.ttf", fs::path(directory) / "DejaVuSans-Bold.ttf"});
-  }
-  candidates.push_back({release_directory / "Sys" / "Resources" / "OSD_Font.ttf", {}});
-
-  const auto usable = [](const fs::path& path) {
-    std::error_code ec;
-    return !path.empty() && fs::is_regular_file(path, ec) && IsTrueTypeFont(path);
-  };
-  ImGuiIO& io = ImGui::GetIO();
-  // The interface fonts have no Japanese characters (the Credits page uses a
-  // few), so a small embedded Noto Sans CJK JP is merged into each face.
-  const auto merge_japanese = [&](const unsigned char* data, std::size_t bytes)
-  {
-    ImFontConfig config;
-    config.MergeMode = true;
-    config.FontDataOwnedByAtlas = false;
-    io.Fonts->AddFontFromMemoryTTF(const_cast<unsigned char*>(data), static_cast<int>(bytes),
-                                   size, &config);
-  };
-  for (const Candidate& candidate : candidates)
-  {
-    if (!usable(candidate.regular))
-      continue;
-    LauncherFonts fonts;
-    fonts.regular = io.Fonts->AddFontFromFileTTF(candidate.regular.string().c_str(), size);
-    if (!fonts.regular)
-      continue;
-    merge_japanese(LAUNCHER_CJK_REGULAR, sizeof(LAUNCHER_CJK_REGULAR));
-    ImGui::GetStyle().FontSizeBase = size;
-    if (usable(candidate.bold))
-      fonts.bold = io.Fonts->AddFontFromFileTTF(candidate.bold.string().c_str(), size);
-    if (fonts.bold)
-      merge_japanese(LAUNCHER_CJK_BOLD, sizeof(LAUNCHER_CJK_BOLD));
-    std::cout << "launcher font: " << candidate.regular.string() << '\n';
-    if (fonts.bold)
-      std::cout << "launcher bold font: " << candidate.bold.string() << '\n';
-    else
-      fonts.bold = fonts.regular;
-    return fonts;
-  }
-  LauncherFonts fonts;
-  fonts.regular = io.Fonts->AddFontDefault();
-  merge_japanese(LAUNCHER_CJK_REGULAR, sizeof(LAUNCHER_CJK_REGULAR));
-  fonts.bold = fonts.regular;
-  std::cout << "launcher font: ImGui default\n";
-  return fonts;
+  const ImGuiStyle& style = ImGui::GetStyle();
+  const float show_width =
+      std::max(ImGui::CalcTextSize(Tr("Show")).x, ImGui::CalcTextSize(Tr("Hide")).x) +
+      style.FramePadding.x * 2.0f;
+  ImGui::SetNextItemWidth(-(label_width + show_width + style.ItemInnerSpacing.x));
+  ImGui::InputText(id, buffer, size,
+                   *shown ? ImGuiInputTextFlags_None : ImGuiInputTextFlags_Password);
+  const bool edited = ImGui::IsItemDeactivatedAfterEdit();
+  ImGui::SameLine(0.0f, style.ItemInnerSpacing.x);
+  if (ImGui::Button((std::string(*shown ? Tr("Hide") : Tr("Show")) + id + "_show").c_str(),
+                    ImVec2(show_width, 0.0f)))
+    *shown = !*shown;
+  ImGui::SameLine(0.0f, style.ItemInnerSpacing.x);
+  ImGui::TextUnformatted(label);
+  return edited;
 }
 
 enum class LauncherPage
@@ -769,70 +618,7 @@ bool DrawNavigationItem(const char* label, bool selected, ImFont* bold, float sc
   return clicked;
 }
 
-// Small rounded label, e.g. the CPU core in the top bar. With in_top_bar it is
-// right-aligned to the window's content edge and centred on a frame-high line,
-// so it sits level with text drawn after AlignTextToFramePadding().
-void DrawStatusPill(const char* text, ImVec4 color, float scale, bool in_top_bar)
-{
-  const ImVec2 padding(10.0f * scale, 3.0f * scale);
-  const ImVec2 text_size = ImGui::CalcTextSize(text);
-  const ImVec2 size(text_size.x + padding.x * 2.0f, text_size.y + padding.y * 2.0f);
-  if (in_top_bar)
-  {
-    const float right = ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x;
-    ImGui::SetCursorPosX(std::max(ImGui::GetCursorPosX(), right - size.x));
-    ImGui::SetCursorPosY(ImGui::GetCursorPosY() +
-                         std::max(0.0f, (ImGui::GetFrameHeight() - size.y) * 0.5f));
-  }
-  const ImVec2 position = ImGui::GetCursorScreenPos();
-  ImVec4 background = color;
-  background.w = 0.14f;
-  ImDrawList* draw_list = ImGui::GetWindowDrawList();
-  draw_list->AddRectFilled(position, ImVec2(position.x + size.x, position.y + size.y),
-                           ImGui::GetColorU32(background), size.y * 0.5f);
-  draw_list->AddText(ImVec2(position.x + padding.x, position.y + padding.y),
-                     ImGui::GetColorU32(color), text);
-  ImGui::Dummy(size);
-}
-
-// Optional images the build copies into Resources/ next to the launcher: the
-// Play page banner (MODERNGEKKO_LAUNCHER_BANNER) and the controller artwork
-// of the Controls page (MODERNGEKKO_LAUNCHER_CONTROLLER_ART). A missing or
-// unreadable file just means no image, and the page shows its text alone.
-struct LauncherImage
-{
-  SDL_Texture* texture = nullptr;
-  float aspect = 0.0f;  // height / width
-};
 using LauncherBanner = LauncherImage;
-
-LauncherImage LoadLauncherImage(SDL_Renderer* renderer, const fs::path& release_directory,
-                                std::string_view file_name, std::string_view log_label)
-{
-  LauncherImage image;
-  const fs::path path = release_directory / "Resources" / file_name;
-  std::error_code ec;
-  if (!fs::is_regular_file(path, ec))
-    return image;
-  SDL_Surface* surface = SDL_LoadPNG(path.string().c_str());
-  if (!surface)
-  {
-    std::cout << log_label << ": can't load " << path.string() << ": " << SDL_GetError()
-              << '\n';
-    return image;
-  }
-  if (surface->w > 0 && surface->h > 0)
-  {
-    image.texture = SDL_CreateTextureFromSurface(renderer, surface);
-    if (image.texture)
-    {
-      image.aspect = static_cast<float>(surface->h) / static_cast<float>(surface->w);
-      std::cout << log_label << ": " << path.string() << '\n';
-    }
-  }
-  SDL_DestroySurface(surface);
-  return image;
-}
 
 LauncherBanner LoadLauncherBanner(SDL_Renderer* renderer, const fs::path& release_directory)
 {
@@ -850,65 +636,6 @@ void DrawLauncherBanner(const LauncherBanner& banner)
       position, ImVec2(position.x + size.x, position.y + size.y), ImVec2(0.0f, 0.0f),
       ImVec2(1.0f, 1.0f), IM_COL32_WHITE, ImGui::GetStyle().ChildRounding);
   ImGui::Dummy(size);
-}
-
-// The page's main action: full width, accent colour, dark bold label.
-bool DrawPrimaryButton(const char* label, ImFont* bold, float height)
-{
-  ImGui::PushStyleColor(ImGuiCol_Button, LAUNCHER_ACCENT);
-  ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.80f, 1.0f, 0.40f, 1.0f));
-  ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.62f, 0.90f, 0.10f, 1.0f));
-  ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.04f, 0.05f, 0.02f, 1.0f));
-  ImGui::PushFont(bold, ImGui::GetStyle().FontSizeBase * 1.2f);
-  const bool clicked = ImGui::Button(label, ImVec2(-1.0f, height));
-  ImGui::PopFont();
-  ImGui::PopStyleColor(4);
-  return clicked;
-}
-
-// Title of the Settings, Controls and Game Files pages, with one line of help.
-void DrawPageHeader(const char* title, const char* subtitle, ImFont* bold)
-{
-  ImGui::PushFont(bold, ImGui::GetStyle().FontSizeBase * 1.35f);
-  ImGui::TextUnformatted(title);
-  ImGui::PopFont();
-  ImGui::PushTextWrapPos(0.0f);
-  ImGui::TextDisabled("%s", subtitle);
-  ImGui::PopTextWrapPos();
-  ImGui::Spacing();
-}
-
-// A bordered panel that grows with its content, headed by a small caps label.
-// Every BeginSection() needs a matching EndSection().
-void BeginSection(const char* id, const char* heading)
-{
-  // A little less vertical padding than other panels, so that a page with
-  // three sections (Settings) still fits the default window without scrolling.
-  const ImVec2 padding = ImGui::GetStyle().WindowPadding;
-  ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(padding.x, padding.y * 0.75f));
-  ImGui::BeginChild(id, ImVec2(0.0f, 0.0f),
-                    ImGuiChildFlags_Borders | ImGuiChildFlags_AutoResizeY);
-  ImGui::PopStyleVar();
-  ImGui::TextDisabled("%s", heading);
-}
-
-void EndSection()
-{
-  ImGui::EndChild();
-  ImGui::Spacing();
-}
-
-// A quiet text button, such as "Host Netplay" under PLAY.
-bool DrawLinkButton(const char* label)
-{
-  const ImGuiStyle& style = ImGui::GetStyle();
-  ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
-  ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(1.0f, 1.0f, 1.0f, 0.06f));
-  ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(1.0f, 1.0f, 1.0f, 0.10f));
-  ImGui::PushStyleColor(ImGuiCol_Text, style.Colors[ImGuiCol_TextDisabled]);
-  const bool clicked = ImGui::Button(label);
-  ImGui::PopStyleColor(4);
-  return clicked;
 }
 
 // The system's first preferred language, such as "es" from es_VE.UTF-8, or
@@ -1220,13 +947,16 @@ void DrawCreditsPage(ImFont* bold)
   ImGui::PopTextWrapPos();
   EndSection();
 
-  static constexpr std::array<std::array<const char*, 2>, 5> BUILT_ON = {{
+  static constexpr std::array<std::array<const char*, 2>, 6> BUILT_ON = {{
       {"DolRecomp", MODERNGEKKO_UI_TEXT("Static recompilation framework")},
       {"ModernGekko", MODERNGEKKO_UI_TEXT("Runtime for GameCube/Wii recomps, by Hyperway")},
       {"RecompCore", "SpecialK / aharonahdoot"},
       {MODERNGEKKO_UI_TEXT("Recomp template"),
        MODERNGEKKO_UI_TEXT("Literally God / MrPoloGit, who also added macOS support")},
       {"Dolphin", MODERNGEKKO_UI_TEXT("The Dolphin Team and its contributors")},
+      // Netplay's invite codes come from Dolphin's traversal server.
+      {MODERNGEKKO_UI_TEXT("Invite codes"),
+       MODERNGEKKO_UI_TEXT("Dolphin's public server (stun.dolphin-emu.org)")},
   }};
   BeginSection("##credits_built_on", Tr("BUILT ON"));
   DrawCreditsRows("##credits_built_on_rows", BUILT_ON, bold);
@@ -2454,6 +2184,24 @@ int main(int argc, char** argv)
   std::snprintf(netplay_address.data(), netplay_address.size(), "%s",
                 config.netplay_address.c_str());
   int netplay_port = config.netplay_port;
+  // The host's address and invite code are hidden on screen until asked, for
+  // players who stream.
+  bool show_netplay_address = false;
+  bool show_netplay_code = false;
+  // Friends find the host by invite code (the default) or by its address.
+  bool netplay_invite_mode = config.netplay_connection != "ip";
+  std::array<char, 32> netplay_code{};
+  std::string netplay_join_code;  // the code typed, as the runner takes it
+  // "ip:port" pasted whole (as the lobby's Copy button gives it) goes to the
+  // address and port fields.
+  const auto split_netplay_address = [&]
+  {
+    if (const auto split = moderngekko::frontend::SplitHostAndPort(netplay_address.data()))
+    {
+      std::snprintf(netplay_address.data(), netplay_address.size(), "%s", split->host.c_str());
+      netplay_port = split->port;
+    }
+  };
   bool automatic_buffer = config.netplay_buffer == "auto";
   int manual_buffer = automatic_buffer ? 5 : std::stoi(config.netplay_buffer);
   int resolution_index = 0;
@@ -2914,43 +2662,92 @@ int main(int argc, char** argv)
 
           ImGui::SetNextWindowPos(ImGui::GetMainViewport()->GetCenter(), ImGuiCond_Appearing,
                                   ImVec2(0.5f, 0.5f));
-          ImGui::SetNextWindowSize(ImVec2(460 * scale, 0.0f));
+          ImGui::SetNextWindowSize(ImVec2(500 * scale, 0.0f));
           if (ImGui::BeginPopupModal("Netplay##session", nullptr, ImGuiWindowFlags_NoResize))
           {
             const bool hosting = netplay_dialog_mode == LaunchMode::Host;
             ImGui::PushFont(fonts.bold, 0.0f);
             ImGui::TextUnformatted(hosting ? Tr("Host a session") : Tr("Join a session"));
             ImGui::PopFont();
+            ImGui::Spacing();
+            // How friends find the host: an invite code from the invite server,
+            // or the host's address.
+            const float choice_width =
+                (ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ItemSpacing.x) * 0.5f;
+            if (DrawChoiceButton(Tr("INVITE CODE"), netplay_invite_mode,
+                                 ImVec2(choice_width, 34 * scale), fonts.bold, scale))
+              netplay_invite_mode = true;
+            ImGui::SameLine();
+            if (DrawChoiceButton(Tr("DIRECT IP"), !netplay_invite_mode,
+                                 ImVec2(choice_width, 34 * scale), fonts.bold, scale))
+              netplay_invite_mode = false;
+            ImGui::Spacing();
             ImGui::PushTextWrapPos(0.0f);
-            ImGui::TextDisabled(
-                "%s", hosting ? Tr("Other players connect to this computer's address and "
-                                   "UDP port.")
-                              : Tr("Enter the address and UDP port of the player who hosts."));
+            if (netplay_invite_mode)
+            {
+              ImGui::TextDisabled("%s", hosting ? Tr("When the room opens you get a code. Your "
+                                                     "friends type it in Join Netplay, and "
+                                                     "nobody sees your IP.")
+                                                : Tr("Type the code the host gave you."));
+            }
+            else
+            {
+              ImGui::TextDisabled(
+                  "%s", hosting ? Tr("Other players connect to this computer's address and "
+                                     "UDP port. For the same network or Tailscale.")
+                                : Tr("Enter the address and UDP port of the player who hosts. "
+                                     "For the same network or Tailscale."));
+              ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.3f, 1.0f), "%s",
+                                 Tr("Careful: an IP address identifies your connection. Don't "
+                                    "show it on stream or share it in public."));
+            }
             ImGui::TextDisabled("%s", Tr("Every player needs the same SR-ZGS release and game "
                                          "files. Everyone plays with the host's CPU core."));
             ImGui::PopTextWrapPos();
             ImGui::Spacing();
             // A negative width of the widest label leaves room for all of them.
             float netplay_label_width = 0.0f;
-            for (const char* label : {Tr("Nickname"), Tr("Host / IP"), Tr("UDP port"),
-                                      Tr("Buffer frames")})
+            for (const char* label :
+                 {Tr("Nickname"), netplay_invite_mode ? Tr("Invite code") : Tr("Host / IP"),
+                  Tr("UDP port"), Tr("Buffer frames")})
               netplay_label_width = std::max(netplay_label_width, ImGui::CalcTextSize(label).x);
             netplay_label_width += ImGui::GetStyle().ItemInnerSpacing.x;
             ImGui::SetNextItemWidth(-netplay_label_width);
             ImGui::InputText(Tr("Nickname"), netplay_nickname.data(), netplay_nickname.size());
-            if (!hosting)
+            if (!hosting && netplay_invite_mode)
             {
-              ImGui::SetNextItemWidth(-netplay_label_width);
-              ImGui::InputText(Tr("Host / IP"), netplay_address.data(), netplay_address.size());
+              DrawHiddenField("##netplay_code", netplay_code.data(), netplay_code.size(),
+                              Tr("Invite code"), netplay_label_width, &show_netplay_code);
             }
-            ImGui::SetNextItemWidth(150 * scale);
-            ImGui::InputInt(Tr("UDP port"), &netplay_port);
-            netplay_port = std::clamp(netplay_port, 1, 65535);
+            else if (!hosting &&
+                     DrawHiddenField("##netplay_address", netplay_address.data(),
+                                     netplay_address.size(), Tr("Host / IP"),
+                                     netplay_label_width, &show_netplay_address))
+            {
+              split_netplay_address();
+            }
+            if (!netplay_invite_mode)
+            {
+              ImGui::SetNextItemWidth(150 * scale);
+              ImGui::InputInt(Tr("UDP port"), &netplay_port);
+              netplay_port = std::clamp(netplay_port, 1, 65535);
+            }
             ImGui::Checkbox(Tr("Automatic input buffer"), &automatic_buffer);
             if (!automatic_buffer)
             {
               ImGui::SetNextItemWidth(-netplay_label_width);
               ImGui::SliderInt(Tr("Buffer frames"), &manual_buffer, 1, 20);
+            }
+            // Joining by code needs the whole code before Join does anything.
+            const auto typed_code = moderngekko::frontend::NormalizeInviteCode(netplay_code.data());
+            const bool code_missing = !hosting && netplay_invite_mode && !typed_code;
+            if (code_missing && netplay_code[0] != '\0')
+            {
+              ImGui::PushTextWrapPos(0.0f);
+              ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.3f, 1.0f), "%s",
+                                 Tr("An invite code has 8 characters (numbers and letters "
+                                    "a-f)."));
+              ImGui::PopTextWrapPos();
             }
             ImGui::Spacing();
             ImGui::Separator();
@@ -2961,17 +2758,23 @@ int main(int argc, char** argv)
             ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.80f, 1.0f, 0.40f, 1.0f));
             ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.62f, 0.90f, 0.10f, 1.0f));
             ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.04f, 0.05f, 0.02f, 1.0f));
+            ImGui::BeginDisabled(code_missing);
             const bool start = ImGui::Button(hosting ? Tr("Host") : Tr("Join"),
                                              ImVec2(button_width, 38 * scale));
+            ImGui::EndDisabled();
             ImGui::PopStyleColor(4);
             if (start)
             {
+              if (!hosting && !netplay_invite_mode)
+                split_netplay_address();
+              netplay_join_code = typed_code.value_or("");
               if (ensure_controller())
               {
                 config.netplay_nickname = netplay_nickname.data();
                 config.netplay_address = netplay_address.data();
                 config.netplay_port = static_cast<std::uint16_t>(netplay_port);
                 config.netplay_buffer = automatic_buffer ? "auto" : std::to_string(manual_buffer);
+                config.netplay_connection = netplay_invite_mode ? "code" : "ip";
                 config.controllers = configured_controllers.empty()
                                          ? std::vector<std::string>{selected_controller}
                                          : configured_controllers;
@@ -3458,8 +3261,18 @@ int main(int argc, char** argv)
             moderngekko::frontend::PathText(
                 launcher_savestates[static_cast<std::size_t>(selected_savestate)]));
       }
+      const bool invite_code = config.netplay_connection == "code";
       if (launch_mode == LaunchMode::Host)
+      {
         argument_storage.emplace_back("--netplay-host");
+        if (invite_code)
+          argument_storage.emplace_back("--invite-code");
+      }
+      else if (launch_mode == LaunchMode::Join && invite_code)
+      {
+        argument_storage.emplace_back("--netplay-join-code");
+        argument_storage.emplace_back(netplay_join_code);
+      }
       else if (launch_mode == LaunchMode::Join)
       {
         argument_storage.emplace_back("--netplay-join");
@@ -3568,6 +3381,12 @@ int main(int argc, char** argv)
               break;
             case moderngekko::frontend::NetplayExitCode::NicknameRejected:
               launch_error = Tr("The nickname was rejected by the host.");
+              break;
+            case moderngekko::frontend::NetplayExitCode::InviteCodeFailed:
+              launch_error = Tr("No room answered to that invite code. Check that it is typed "
+                                "right and that the host's room is still open. If it keeps "
+                                "failing, the invite server may be down or your connection "
+                                "may not allow it: try Direct IP with Tailscale.");
               break;
             default:
               launch_error = Tr("Could not reach the netplay host. Check the host name, UDP "

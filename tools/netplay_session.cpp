@@ -1,8 +1,13 @@
 #include "netplay_session.hpp"
 
 #include "launcher_text.hpp"
+#include "launcher_ui.hpp"
+#include "netplay_address.hpp"
 #include "netplay_compatibility.hpp"
+#include "netplay_lobby_ui.hpp"
 
+#include "Common/MsgHandler.h"
+#include "Common/TraversalClient.h"
 #include "Core/Boot/Boot.h"
 #include "Core/Config/MainSettings.h"
 #include "Core/Config/NetplaySettings.h"
@@ -25,6 +30,7 @@
 #include <array>
 #include <atomic>
 #include <chrono>
+#include <cstring>
 #include <filesystem>
 #include <iostream>
 #include <memory>
@@ -34,6 +40,7 @@
 #include <span>
 #include <string>
 #include <thread>
+#include <tuple>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -68,6 +75,11 @@ constexpr const char *LOBBY_WINDOW_TITLE =
 #else
 constexpr const char *LOBBY_WINDOW_TITLE = "ModernGekko - Netplay";
 #endif
+
+// Dolphin's traversal server ports (its main one, and the one it uses to
+// test the router), unless invite_server names another main port.
+constexpr u16 INVITE_SERVER_PORT = 6262;
+constexpr u16 INVITE_SERVER_ALT_PORT = 6226;
 
 const char *CPUCoreLabel(PowerPC::CPUCore core) {
   switch (core) {
@@ -150,6 +162,14 @@ public:
 
   bool ConnectionLost() const { return m_connection_lost.load(); }
 
+  // Host with an invite code: the code once the invite server has handed it
+  // out, and whether the server stopped answering.
+  std::string InviteCode() {
+    std::lock_guard lock(m_mutex);
+    return m_invite_code;
+  }
+  bool InviteServerFailed() const { return m_invite_server_failed.load(); }
+
   void ClearReadyState() {
     if (m_client)
       m_client->SetReady(false);
@@ -229,11 +249,23 @@ public:
     m_error = message;
   }
 
+  // The invite server did not answer, or forgot this computer. The lobby
+  // says so in its invite section; a code join fails before the lobby opens.
   void OnTraversalError(Common::TraversalClient::FailureReason) override {
-    OnConnectionError(Tr("Direct connection failed"));
+    m_invite_server_failed = true;
   }
 
-  void OnTraversalStateChanged(Common::TraversalClient::State) override {}
+  // Called on the netplay thread, which is also the one that receives the
+  // code from the invite server.
+  void OnTraversalStateChanged(Common::TraversalClient::State state) override {
+    if (state != Common::TraversalClient::State::Connected ||
+        !Common::g_TraversalClient)
+      return;
+    const Common::TraversalHostId id = Common::g_TraversalClient->GetHostID();
+    std::lock_guard lock(m_mutex);
+    m_invite_code.assign(id.data(), strnlen(id.data(), id.size()));
+    m_invite_server_failed = false;
+  }
 
   void OnGameStartAborted() override {
     std::lock_guard lock(m_mutex);
@@ -300,6 +332,8 @@ private:
   bool m_hosting = false;
   std::atomic<bool> m_start_requested{false};
   std::atomic<bool> m_connection_lost{false};
+  std::atomic<bool> m_invite_server_failed{false};
+  std::string m_invite_code;
   std::atomic<u32> m_buffer_size{5};
   std::unique_ptr<BootSessionData> m_boot_data;
   std::string m_error;
@@ -307,6 +341,48 @@ private:
   u64 m_progress_size = 0;
   u64 m_progress = 0;
 };
+
+// The lobby's layout and the launcher's look it shares (netplay_lobby_ui.hpp,
+// launcher_ui.hpp). Not "using namespace ui": RunLobbyWindow's SessionUI is
+// also called ui.
+using ui::ApplyLauncherTheme;
+using ui::DrawLobby;
+using ui::LauncherFonts;
+using ui::LauncherImage;
+using ui::LobbyActions;
+using ui::LobbyAddress;
+using ui::LobbySeat;
+using ui::LobbyState;
+using ui::LobbyView;
+
+// The folder of this executable, where the build puts Resources/ (the lobby
+// artwork) and Sys/ (the fallback font).
+fs::path ExecutableDirectory() {
+  if (const char *base = SDL_GetBasePath())
+    return fs::path(reinterpret_cast<const char8_t *>(base));
+  std::error_code ec;
+  return fs::current_path(ec);
+}
+
+// The addresses of this computer that friends can connect to, home network
+// first. Container and virtual machine adapters are left out.
+std::vector<LobbyAddress> HostAddresses(const NetPlay::NetPlayServer &server) {
+  std::vector<LobbyAddress> addresses;
+  for (const std::string &interface_name : server.GetInterfaceSet()) {
+    const std::string host = server.GetInterfaceHost(interface_name);
+    const std::string_view ip =
+        std::string_view(host).substr(0, host.rfind(':'));
+    const AddressKind kind = ClassifyAddress(interface_name, ip);
+    if (kind == AddressKind::Ignore ||
+        std::ranges::contains(addresses, host, &LobbyAddress::address))
+      continue;
+    addresses.push_back({kind, host});
+  }
+  std::ranges::sort(addresses, [](const LobbyAddress &a, const LobbyAddress &b) {
+    return std::tie(a.kind, a.address) < std::tie(b.kind, b.address);
+  });
+  return addresses;
+}
 
 class LobbyWindow {
 public:
@@ -317,13 +393,26 @@ public:
 #endif
     if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD))
       return false;
-    const float scale = SDL_GetDisplayContentScale(SDL_GetPrimaryDisplay());
+    const SDL_DisplayID display = SDL_GetPrimaryDisplay();
+    const float display_scale = SDL_GetDisplayContentScale(display);
+    m_scale = display_scale > 0.0f ? display_scale : 1.0f;
+    // The artwork's height sets the window's proportions; a small screen
+    // gets a smaller window, and the lobby scrolls if it must.
+    int width = static_cast<int>(1000 * m_scale);
+    int height = static_cast<int>(640 * m_scale);
+    SDL_Rect usable{};
+    if (SDL_GetDisplayUsableBounds(display, &usable) && usable.w > 0 &&
+        usable.h > 0) {
+      width = std::min(width, usable.w * 9 / 10);
+      height = std::min(height, usable.h * 9 / 10);
+    }
     m_window = SDL_CreateWindow(
-        LOBBY_WINDOW_TITLE, static_cast<int>(820 * scale),
-        static_cast<int>(600 * scale),
+        LOBBY_WINDOW_TITLE, width, height,
         SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY);
     if (!m_window)
       return false;
+    SDL_SetWindowMinimumSize(m_window, static_cast<int>(760 * m_scale),
+                             static_cast<int>(560 * m_scale));
     m_renderer = SDL_CreateRenderer(m_window, "vulkan");
     if (!m_renderer)
       m_renderer = SDL_CreateRenderer(m_window, nullptr);
@@ -335,16 +424,26 @@ public:
     ImGuiIO &io = ImGui::GetIO();
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
     io.IniFilename = nullptr;
+    // The launcher's look: its theme, its fonts and the lobby artwork.
     ImGui::StyleColorsDark();
-    ImGui::GetStyle().ScaleAllSizes(scale);
-    ImGui::GetStyle().FontScaleDpi = scale;
+    ApplyLauncherTheme(ImGui::GetStyle());
+    ImGui::GetStyle().ScaleAllSizes(m_scale);
+    ImGui::GetStyle().FontScaleDpi = m_scale;
+    const fs::path release_directory = ExecutableDirectory();
+    m_fonts = ui::LoadInterfaceFont(release_directory, 18.0f);
     ImGui_ImplSDL3_InitForSDLRenderer(m_window, m_renderer);
     ImGui_ImplSDLRenderer3_Init(m_renderer);
+    m_art = ui::LoadLauncherImage(m_renderer, release_directory,
+                                  "lobby-art.png", "lobby art");
     m_open = true;
     return true;
   }
 
   ~LobbyWindow() { Close(); }
+
+  float Scale() const { return m_scale; }
+  ImFont *Bold() const { return m_fonts.bold; }
+  const LauncherImage &Art() const { return m_art; }
 
   void Close() {
     if (!m_open)
@@ -352,6 +451,10 @@ public:
     ImGui_ImplSDLRenderer3_Shutdown();
     ImGui_ImplSDL3_Shutdown();
     ImGui::DestroyContext();
+    if (m_art.texture)
+      SDL_DestroyTexture(m_art.texture);
+    m_art = {};
+    m_fonts = {};
     SDL_DestroyRenderer(m_renderer);
     SDL_DestroyWindow(m_window);
     SDL_Quit();
@@ -379,7 +482,7 @@ public:
     const ImGuiIO &io = ImGui::GetIO();
     SDL_SetRenderScale(m_renderer, io.DisplayFramebufferScale.x,
                        io.DisplayFramebufferScale.y);
-    SDL_SetRenderDrawColor(m_renderer, 18, 20, 28, 255);
+    SDL_SetRenderDrawColor(m_renderer, 8, 8, 9, 255);
     SDL_RenderClear(m_renderer);
     ImGui_ImplSDLRenderer3_RenderDrawData(ImGui::GetDrawData(), m_renderer);
     SDL_RenderPresent(m_renderer);
@@ -388,8 +491,41 @@ public:
 private:
   SDL_Window *m_window = nullptr;
   SDL_Renderer *m_renderer = nullptr;
+  float m_scale = 1.0f;
+  LauncherFonts m_fonts;
+  LauncherImage m_art;
   bool m_open = false;
 };
+
+// A controller ticked or unticked in the lobby: the generated controller
+// profile and config.ini follow, and the server learns the new count.
+void ToggleController(const ControllerOption &controller,
+                      RuntimeConfig &runtime_config,
+                      ConfigResult &frontend_config, NetplayOptions &options,
+                      NetPlay::NetPlayClient &client) {
+  const bool selected =
+      !std::ranges::contains(options.controllers, controller.device);
+#ifdef MODERNGEKKO_GAMECUBE_CONTROLLERS
+  // A keyboard-only player who ticks a gamepad switches to it rather than
+  // taking a second seat; the gamepad's port keeps the keys.
+  if (selected && options.controllers.size() == 1 &&
+      options.controllers.front() == KeyboardDevice())
+    options.controllers.clear();
+#endif
+  if (selected)
+    options.controllers.push_back(controller.device);
+  else if (options.controllers.size() > 1)
+    std::erase(options.controllers, controller.device);
+  frontend_config.controllers = options.controllers;
+  frontend_config.controller = options.controllers.front();
+  std::string error;
+  if (GenerateControllerConfig(runtime_config.user_directory,
+                               options.controllers, &error) &&
+      SaveConfig(runtime_config.user_directory, frontend_config, &error)) {
+    client.SetLocalControllerCount(static_cast<u8>(options.controllers.size()));
+    client.SetReady(false);
+  }
+}
 
 bool RunLobbyWindow(RuntimeConfig &runtime_config,
                     ConfigResult &frontend_config, NetplayOptions &options,
@@ -400,6 +536,13 @@ bool RunLobbyWindow(RuntimeConfig &runtime_config,
     return false;
 
   std::vector<ControllerOption> available = EnumerateControllers();
+  // The host's addresses, refreshed with the controllers (each lookup asks
+  // the system for its network adapters).
+  // With an invite code the lobby shows the code, not the addresses.
+  std::vector<LobbyAddress> addresses;
+  if (server && !options.invite_code)
+    addresses = HostAddresses(*server);
+  LobbyState lobby_state;
   auto last_refresh = std::chrono::steady_clock::now();
   bool running = true;
   while (running) {
@@ -409,6 +552,8 @@ bool RunLobbyWindow(RuntimeConfig &runtime_config,
     const auto now = std::chrono::steady_clock::now();
     if (now - last_refresh >= std::chrono::seconds(1)) {
       available = EnumerateControllers();
+      if (server && !options.invite_code)
+        addresses = HostAddresses(*server);
       last_refresh = now;
     }
 
@@ -451,143 +596,81 @@ bool RunLobbyWindow(RuntimeConfig &runtime_config,
       return true;
     }
 
-    const ImGuiViewport *viewport = ImGui::GetMainViewport();
-    ImGui::SetNextWindowPos(viewport->WorkPos);
-    ImGui::SetNextWindowSize(viewport->WorkSize);
-    ImGui::Begin("Netplay", nullptr,
-                 ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove |
-                     ImGuiWindowFlags_NoSavedSettings);
-    ImGui::TextUnformatted(server ? Tr("Hosting direct-IP netplay")
-                                  : Tr("Connected to direct-IP host"));
-    if (server) {
-      ImGui::TextUnformatted(
-          Format(Tr("UDP port: %u"), unsigned(server->GetPort())).c_str());
-      for (const std::string &interface_name : server->GetInterfaceSet())
-        ImGui::Text("%s: %s", interface_name.c_str(),
-                    server->GetInterfaceHost(interface_name).c_str());
-    } else {
-      ImGui::TextUnformatted(Format(Tr("Host: %s:%u"), options.address.c_str(),
-                                    unsigned(options.port))
-                                 .c_str());
-    }
-    ImGui::TextUnformatted(
-        Format(Tr("Input buffer: %u frames%s"), unsigned(ui.BufferSize()),
-               server && options.buffer == "auto" ? " (auto)" : "")
-            .c_str());
+    // What the lobby shows, from the client's and the server's state.
+    LobbyView view;
+    view.hosting = server != nullptr;
     if (server)
-      ImGui::TextUnformatted(Format(Tr("CPU core for every player: %s"),
-                                    CPUCoreLabel(detail::SelectedCPUCore()))
-                                 .c_str());
-    else
-      ImGui::TextUnformatted(Tr("CPU core: the host's choice"));
-    ImGui::Separator();
-
-    if (ImGui::BeginTable("players", 5,
-                          ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg)) {
-      ImGui::TableSetupColumn(Tr("Player"));
-      ImGui::TableSetupColumn("Ping");
-      ImGui::TableSetupColumn(Tr("Controllers"));
-      ImGui::TableSetupColumn(Tr("Game"));
-      ImGui::TableSetupColumn(Tr("Ready"));
-      ImGui::TableHeadersRow();
-      for (const NetPlay::Player &player : players) {
-        ImGui::TableNextRow();
-        ImGui::TableSetColumnIndex(0);
-        ImGui::TextUnformatted(player.name.c_str());
-        ImGui::TableSetColumnIndex(1);
-        ImGui::Text("%u ms", player.ping);
-        ImGui::TableSetColumnIndex(2);
-        std::string slots;
-        for (std::size_t i = 0; i < wiimote_mapping.size(); ++i) {
-          if (wiimote_mapping[i] != player.pid)
-            continue;
-          if (!slots.empty())
-            slots += ", ";
-          slots += GAMECUBE_PORTS ? Format(Tr("Port %d"), int(i + 1))
-                                  : "Wii " + std::to_string(i + 1);
-        }
-        ImGui::TextUnformatted(slots.empty() ? Tr("None") : slots.c_str());
-        ImGui::TableSetColumnIndex(3);
-        ImGui::TextUnformatted(
-            player.game_status == NetPlay::SyncIdentifierComparison::SameGame
-                ? Tr("Match")
-                : Tr("Mismatch"));
-        ImGui::TableSetColumnIndex(4);
-        ImGui::TextUnformatted(player.ready ? Tr("Ready") : Tr("Not ready"));
-      }
-      ImGui::EndTable();
+      view.cpu_core = CPUCoreLabel(detail::SelectedCPUCore());
+    view.buffer = ui.BufferSize();
+    view.automatic_buffer = server && options.buffer == "auto";
+    view.invite_code = options.invite_code;
+    if (options.invite_code) {
+      // A joining player's address is the host's code.
+      view.code = server ? ui.InviteCode() : options.address;
+      view.invite_server_failed = server && ui.InviteServerFailed();
+    } else {
+      view.addresses = addresses;
+      if (!server)
+        view.host_address =
+            options.address + ':' + std::to_string(options.port);
     }
-
-    ImGui::Spacing();
-    ImGui::TextUnformatted(GAMECUBE_PORTS
-                               ? Tr("Controllers on this computer (the first one "
-                                    "also answers to the keyboard)")
-                               : Tr("Local sideways Wii Remotes"));
+    const auto seat_of = [&](const NetPlay::Player &player) {
+      LobbySeat seat;
+      seat.taken = true;
+      seat.name = player.name;
+      seat.ping = player.ping;
+      seat.ready = player.ready;
+      // Unknown until the player's copy of the game has been compared.
+      seat.same_game =
+          player.game_status == NetPlay::SyncIdentifierComparison::SameGame ||
+          player.game_status == NetPlay::SyncIdentifierComparison::Unknown;
+      seat.you = client.IsLocalPlayer(player.pid);
+      seat.host = player.IsHost();
+      return seat;
+    };
+    for (std::size_t i = 0; i < view.seats.size() && i < wiimote_mapping.size();
+         ++i) {
+      const auto player =
+          std::ranges::find(players, wiimote_mapping[i], &NetPlay::Player::pid);
+      if (wiimote_mapping[i] != 0 && player != players.end())
+        view.seats[i] = seat_of(*player);
+    }
+    for (const NetPlay::Player &player : players) {
+      if (!std::ranges::contains(wiimote_mapping, player.pid))
+        view.without_seat.push_back(seat_of(player));
+    }
+    view.gamecube_ports = GAMECUBE_PORTS;
     std::size_t total_assigned = 0;
     for (const NetPlay::Player &player : players)
       total_assigned += player.controller_count;
     const std::size_t local_limit =
         std::min<std::size_t>(4, assigned + 4 - total_assigned);
     for (const ControllerOption &controller : available) {
-      bool selected =
+      const bool selected =
           std::ranges::contains(options.controllers, controller.device);
-      ImGui::BeginDisabled(!selected &&
-                           options.controllers.size() >= local_limit);
-      if (ImGui::Checkbox(controller.label.c_str(), &selected)) {
-#ifdef MODERNGEKKO_GAMECUBE_CONTROLLERS
-        // A keyboard-only player who ticks a gamepad switches to it rather
-        // than taking a second seat; the gamepad's port keeps the keys.
-        if (selected && options.controllers.size() == 1 &&
-            options.controllers.front() == KeyboardDevice())
-          options.controllers.clear();
-#endif
-        if (selected)
-          options.controllers.push_back(controller.device);
-        else if (options.controllers.size() > 1)
-          std::erase(options.controllers, controller.device);
-        frontend_config.controllers = options.controllers;
-        frontend_config.controller = options.controllers.front();
-        std::string error;
-        if (GenerateControllerConfig(runtime_config.user_directory,
-                                     options.controllers, &error) &&
-            SaveConfig(runtime_config.user_directory, frontend_config,
-                       &error)) {
-          client.SetLocalControllerCount(
-              static_cast<u8>(options.controllers.size()));
-          client.SetReady(false);
-        }
-      }
-      ImGui::EndDisabled();
+      view.controllers.push_back(
+          {controller.label, selected,
+           selected || options.controllers.size() < local_limit});
     }
-
     const auto local_player =
         std::ranges::find_if(players, [&](const NetPlay::Player &player) {
           return client.IsLocalPlayer(player.pid);
         });
-    const bool local_ready =
-        local_player != players.end() && local_player->ready;
-    if (ImGui::Button(local_ready ? Tr("Not Ready") : Tr("Ready"), ImVec2(140, 38)))
-      client.SetReady(!local_ready);
+    view.local_ready = local_player != players.end() && local_player->ready;
+    view.can_start = server && server->CanStart();
+    view.status = ui.Status();
+    view.error = ui.Error();
 
-    if (server) {
-      ImGui::SameLine();
-      const bool can_start = server->CanStart();
-      ImGui::BeginDisabled(!can_start);
-      if (ImGui::Button(Tr("Start game"), ImVec2(140, 38)))
-        server->RequestStartGame();
-      ImGui::EndDisabled();
-      if (!can_start)
-        ImGui::TextDisabled(
-            "%s", Tr("Two controller slots and every machine ready are required"));
-    }
-
-    const std::string status = ui.Status();
-    const std::string error = ui.Error();
-    if (!status.empty())
-      ImGui::TextWrapped("%s", status.c_str());
-    if (!error.empty())
-      ImGui::TextColored(ImVec4(1.0f, 0.35f, 0.3f, 1.0f), "%s", error.c_str());
-    ImGui::End();
+    const LobbyActions actions = DrawLobby(view, lobby_state, window.Art(),
+                                           window.Bold(), window.Scale());
+    if (actions.toggled_controller >= 0 &&
+        static_cast<std::size_t>(actions.toggled_controller) < available.size())
+      ToggleController(available[actions.toggled_controller], runtime_config,
+                       frontend_config, options, client);
+    if (actions.toggle_ready)
+      client.SetReady(!view.local_ready);
+    if (actions.start && server)
+      server->RequestStartGame();
     window.Present();
 
     if (ui.ConnectionLost())
@@ -645,13 +728,28 @@ int RunNetplayLobby(RuntimeConfig runtime_config, ConfigResult frontend_config,
 
   SessionUI ui(game);
   const NetPlay::NetTraversalConfig direct{};
+  // Invite codes come from the invite server (Dolphin's traversal server):
+  // config.ini's invite_server, "host" or "host:port".
+  NetPlay::NetTraversalConfig invite{};
+  if (options.invite_code) {
+    std::string invite_host = options.invite_server;
+    u16 invite_port = INVITE_SERVER_PORT;
+    if (const auto split = SplitHostAndPort(options.invite_server)) {
+      invite_host = split->host;
+      invite_port = split->port;
+    }
+    invite = NetPlay::NetTraversalConfig{true, invite_host, invite_port,
+                                         INVITE_SERVER_ALT_PORT};
+    std::cerr << "netplay: invite server " << invite_host << ':' << invite_port
+              << '\n';
+  }
   std::unique_ptr<NetPlay::NetPlayServer> server;
   std::unique_ptr<NetPlay::NetPlayClient> client;
   if (options.role == NetplayRole::Host) {
     std::cerr << "netplay: opening host on UDP port " << options.port << '\n';
     ui.SetHosting(true);
-    server = std::make_unique<NetPlay::NetPlayServer>(options.port, false, &ui,
-                                                      direct);
+    server = std::make_unique<NetPlay::NetPlayServer>(
+        options.port, false, &ui, options.invite_code ? invite : direct);
     if (!server->is_connected) {
       server.reset();
       detail::SetExternalUICommon(false);
@@ -669,11 +767,21 @@ int RunNetplayLobby(RuntimeConfig runtime_config, ConfigResult frontend_config,
         "127.0.0.1", server->GetPort(), &ui, options.nickname, direct,
         static_cast<u8>(options.controllers.size()));
   } else {
-    std::cerr << "netplay: connecting to " << options.address << ':'
-              << options.port << '\n';
+    if (options.invite_code)
+      std::cerr << "netplay: joining with an invite code\n";
+    else
+      std::cerr << "netplay: connecting to " << options.address << ':'
+                << options.port << '\n';
+    // A code nobody answers to raises one of Dolphin's alerts, a message box
+    // in English on Windows. The launcher explains the failure instead.
+    if (options.invite_code)
+      Common::SetEnableAlert(false);
     client = std::make_unique<NetPlay::NetPlayClient>(
-        options.address, options.port, &ui, options.nickname, direct,
+        options.address, options.port, &ui, options.nickname,
+        options.invite_code ? invite : direct,
         static_cast<u8>(options.controllers.size()));
+    if (options.invite_code)
+      Common::SetEnableAlert(true);
   }
 
   if (!client->IsConnected()) {
@@ -700,7 +808,9 @@ int RunNetplayLobby(RuntimeConfig runtime_config, ConfigResult frontend_config,
     case NetPlay::ConnectionError::NameTooLong:
       return static_cast<int>(NetplayExitCode::NicknameRejected);
     case NetPlay::ConnectionError::NoError:
-      return static_cast<int>(NetplayExitCode::HostUnavailable);
+      return static_cast<int>(options.invite_code
+                                  ? NetplayExitCode::InviteCodeFailed
+                                  : NetplayExitCode::HostUnavailable);
     }
   }
   ui.SetClient(client.get());

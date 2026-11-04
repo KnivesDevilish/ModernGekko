@@ -42,6 +42,12 @@ int main() {
   netplay_config.netplay_address = "192.168.1.50";
   netplay_config.netplay_port = 34567;
   netplay_config.netplay_buffer = "auto";
+  // Invite codes by default, from Dolphin's public server.
+  if (netplay_config.netplay_connection != "code" ||
+      netplay_config.invite_server != "stun.dolphin-emu.org")
+    return 20;
+  netplay_config.netplay_connection = "ip";
+  netplay_config.invite_server = "203.0.113.5:6262";
   if (!moderngekko::frontend::SaveConfig(directory, netplay_config, &error))
     return 6;
   const auto netplay_loaded =
@@ -52,10 +58,20 @@ int main() {
       netplay_loaded.netplay_address != "192.168.1.50" ||
       netplay_loaded.netplay_port != 34567 ||
       netplay_loaded.netplay_buffer != "auto" ||
+      netplay_loaded.netplay_connection != "ip" ||
+      netplay_loaded.invite_server != "203.0.113.5:6262" ||
       netplay_loaded.graphics_backend != "OGL" ||
       !netplay_loaded.fullscreen) {
     return 7;
   }
+  auto invalid_invite = netplay_config;
+  invalid_invite.netplay_connection = "carrier pigeon";
+  if (moderngekko::frontend::SaveConfig(directory, invalid_invite, &error))
+    return 21;
+  invalid_invite = netplay_config;
+  invalid_invite.invite_server = "stun.example.org:99999";
+  if (moderngekko::frontend::SaveConfig(directory, invalid_invite, &error))
+    return 22;
 
   auto invalid_netplay = netplay_config;
   invalid_netplay.netplay_address = "not a host";

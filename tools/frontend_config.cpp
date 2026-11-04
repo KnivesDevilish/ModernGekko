@@ -36,6 +36,23 @@ bool ValidNetplayAddress(std::string_view value) {
   });
 }
 
+// "stun.dolphin-emu.org" or "203.0.113.5:6262".
+bool ValidInviteServer(std::string_view value) {
+  const std::size_t colon = value.find(':');
+  if (colon != std::string_view::npos) {
+    const std::string_view port_text = value.substr(colon + 1);
+    unsigned int port = 0;
+    const auto parsed = std::from_chars(
+        port_text.data(), port_text.data() + port_text.size(), port);
+    if (parsed.ec != std::errc{} ||
+        parsed.ptr != port_text.data() + port_text.size() || port == 0 ||
+        port > 65535)
+      return false;
+    value = value.substr(0, colon);
+  }
+  return ValidNetplayAddress(value);
+}
+
 std::string NormalizeGraphicsBackend(std::string value) {
   const std::string lower = Lower(Trim(std::move(value)));
   if (lower == "vulkan")
@@ -292,6 +309,15 @@ ConfigResult LoadConfig(const fs::path &user_directory,
                       "netplay buffer must be auto or a value from 1 to 20"};
       }
       config.netplay_buffer = value;
+    } else if (key == "connection") {
+      if (value != "code" && value != "ip")
+        return {.error = "netplay connection must be code or ip"};
+      config.netplay_connection = value;
+    } else if (key == "invite_server") {
+      if (!ValidInviteServer(raw_value))
+        return {.error = "invite_server must be a host name, optionally "
+                         "followed by :port"};
+      config.invite_server = raw_value;
     }
   }
   if (config.resolution.empty())
@@ -343,7 +369,10 @@ bool SaveConfig(const fs::path &user_directory, const ConfigResult &config,
       config.netplay_nickname.find_first_of("\r\n") != std::string::npos ||
       !ValidNetplayAddress(config.netplay_address) ||
       config.netplay_address.find_first_of("\r\n") != std::string::npos ||
-      config.netplay_port == 0) {
+      config.netplay_port == 0 ||
+      (config.netplay_connection != "code" &&
+       config.netplay_connection != "ip") ||
+      !ValidInviteServer(config.invite_server)) {
     if (error)
       *error = "invalid frontend settings";
     return false;
@@ -424,7 +453,11 @@ bool SaveConfig(const fs::path &user_directory, const ConfigResult &config,
        << "nickname=" << config.netplay_nickname << '\n'
        << "address=" << config.netplay_address << '\n'
        << "port=" << config.netplay_port << '\n'
-       << "buffer=" << config.netplay_buffer << '\n';
+       << "buffer=" << config.netplay_buffer << '\n'
+       << "# code (an invite code) or ip (the host's address)\n"
+       << "connection=" << config.netplay_connection << '\n'
+       << "# The server that hands out invite codes: host or host:port\n"
+       << "invite_server=" << config.invite_server << '\n';
   return true;
 }
 

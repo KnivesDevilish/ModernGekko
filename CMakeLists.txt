@@ -62,6 +62,26 @@ set(MODERNGEKKO_LAUNCHER_CONTROLLER_ART "" CACHE FILEPATH
     "Optional PNG of the SR-ZGS controller drawing for the Controls page tester")
 set(MODERNGEKKO_LAUNCHER_KEYBOARD_ART "" CACHE FILEPATH
     "Optional PNG of the SR-ZGS keyboard drawing for the Controls page tester")
+set(MODERNGEKKO_LOBBY_ART "" CACHE FILEPATH
+    "Optional portrait PNG shown on the left of the Netplay lobby")
+
+# Puts an optional image in Resources/ next to an executable, as <name>. It is
+# copied on every build of that executable, so a changed image is picked up,
+# and a missing one only warns (cmake/CopyOptionalResource.cmake).
+function(moderngekko_add_resource target source name)
+    if(NOT source)
+        return()
+    endif()
+    string(MAKE_C_IDENTIFIER "${target}_resource_${name}" _copy_target)
+    add_custom_target(${_copy_target}
+        COMMAND "${CMAKE_COMMAND}"
+                "-DSOURCE=${source}"
+                "-DDESTINATION=$<TARGET_FILE_DIR:${target}>/Resources/${name}"
+                -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/CopyOptionalResource.cmake"
+        COMMENT "Copying ${name} into Resources/"
+        VERBATIM)
+    add_dependencies(${target} ${_copy_target})
+endfunction()
 option(MODERNGEKKO_USER_DIRECTORY_IN_DOCUMENTS
        "Place the branded user directory in Documents" OFF)
 set(MODERNGEKKO_FRONTEND_SDK "" CACHE PATH
@@ -522,6 +542,9 @@ if(MODERNGEKKO_ENABLE_DOLPHIN_RUNTIME)
                     "${MODERNGEKKO_GAME_SETTINGS_OVERRIDE}"
                     "$<TARGET_FILE_DIR:moderngekko-run>/Sys/GameSettings/${_moderngekko_settings_name}")
     endif()
+    # The Netplay lobby (run by moderngekko-run) draws Resources/lobby-art.png
+    # next to itself on its left; without it the lobby is text only.
+    moderngekko_add_resource(moderngekko-run "${MODERNGEKKO_LOBBY_ART}" lobby-art.png)
 
     add_executable(moderngekko-launcher
         tools/moderngekko_launcher.cpp
@@ -603,35 +626,17 @@ if(MODERNGEKKO_ENABLE_DOLPHIN_RUNTIME)
     endif()
     # The launcher looks for Resources/launcher-banner.png next to itself and
     # shows it at the top of the Play page; without it the page is text only.
-    if(MODERNGEKKO_LAUNCHER_BANNER)
-        add_custom_command(TARGET moderngekko-launcher POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E make_directory
-                    "$<TARGET_FILE_DIR:moderngekko-launcher>/Resources"
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                    "${MODERNGEKKO_LAUNCHER_BANNER}"
-                    "$<TARGET_FILE_DIR:moderngekko-launcher>/Resources/launcher-banner.png")
-    endif()
+    moderngekko_add_resource(moderngekko-launcher "${MODERNGEKKO_LAUNCHER_BANNER}"
+                             launcher-banner.png)
     # The Controls page tester draws Resources/launcher-controller.png and lights
     # up its buttons; the button positions in the launcher match that drawing.
     # Without it the tester shows the button list alone.
-    if(MODERNGEKKO_LAUNCHER_CONTROLLER_ART)
-        add_custom_command(TARGET moderngekko-launcher POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E make_directory
-                    "$<TARGET_FILE_DIR:moderngekko-launcher>/Resources"
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                    "${MODERNGEKKO_LAUNCHER_CONTROLLER_ART}"
-                    "$<TARGET_FILE_DIR:moderngekko-launcher>/Resources/launcher-controller.png")
-    endif()
+    moderngekko_add_resource(moderngekko-launcher "${MODERNGEKKO_LAUNCHER_CONTROLLER_ART}"
+                             launcher-controller.png)
     # Same for the keyboard: Resources/launcher-keyboard.png, with the key
     # positions in the launcher matching that drawing.
-    if(MODERNGEKKO_LAUNCHER_KEYBOARD_ART)
-        add_custom_command(TARGET moderngekko-launcher POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E make_directory
-                    "$<TARGET_FILE_DIR:moderngekko-launcher>/Resources"
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                    "${MODERNGEKKO_LAUNCHER_KEYBOARD_ART}"
-                    "$<TARGET_FILE_DIR:moderngekko-launcher>/Resources/launcher-keyboard.png")
-    endif()
+    moderngekko_add_resource(moderngekko-launcher "${MODERNGEKKO_LAUNCHER_KEYBOARD_ART}"
+                             launcher-keyboard.png)
     # The launcher embeds a few Noto Sans CJK glyphs (tools/launcher_cjk_font.inc);
     # the font's license travels with every build of it.
     add_custom_command(TARGET moderngekko-launcher POST_BUILD
@@ -760,6 +765,16 @@ if(BUILD_TESTING)
     endif()
     add_test(NAME moderngekko.launcher_text
              COMMAND moderngekko_launcher_text_test)
+
+    # Header-only: how the Netplay lobby labels and hides addresses, and how
+    # Join Netplay splits a pasted "ip:port".
+    add_executable(moderngekko_netplay_address_test
+        tests/netplay_address_test.cpp)
+    target_include_directories(moderngekko_netplay_address_test PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/tools")
+    target_compile_features(moderngekko_netplay_address_test PRIVATE cxx_std_23)
+    add_test(NAME moderngekko.netplay_address
+             COMMAND moderngekko_netplay_address_test)
 
     add_executable(moderngekko_pgo_support_test
         tests/pgo_support_test.cpp

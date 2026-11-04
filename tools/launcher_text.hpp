@@ -56,10 +56,29 @@ inline constexpr Translation SPANISH_TEXTS[] = {
     {"Join Netplay", "Unirse a Netplay"},
     {"Host a session", "Crear una sesión"},
     {"Join a session", "Unirse a una sesión"},
-    {"Other players connect to this computer's address and UDP port.",
-     "Los demás jugadores se conectan a la dirección y al puerto UDP de este equipo."},
-    {"Enter the address and UDP port of the player who hosts.",
-     "Escribe la dirección y el puerto UDP del jugador anfitrión."},
+    {"INVITE CODE", "CÓDIGO DE INVITACIÓN"},
+    {"DIRECT IP", "IP DIRECTA"},
+    {"When the room opens you get a code. Your friends type it in Join Netplay, and nobody sees "
+     "your IP.",
+     "Al crear la sala recibirás un código. Tus amigos lo escriben en Unirse a Netplay y nadie ve "
+     "tu IP."},
+    {"Type the code the host gave you.", "Escribe el código que te pasó el anfitrión."},
+    {"Other players connect to this computer's address and UDP port. For the same network or "
+     "Tailscale.",
+     "Los demás jugadores se conectan a la dirección y al puerto UDP de este equipo. Para la misma "
+     "red o Tailscale."},
+    {"Enter the address and UDP port of the player who hosts. For the same network or Tailscale.",
+     "Escribe la dirección y el puerto UDP del jugador anfitrión. Para la misma red o Tailscale."},
+    {"Careful: an IP address identifies your connection. Don't show it on stream or share it in "
+     "public.",
+     "Cuidado: una IP identifica tu conexión. No la muestres en directo ni la compartas en "
+     "público."},
+    {"Invite code", "Código de invitación"},
+    {"Invite codes", "Códigos de invitación"},
+    {"Dolphin's public server (stun.dolphin-emu.org)",
+     "Servidor público de Dolphin (stun.dolphin-emu.org)"},
+    {"An invite code has 8 characters (numbers and letters a-f).",
+     "El código tiene 8 caracteres (números y letras a-f)."},
     {"Every player needs the same SR-ZGS release and game files. Everyone plays with the host's "
      "CPU core.",
      "Todos necesitan la misma versión de SR-ZGS y los mismos archivos del juego. Todos juegan "
@@ -294,6 +313,12 @@ inline constexpr Translation SPANISH_TEXTS[] = {
     {"The host has already started the game.", "El anfitrión ya empezó la partida."},
     {"The netplay server is full.", "El servidor de Netplay está lleno."},
     {"The nickname was rejected by the host.", "El anfitrión rechazó el apodo."},
+    {"No room answered to that invite code. Check that it is typed right and that the host's "
+     "room is still open. If it keeps failing, the invite server may be down or your connection "
+     "may not allow it: try Direct IP with Tailscale.",
+     "Ninguna sala respondió a ese código de invitación. Revisa que esté bien escrito y que la "
+     "sala del anfitrión siga abierta. Si sigue fallando, puede que el servidor de invitaciones "
+     "esté caído o que tu conexión no lo permita: prueba IP directa con Tailscale."},
     {"Could not reach the netplay host. Check the host name, UDP port, and firewall.",
      "No se pudo contactar con el anfitrión. Revisa la dirección, el puerto UDP y el firewall."},
     {"Could not create the netplay session. Check the UDP port and firewall settings.",
@@ -302,36 +327,61 @@ inline constexpr Translation SPANISH_TEXTS[] = {
     {"\n\nDetails were written to:\n%s", "\n\nLos detalles se guardaron en:\n%s"},
     {"Session failed", "La sesión falló"},
 
-    // Netplay lobby
-    {"Hosting direct-IP netplay", "Eres el anfitrión del Netplay por IP directa"},
-    {"Connected to direct-IP host", "Conectado a un anfitrión por IP directa"},
-    {"UDP port: %u", "Puerto UDP: %u"},
-    {"Host: %s:%u", "Anfitrión: %s:%u"},
-    {"Input buffer: %u frames%s", "Búfer de entrada: %u frames%s"},
+    // Netplay lobby, top to bottom
+    {"HOST", "ANFITRIÓN"},
     {"CPU core for every player: %s", "Núcleo de CPU para todos: %s"},
     {"CPU core: the host's choice", "Núcleo de CPU: el que elija el anfitrión"},
-    {"Player", "Jugador"},
-    {"Controllers", "Mandos"},
-    {"Game", "Juego"},
-    {"Ready", "Listo"},
-    {"Not ready", "No listo"},
-    {"Not Ready", "No listo"},
-    {"Port %d", "Puerto %d"},
-    {"Match", "Coincide"},
-    {"Mismatch", "No coincide"},
-    {"Controllers on this computer (the first one also answers to the keyboard)",
-     "Mandos en este equipo (el primero también responde al teclado)"},
+    {"Input buffer: %u frames%s", "Búfer de entrada: %u frames%s"},
+    {"INVITE YOUR FRIENDS", "INVITA A TUS AMIGOS"},
+    {"Show", "Mostrar"},
+    {"Hide", "Ocultar"},
+    {"At home", "En casa"},
+    {"Internet (Tailscale)", "Internet (Tailscale)"},
+    {"Internet (public)", "Internet (pública)"},
+    {"Copy", "Copiar"},
+    {"Copied", "Copiado"},
+    {"Your friends type this address in Join Netplay.",
+     "Tus amigos escriben esta dirección en Unirse a Netplay."},
+    {"Your friends type it in Join Netplay, under Invite code. Anyone who sees it can join: keep "
+     "it off your stream.",
+     "Tus amigos lo escriben en Unirse a Netplay, en Código de invitación. Quien lo vea puede "
+     "entrar: no lo muestres en directo."},
+    {"Asking the invite server for a code...", "Pidiendo un código al servidor de invitaciones..."},
+    {"The invite server did not answer. Check the internet connection, or close the room and "
+     "host with Direct IP.",
+     "El servidor de invitaciones no respondió. Revisa la conexión a internet, o cierra la sala "
+     "y créala con IP directa."},
+    {"No network found. Connect this computer to your Wi-Fi or to Tailscale.",
+     "No se encontró ninguna red. Conecta este equipo a tu Wi-Fi o a Tailscale."},
+    {"Waiting for the host to start the match.",
+     "Esperando a que el anfitrión empiece la partida."},
+    {"PLAYERS  \xC2\xB7  %d / 4", "JUGADORES  \xC2\xB7  %d / 4"},
+    {"Free", "Libre"},
+    {"(you)", "(tú)"},
+    {"(host)", "(anfitrión)"},
+    {"READY", "LISTO"},
+    {"NOT READY", "NO LISTO"},
+    {"OTHER GAME", "OTRO JUEGO"},
+    {"THIS COMPUTER", "ESTE EQUIPO"},
     {"Local sideways Wii Remotes", "Wii Remotes horizontales en este equipo"},
-    {"Start game", "Empezar partida"},
+    {"No controller connected: you play with the keyboard.",
+     "No hay mandos conectados: juegas con el teclado."},
+    {"No controller connected.", "No hay mandos conectados."},
+    {"(the first one also answers to the keyboard)", "(el primero también responde al teclado)"},
+    {"I'M READY", "ESTOY LISTO"},
+    {"READY  \xC2\xB7  CANCEL", "LISTO  \xC2\xB7  CANCELAR"},
+    {"START MATCH", "EMPEZAR PARTIDA"},
     {"Two controller slots and every machine ready are required",
      "Hacen falta dos puestos de mando y que todos estén listos"},
+    {"Press I'M READY when your controller is set.",
+     "Pulsa ESTOY LISTO cuando tengas tu mando preparado."},
+    // Netplay lobby events
     {"Game: %s", "Juego: %s"},
     {"%s joined", "%s se unió"},
     {"%s left", "%s salió"},
     {"Desync at frame %u", "Desincronización en el frame %u"},
     {"Desync at frame %u reported for %s", "Desincronización en el frame %u, detectada en %s"},
     {"Connection to the netplay host was lost", "Se perdió la conexión con el anfitrión"},
-    {"Direct connection failed", "Falló la conexión directa"},
     {"Game start was aborted", "Se canceló el inicio de la partida"},
 };
 // clang-format on

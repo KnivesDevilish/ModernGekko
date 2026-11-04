@@ -3,6 +3,7 @@
 #include "dol_patch.hpp"
 #include "moderngekko/game.hpp"
 #include "moderngekko/runtime.hpp"
+#include "netplay_address.hpp"
 #include "netplay_session.hpp"
 
 #include "Common/StringUtil.h"
@@ -50,8 +51,9 @@ void Usage() {
                "       [--mods <directory>] [--no-mods]\n"
                "       [--wayland] [-X11] [--headless] [--allow-interpreter]\n"
                "       [--cache-affinity | --no-cache-affinity]\n"
-               "       [--netplay-host | --netplay-join <host>] "
-               "[--netplay-port <port>]\n"
+               "       [--netplay-host [--invite-code] | --netplay-join <host> |\n"
+               "        --netplay-join-code <code>] [--netplay-port <port>]\n"
+               "       [--invite-server <host[:port]>]\n"
                "       [--nickname <name>] [--buffer <auto|1-20>] "
                "[--controller <device>]...\n"
                "       With no --game, boots the path in "
@@ -150,6 +152,8 @@ int RunMain(int argc, char **argv) {
   std::string netplay_nickname;
   std::string netplay_buffer;
   std::vector<std::string> netplay_controllers;
+  bool netplay_invite_code = false;
+  std::string netplay_invite_server;
   for (int i = 1; i < argc; ++i) {
     const std::string arg = argv[i];
     const auto value = [&](const char *option) -> const char * {
@@ -209,6 +213,20 @@ int RunMain(int argc, char **argv) {
     else if (arg == "--netplay-join") {
       netplay_role = moderngekko::frontend::NetplayRole::Join;
       netplay_address = value("--netplay-join");
+    } else if (arg == "--invite-code")
+      netplay_invite_code = true;
+    else if (arg == "--netplay-join-code") {
+      netplay_role = moderngekko::frontend::NetplayRole::Join;
+      netplay_invite_code = true;
+      const auto code =
+          moderngekko::frontend::NormalizeInviteCode(value("--netplay-join-code"));
+      if (!code) {
+        std::cerr << "--netplay-join-code takes the host's 8-character code\n";
+        return 2;
+      }
+      netplay_address = *code;
+    } else if (arg == "--invite-server") {
+      netplay_invite_server = value("--invite-server");
     } else if (arg == "--netplay-port") {
       const std::string port_value = value("--netplay-port");
       unsigned int port = 0;
@@ -404,6 +422,12 @@ int RunMain(int argc, char **argv) {
     options.role = *netplay_role;
     options.address = netplay_address.empty() ? frontend_config.netplay_address
                                               : netplay_address;
+    // With an invite code the host is found through the invite server; a
+    // joining player's address is then the host's code.
+    options.invite_code = netplay_invite_code;
+    options.invite_server = netplay_invite_server.empty()
+                                ? frontend_config.invite_server
+                                : netplay_invite_server;
     options.port = netplay_port.value_or(frontend_config.netplay_port);
     options.nickname = netplay_nickname.empty()
                            ? frontend_config.netplay_nickname
@@ -428,7 +452,10 @@ int RunMain(int argc, char **argv) {
       std::cerr << "netplay requires at least one selected controller\n";
       return 2;
     }
-    frontend_config.netplay_address = options.address;
+    if (!options.invite_code)
+      frontend_config.netplay_address = options.address;
+    frontend_config.netplay_connection = options.invite_code ? "code" : "ip";
+    frontend_config.invite_server = options.invite_server;
     frontend_config.netplay_port = options.port;
     frontend_config.netplay_nickname = options.nickname;
     frontend_config.netplay_buffer = options.buffer;

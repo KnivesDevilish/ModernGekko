@@ -23,6 +23,9 @@ enum class NetplayExitCode {
   GameRunning = 14,
   ServerFull = 15,
   NicknameRejected = 16,
+  // Joining with an invite code: no room answered to the code (mistyped,
+  // closed, or the host unreachable), or the invite server did not answer.
+  InviteCodeFailed = 17,
 };
 
 struct NetplayOptions {
@@ -32,6 +35,10 @@ struct NetplayOptions {
   std::string nickname = "Player";
   std::string buffer = "auto";
   std::vector<std::string> controllers;
+  // Players meet through the invite server: the host gets a code from it, and
+  // a joining player's address is that code.
+  bool invite_code = false;
+  std::string invite_server = "stun.dolphin-emu.org";  // "host" or "host:port"
 };
 
 int RunNetplayLobby(RuntimeConfig runtime_config, ConfigResult frontend_config,

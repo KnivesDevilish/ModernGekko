@@ -48,6 +48,12 @@ struct ConfigResult {
   std::string netplay_address = "127.0.0.1";
   std::uint16_t netplay_port = 2626;
   std::string netplay_buffer = "auto";
+  // How friends find the host: "code" (an invite code handed out by the
+  // invite server) or "ip" (the host's address and UDP port).
+  std::string netplay_connection = "code";
+  // The invite server, "host" or "host:port": Dolphin's public traversal
+  // server unless config.ini names another one.
+  std::string invite_server = "stun.dolphin-emu.org";
   std::string error;
 
   explicit operator bool() const { return error.empty(); }
