@@ -1,5 +1,6 @@
 #include "frontend_config.hpp"
 #include "dol_patch.hpp"
+#include "launcher_cjk_font.inc"
 #include "launcher_savestates.hpp"
 #include "launcher_summary.hpp"
 #include "moderngekko/game.hpp"
@@ -28,6 +29,7 @@
 #include <iostream>
 #include <mutex>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -666,6 +668,16 @@ LauncherFonts LoadInterfaceFont(const fs::path& release_directory, float size)
     return !path.empty() && fs::is_regular_file(path, ec) && IsTrueTypeFont(path);
   };
   ImGuiIO& io = ImGui::GetIO();
+  // The interface fonts have no Japanese characters (the Credits page uses a
+  // few), so a small embedded Noto Sans CJK JP is merged into each face.
+  const auto merge_japanese = [&](const unsigned char* data, std::size_t bytes)
+  {
+    ImFontConfig config;
+    config.MergeMode = true;
+    config.FontDataOwnedByAtlas = false;
+    io.Fonts->AddFontFromMemoryTTF(const_cast<unsigned char*>(data), static_cast<int>(bytes),
+                                   size, &config);
+  };
   for (const Candidate& candidate : candidates)
   {
     if (!usable(candidate.regular))
@@ -674,9 +686,12 @@ LauncherFonts LoadInterfaceFont(const fs::path& release_directory, float size)
     fonts.regular = io.Fonts->AddFontFromFileTTF(candidate.regular.string().c_str(), size);
     if (!fonts.regular)
       continue;
+    merge_japanese(LAUNCHER_CJK_REGULAR, sizeof(LAUNCHER_CJK_REGULAR));
     ImGui::GetStyle().FontSizeBase = size;
     if (usable(candidate.bold))
       fonts.bold = io.Fonts->AddFontFromFileTTF(candidate.bold.string().c_str(), size);
+    if (fonts.bold)
+      merge_japanese(LAUNCHER_CJK_BOLD, sizeof(LAUNCHER_CJK_BOLD));
     std::cout << "launcher font: " << candidate.regular.string() << '\n';
     if (fonts.bold)
       std::cout << "launcher bold font: " << candidate.bold.string() << '\n';
@@ -686,6 +701,7 @@ LauncherFonts LoadInterfaceFont(const fs::path& release_directory, float size)
   }
   LauncherFonts fonts;
   fonts.regular = io.Fonts->AddFontDefault();
+  merge_japanese(LAUNCHER_CJK_REGULAR, sizeof(LAUNCHER_CJK_REGULAR));
   fonts.bold = fonts.regular;
   std::cout << "launcher font: ImGui default\n";
   return fonts;
@@ -697,6 +713,7 @@ enum class LauncherPage
   Settings,
   Controls,
   GameFiles,
+  Credits,
 };
 
 // One entry of the sidebar. The current page is drawn in bold with a lime bar
@@ -1043,6 +1060,108 @@ int DrawSummaryRow(const std::array<SummaryTile, 4>& tiles, ImFont* bold, float 
       clicked = static_cast<int>(i);
   }
   return clicked;
+}
+
+// A web address drawn as a link. A click opens it in the browser and also
+// copies it, since a container such as Distrobox may have no browser to open.
+void DrawWebLink(const char* label, const char* url)
+{
+  static double copied_at = -10.0;
+  static const char* copied_url = nullptr;
+  ImGui::PushStyleColor(ImGuiCol_Text, LAUNCHER_ACCENT);
+  ImGui::TextUnformatted(label);
+  ImGui::PopStyleColor();
+  if (!ImGui::IsItemHovered())
+    return;
+  const ImVec2 min = ImGui::GetItemRectMin();
+  const ImVec2 max = ImGui::GetItemRectMax();
+  ImGui::GetWindowDrawList()->AddLine(ImVec2(min.x, max.y), max,
+                                      ImGui::GetColorU32(LAUNCHER_ACCENT));
+  ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
+  if (ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+  {
+    SDL_OpenURL(url);
+    ImGui::SetClipboardText(url);
+    copied_at = ImGui::GetTime();
+    copied_url = url;
+  }
+  const bool just_copied = copied_url == url && ImGui::GetTime() - copied_at < 2.5;
+  ImGui::SetTooltip("%s", just_copied ? "Opened in your browser and copied to the clipboard"
+                                      : url);
+}
+
+// One "name: detail" list of the Credits page, the names in bold.
+void DrawCreditsRows(const char* id, std::span<const std::array<const char*, 2>> rows,
+                     ImFont* bold)
+{
+  if (!ImGui::BeginTable(id, 2, ImGuiTableFlags_None))
+    return;
+  ImGui::TableSetupColumn("name", ImGuiTableColumnFlags_WidthFixed);
+  ImGui::TableSetupColumn("detail", ImGuiTableColumnFlags_WidthStretch);
+  for (const auto& [name, detail] : rows)
+  {
+    ImGui::TableNextRow();
+    ImGui::TableNextColumn();
+    ImGui::PushFont(bold, 0.0f);
+    ImGui::TextUnformatted(name);
+    ImGui::PopFont();
+    ImGui::TableNextColumn();
+    ImGui::PushTextWrapPos(0.0f);
+    ImGui::TextDisabled("%s", detail);
+    ImGui::PopTextWrapPos();
+  }
+  ImGui::EndTable();
+}
+
+// Who made SR-ZGS and what it is built on, credited as each project credits
+// itself (the READMEs of SR-ZGS and ModernGekko).
+void DrawCreditsPage(ImFont* bold)
+{
+  DrawPageHeader("Credits",
+                 "SR-ZGS is an independent fan project. It is not affiliated with or endorsed "
+                 "by SEGA.",
+                 bold);
+  BeginSection("##credits_author", "CREATED BY");
+  // Naizu Akumateki, written in Japanese.
+  ImGui::PushFont(bold, ImGui::GetStyle().FontSizeBase * 1.35f);
+  ImGui::TextUnformatted("\xE5\xA5\x88\xE4\xBE\x9D\xE8\x8C\xB2\xE3\x83\xBB\xE6\x82\xAA\xE9\xAD\x94"
+                         "\xE7\x9A\x84");
+  ImGui::PopFont();
+  ImGui::TextDisabled("JP: Naizu Akumateki \xC2\xB7 EN: KnivesDevilish");
+  DrawWebLink("github.com/KnivesDevilish/SR-ZGS", "https://github.com/KnivesDevilish/SR-ZGS");
+  ImGui::Spacing();
+  ImGui::PushTextWrapPos(0.0f);
+  ImGui::TextDisabled("With the SR-ZGS contributors and testers: research, development and "
+                      "testing.");
+  ImGui::PopTextWrapPos();
+  EndSection();
+
+  static constexpr std::array<std::array<const char*, 2>, 5> BUILT_ON = {{
+      {"DolRecomp", "Static recompilation framework"},
+      {"ModernGekko", "Runtime for GameCube/Wii recomps, by Hyperway"},
+      {"RecompCore", "SpecialK / aharonahdoot"},
+      {"Recomp template", "Literally God / MrPoloGit, who also added macOS support"},
+      {"Dolphin", "The Dolphin Team and its contributors"},
+  }};
+  BeginSection("##credits_built_on", "BUILT ON");
+  DrawCreditsRows("##credits_built_on_rows", BUILT_ON, bold);
+  EndSection();
+
+  static constexpr std::array<std::array<const char*, 2>, 5> LICENSES = {{
+      {"SR-ZGS, ModernGekko", "GNU GPL v3"},
+      {"Dolphin", "GNU GPL v2 or later"},
+      {"SDL 3", "zlib License"},
+      {"Dear ImGui", "MIT License"},
+      {"Noto Sans CJK", "SIL Open Font License 1.1"},
+  }};
+  BeginSection("##credits_licenses", "LICENSES");
+  DrawCreditsRows("##credits_license_rows", LICENSES, bold);
+  EndSection();
+
+  ImGui::PushTextWrapPos(0.0f);
+  ImGui::TextDisabled("Sonic Riders: Zero Gravity and its characters are trademarks of SEGA. "
+                      "Play with your own legally obtained copy of the game.");
+  ImGui::PopTextWrapPos();
 }
 
 std::string_view TrimView(std::string_view text)
@@ -2582,6 +2701,8 @@ int main(int argc, char** argv)
     if (DrawNavigationItem("Game Files", current_page == LauncherPage::GameFiles, fonts.bold,
                            scale))
       current_page = LauncherPage::GameFiles;
+    if (DrawNavigationItem("Credits", current_page == LauncherPage::Credits, fonts.bold, scale))
+      current_page = LauncherPage::Credits;
     ImGui::EndChild();
     ImGui::SameLine();
     ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
@@ -3156,6 +3277,8 @@ int main(int argc, char** argv)
     }
     EndSection();
     }
+      if (current_page == LauncherPage::Credits)
+        DrawCreditsPage(fonts.bold);
     }
     ImGui::EndChild();
     {

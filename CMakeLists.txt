@@ -623,6 +623,14 @@ if(MODERNGEKKO_ENABLE_DOLPHIN_RUNTIME)
                     "${MODERNGEKKO_LAUNCHER_KEYBOARD_ART}"
                     "$<TARGET_FILE_DIR:moderngekko-launcher>/Resources/launcher-keyboard.png")
     endif()
+    # The launcher embeds a few Noto Sans CJK glyphs (tools/launcher_cjk_font.inc);
+    # the font's license travels with every build of it.
+    add_custom_command(TARGET moderngekko-launcher POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E make_directory
+                "$<TARGET_FILE_DIR:moderngekko-launcher>/Resources/licenses"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${CMAKE_CURRENT_SOURCE_DIR}/tools/fonts/NotoSansCJK-OFL.txt"
+                "$<TARGET_FILE_DIR:moderngekko-launcher>/Resources/licenses/NotoSansCJK-OFL.txt")
     if(MODERNGEKKO_FRONTEND_SDK AND UNIX AND NOT APPLE AND
        MODERNGEKKO_PORTABLE_DEFAULT_GAME)
         set_property(TARGET moderngekko-launcher PROPERTY
