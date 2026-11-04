@@ -55,9 +55,11 @@ namespace
 
 #ifdef MODERNGEKKO_GAMECUBE_CONTROLLERS
 constexpr std::string_view CONTROLLER_PROFILE_NAME = "GCPadNew.ini";
+constexpr std::string_view CONTROLLER_PROFILE_SECTION = "[GCPad1]";
 constexpr std::string_view GENERATED_PROFILE_LABEL = "GameCube profile";
 #else
 constexpr std::string_view CONTROLLER_PROFILE_NAME = "WiimoteNew.ini";
+constexpr std::string_view CONTROLLER_PROFILE_SECTION = "[Wiimote1]";
 constexpr std::string_view GENERATED_PROFILE_LABEL = "sideways profile";
 #endif
 
@@ -869,12 +871,6 @@ bool DrawLinkButton(const char* label)
   return clicked;
 }
 
-#ifndef MODERNGEKKO_GAMECUBE_CONTROLLERS
-// ---- Controller tester (Controls page) -------------------------------------
-// Reads [Wiimote1] from WiimoteNew.ini and lights up the Wii Remote buttons
-// that the pad's current input presses. It only reads: neither the profile
-// nor the pad settings are changed here.
-
 std::string_view TrimView(std::string_view text)
 {
   const std::size_t first = text.find_first_not_of(" \t\r\n");
@@ -883,6 +879,112 @@ std::string_view TrimView(std::string_view text)
   const std::size_t last = text.find_last_not_of(" \t\r\n");
   return text.substr(first, last - first + 1);
 }
+
+// Inside a container (Distrobox, Toolbx, Docker) udev's hotplug events don't
+// reach SDL, so a controller plugged in after start goes unnoticed. SDL then
+// has to watch /dev/input itself; it does so on its own in Flatpak and Snap,
+// but it doesn't recognise these containers.
+bool RunningInContainer()
+{
+#if defined(__linux__)
+  std::error_code ec;
+  return fs::exists("/run/.containerenv", ec) || fs::exists("/.dockerenv", ec) ||
+         std::getenv("CONTAINER_ID") != nullptr;
+#else
+  return false;
+#endif
+}
+
+// Points the first slot of an existing controller profile at another pad and
+// keeps every binding. The same pad can show up under another name depending
+// on how it's connected (one may be a "PS3 Controller" over USB and an "Xbox
+// One S Controller" over Bluetooth); SDL gives both the same button layout,
+// so the mapping still applies. The previous file is kept as <profile>.bak.
+bool RetargetControllerProfile(const fs::path& profile, std::string_view device,
+                               std::string* error)
+{
+  if (device.empty() || device.find_first_of("\r\n") != std::string_view::npos)
+  {
+    *error = "invalid controller device";
+    return false;
+  }
+  std::vector<std::string> lines;
+  {
+    std::ifstream input(profile);
+    if (!input)
+    {
+      *error = "can't read " + profile.string();
+      return false;
+    }
+    for (std::string line; std::getline(input, line);)
+      lines.push_back(std::move(line));
+  }
+  const std::string device_line = "Device = " + std::string(device);
+  std::optional<std::size_t> section_line;
+  bool replaced = false;
+  for (std::size_t i = 0; i < lines.size() && !replaced; ++i)
+  {
+    const std::string_view trimmed = TrimView(lines[i]);
+    if (trimmed.starts_with('['))
+    {
+      if (section_line)
+        break;  // the slot ended without a Device line
+      if (trimmed == CONTROLLER_PROFILE_SECTION)
+        section_line = i;
+      continue;
+    }
+    const std::size_t separator = trimmed.find('=');
+    if (section_line && separator != std::string_view::npos &&
+        TrimView(trimmed.substr(0, separator)) == "Device")
+    {
+      lines[i] = device_line;
+      replaced = true;
+    }
+  }
+  if (!section_line)
+  {
+    *error = profile.filename().string() + " has no " + std::string(CONTROLLER_PROFILE_SECTION) +
+             " section";
+    return false;
+  }
+  if (!replaced)
+    lines.insert(lines.begin() + static_cast<std::ptrdiff_t>(*section_line + 1), device_line);
+
+  std::error_code ec;
+  fs::path backup = profile;
+  backup += ".bak";
+  fs::copy_file(profile, backup, fs::copy_options::overwrite_existing, ec);
+  if (ec)
+  {
+    *error = "can't back up " + profile.string() + ": " + ec.message();
+    return false;
+  }
+  fs::path temporary = profile;
+  temporary += ".tmp";
+  {
+    std::ofstream output(temporary, std::ios::trunc);
+    for (const std::string& line : lines)
+      output << line << '\n';
+    if (!output)
+    {
+      *error = "can't write " + temporary.string();
+      return false;
+    }
+  }
+  fs::rename(temporary, profile, ec);
+  if (ec)
+  {
+    *error = "can't replace " + profile.string() + ": " + ec.message();
+    return false;
+  }
+  return true;
+}
+
+#ifndef MODERNGEKKO_GAMECUBE_CONTROLLERS
+// ---- Controller tester (Controls page) -------------------------------------
+// Reads [Wiimote1] from WiimoteNew.ini and lights up the Wii Remote buttons
+// that the pad's current input presses. It only reads: neither the profile
+// nor the pad settings are changed here.
 
 // Names that Dolphin's SDL backend gives to SDL3 gamepad buttons, in
 // SDL_GamepadButton order (InputCommon/ControllerInterface/SDL/SDLGamepad.h).
@@ -1432,6 +1534,10 @@ int main(int argc, char** argv)
   SDL_SetHint(SDL_HINT_VIDEO_DRIVER, use_wayland ? "wayland" : "x11");
 #endif
   SDL_setenv_unsafe("SDL_GAMECONTROLLER_ALLOW_STEAM_VIRTUAL_GAMEPAD", "1", 0);
+  // The game process inherits this too, so it also notices a reconnected pad.
+  // A value already set in the environment wins (0 = don't overwrite).
+  if (RunningInContainer())
+    SDL_setenv_unsafe("SDL_JOYSTICK_DISABLE_UDEV", "1", 0);
   if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD))
     return 1;
 
@@ -1552,6 +1658,10 @@ int main(int argc, char** argv)
       configured_controllers.empty() ? config.controller : configured_controllers.front();
   int controller_index = FindController(controllers, selected_controller);
   std::string controller_status;
+  const fs::path controller_profile = user_directory / "Config" / CONTROLLER_PROFILE_NAME;
+#ifndef MODERNGEKKO_GAMECUBE_CONTROLLERS
+  ControllerTester controller_tester;
+#endif
   const auto select_controller = [&](int index)
   {
     std::string message;
@@ -1578,6 +1688,37 @@ int main(int argc, char** argv)
     config.show_fps_in_title = show_fps_in_title;
     controller_profile_exists = true;
     controller_status = std::move(message);
+#ifndef MODERNGEKKO_GAMECUBE_CONTROLLERS
+    controller_tester.loaded = false;  // read the new profile on the next frame
+#endif
+    return true;
+  };
+  // Like select_controller, but keeps the profile's button mapping and only
+  // changes which pad it reads (see RetargetControllerProfile).
+  const auto retarget_controller = [&](int index)
+  {
+    std::string error;
+    if (!RetargetControllerProfile(controller_profile, controllers[index].device, &error) ||
+        !moderngekko::frontend::SaveConfig(user_directory, resolutions[resolution_index].text,
+                                           show_fps_in_title, controllers[index].device, &error))
+    {
+      std::lock_guard lock(dialog.mutex);
+      dialog.error = std::move(error);
+      return false;
+    }
+    selected_controller = controllers[index].device;
+    configured_controllers = {selected_controller};
+    config.controller = selected_controller;
+    config.controllers = configured_controllers;
+    config.resolution = resolutions[resolution_index].text;
+    config.show_fps_in_title = show_fps_in_title;
+    controller_index = index;
+    controller_status = std::string(CONTROLLER_PROFILE_NAME) + " now uses " +
+                        controllers[index].label + " with the same buttons";
+    std::cout << "controller: " << controller_status << '\n';
+#ifndef MODERNGEKKO_GAMECUBE_CONTROLLERS
+    controller_tester.loaded = false;
+#endif
     return true;
   };
   const auto ensure_controller = [&]
@@ -1593,6 +1734,10 @@ int main(int argc, char** argv)
                        " has no configured controller device";
         return false;
       }
+      // The profile's pad isn't connected but exactly one other pad is: most
+      // likely the same pad under another name (USB / Bluetooth).
+      if (FindController(controllers, configured_controllers.front()) < 0 && controllers.size() == 1)
+        return retarget_controller(0);
       selected_controller = configured_controllers.front();
       controller_index = FindController(controllers, selected_controller);
       controller_status = "Using existing " + std::string(CONTROLLER_PROFILE_NAME);
@@ -1622,16 +1767,16 @@ int main(int argc, char** argv)
       else
         controller_status = "No SDL gamepad detected";
     }
+    else if (controller_index < 0 && controllers.size() == 1)
+    {
+      retarget_controller(0);  // same rule as ensure_controller
+    }
     else
     {
       controller_status = "Using existing " + std::string(CONTROLLER_PROFILE_NAME);
     }
   };
   refresh_controllers();
-#ifndef MODERNGEKKO_GAMECUBE_CONTROLLERS
-  ControllerTester controller_tester;
-  const fs::path controller_profile = user_directory / "Config" / CONTROLLER_PROFILE_NAME;
-#endif
   ExtractionState extraction;
   std::jthread extraction_thread;
   enum class LaunchMode
@@ -2099,12 +2244,18 @@ int main(int argc, char** argv)
         const bool selected = controller_index == static_cast<int>(i);
         if (ImGui::Selectable(controllers[i].label.c_str(), selected))
         {
-          controller_index = static_cast<int>(i);
-          selected_controller = controllers[i].device;
-          controller_status =
-              controller_profile_exists
-                  ? "Existing " + std::string(CONTROLLER_PROFILE_NAME) + " unchanged"
-                  : "Ready to generate controller profile";
+          if (controller_profile_exists)
+          {
+            // Keep the profile's buttons and point them at the chosen pad.
+            if (!selected)
+              retarget_controller(static_cast<int>(i));
+          }
+          else
+          {
+            controller_index = static_cast<int>(i);
+            selected_controller = controllers[i].device;
+            controller_status = "Ready to generate controller profile";
+          }
         }
         if (selected)
           ImGui::SetItemDefaultFocus();
@@ -2134,12 +2285,7 @@ int main(int argc, char** argv)
     const std::string replace_profile =
         "Replace with generated " + std::string(GENERATED_PROFILE_LABEL);
     if (ImGui::Button(replace_profile.c_str()))
-    {
       select_controller(controller_index);
-#ifndef MODERNGEKKO_GAMECUBE_CONTROLLERS
-      controller_tester.loaded = false;  // read the new profile on the next frame
-#endif
-    }
     ImGui::EndDisabled();
     EndSection();
     }
