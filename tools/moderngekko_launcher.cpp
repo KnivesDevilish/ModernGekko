@@ -64,12 +64,28 @@ namespace
 #ifdef MODERNGEKKO_GAMECUBE_CONTROLLERS
 constexpr std::string_view CONTROLLER_PROFILE_NAME = "GCPadNew.ini";
 constexpr std::string_view CONTROLLER_PROFILE_SECTION = "[GCPad1]";
-constexpr std::string_view GENERATED_PROFILE_LABEL = "GameCube profile";
+constexpr const char* REPLACE_PROFILE_BUTTON =
+    MODERNGEKKO_UI_TEXT("Replace with generated GameCube profile");
+constexpr const char* CONTROLLER_MAPPED_STATUS = MODERNGEKKO_UI_TEXT("1 GameCube controller mapped");
 #else
 constexpr std::string_view CONTROLLER_PROFILE_NAME = "WiimoteNew.ini";
 constexpr std::string_view CONTROLLER_PROFILE_SECTION = "[Wiimote1]";
-constexpr std::string_view GENERATED_PROFILE_LABEL = "sideways profile";
+constexpr const char* REPLACE_PROFILE_BUTTON =
+    MODERNGEKKO_UI_TEXT("Replace with generated sideways profile");
+constexpr const char* CONTROLLER_MAPPED_STATUS = MODERNGEKKO_UI_TEXT("1 sideways Wii Remote mapped");
 #endif
+
+// A status line kept as its English text and values, so that it is drawn in
+// the language chosen at that moment (the Controls page and the footer).
+struct StatusText
+{
+  const char* format = "";
+  std::string first;
+  std::string second;
+
+  std::string Text() const { return Format(Tr(format), first.c_str(), second.c_str()); }
+  std::string English() const { return Format(format, first.c_str(), second.c_str()); }
+};
 
 struct ExtractionState
 {
@@ -100,19 +116,20 @@ std::string RequiredGameError(const moderngekko::GameMetadata& metadata)
 {
 #ifdef MODERNGEKKO_REQUIRED_DISC_ID
   if (metadata.disc_id != MODERNGEKKO_REQUIRED_DISC_ID)
-    return "expected disc ID " MODERNGEKKO_REQUIRED_DISC_ID ", found " + metadata.disc_id;
+    return Format(Tr("expected disc ID %s, found %s"), MODERNGEKKO_REQUIRED_DISC_ID,
+                  metadata.disc_id.c_str());
 #endif
 #ifdef MODERNGEKKO_REQUIRED_DOL_SHA256
   if (metadata.dol_sha256 != MODERNGEKKO_REQUIRED_DOL_SHA256)
-    return "main DOL does not match the pinned release";
+    return Tr("main DOL does not match the pinned release");
 #endif
 #ifdef MODERNGEKKO_REQUIRED_REL_SHA256
   if (metadata.rel_sha256 != MODERNGEKKO_REQUIRED_REL_SHA256)
-    return "_Main.rel does not match the pinned release";
+    return Tr("_Main.rel does not match the pinned release");
 #endif
 #ifdef MODERNGEKKO_REQUIRED_ASSETS_SHA256
   if (metadata.assets_sha256 != MODERNGEKKO_REQUIRED_ASSETS_SHA256)
-    return "game assets do not match the pinned release";
+    return Tr("game assets do not match the pinned release");
 #endif
   return {};
 }
@@ -342,7 +359,7 @@ std::optional<fs::path> PrepareDisc(const fs::path& image, const fs::path& user_
   }
   {
     std::lock_guard lock(state->mutex);
-    state->status = "Applying Tournament Edition 2.4.6.1";
+    state->status = Tr("Applying Tournament Edition 2.4.6.1");
   }
   const fs::path preparer =
       SiblingExecutable(release_directory, MODERNGEKKO_DISC_PREPARER_FILENAME);
@@ -354,7 +371,7 @@ std::optional<fs::path> PrepareDisc(const fs::path& image, const fs::path& user_
   SDL_Process* process = SDL_CreateProcess(arguments.data(), false);
   if (!process)
   {
-    *error = "can't start Tournament Edition patcher: " + std::string(SDL_GetError());
+    *error = Format(Tr("can't start Tournament Edition patcher: %s"), SDL_GetError());
     return std::nullopt;
   }
   int exit_code = 1;
@@ -362,12 +379,12 @@ std::optional<fs::path> PrepareDisc(const fs::path& image, const fs::path& user_
   SDL_DestroyProcess(process);
   if (!waited || exit_code != 0)
   {
-    *error = "Tournament Edition patching failed";
+    *error = Tr("Tournament Edition patching failed");
     return std::nullopt;
   }
   return output;
 #else
-  *error = "this disc is not the pinned patched release";
+  *error = Tr("this disc is not the pinned patched release");
   return std::nullopt;
 #endif
 }
@@ -385,7 +402,7 @@ bool ExtractDisc(const fs::path& image, const fs::path& user_directory,
 
   {
     std::lock_guard lock(state->mutex);
-    state->status = "Opening " + image.filename().string();
+    state->status = Format(Tr("Opening %s"), image.filename().string().c_str());
   }
   std::string preparation_error;
   const std::optional<fs::path> prepared =
@@ -394,20 +411,20 @@ bool ExtractDisc(const fs::path& image, const fs::path& user_directory,
     return fail(std::move(preparation_error));
   std::unique_ptr<DiscIO::Volume> volume = DiscIO::CreateVolume(prepared->string());
   if (!volume)
-    return fail("Dolphin rejected the prepared disc image");
+    return fail(Tr("Dolphin rejected the prepared disc image"));
 
   const DiscIO::Partition partition = volume->GetGamePartition();
   const DiscIO::FileSystem* filesystem = volume->GetFileSystem(partition);
   if (!filesystem || !filesystem->IsValid())
-    return fail("Dolphin could not read the game partition filesystem");
+    return fail(Tr("Dolphin could not read the game partition filesystem"));
 
   std::string disc_id = volume->GetGameID(partition);
   if (disc_id.size() != 6)
-    return fail("the selected image has an invalid disc ID");
+    return fail(Tr("the selected image has an invalid disc ID"));
 #ifdef MODERNGEKKO_REQUIRED_DISC_ID
   if (disc_id != MODERNGEKKO_REQUIRED_DISC_ID)
-    return fail("this frontend requires disc ID " MODERNGEKKO_REQUIRED_DISC_ID "; selected " +
-                disc_id);
+    return fail(Format(Tr("this frontend requires disc ID %s; selected %s"),
+                       MODERNGEKKO_REQUIRED_DISC_ID, disc_id.c_str()));
 #endif
 #ifdef MODERNGEKKO_PORTABLE_DEFAULT_GAME
   const fs::path games_directory = release_directory;
@@ -422,7 +439,7 @@ bool ExtractDisc(const fs::path& image, const fs::path& user_directory,
     bool changed = false;
     std::string patch_error;
     if (!ApplyBundledDolPatch(output, release_directory, &changed, &patch_error))
-      return fail("existing extraction patching failed: " + patch_error);
+      return fail(Format(Tr("existing extraction patching failed: %s"), patch_error.c_str()));
   }
   const auto existing = InspectForLauncher(output);
   if (existing && RequiredGameError(*existing.metadata).empty())
@@ -432,7 +449,7 @@ bool ExtractDisc(const fs::path& image, const fs::path& user_directory,
       return fail(error);
     std::lock_guard lock(state->mutex);
     state->finished_game = output;
-    state->status = "Using existing extraction";
+    state->status = Tr("Using existing extraction");
     state->running = false;
     return true;
   }
@@ -441,22 +458,22 @@ bool ExtractDisc(const fs::path& image, const fs::path& user_directory,
   fs::remove_all(staging, ec);
   fs::create_directories(staging / "files", ec);
   if (ec)
-    return fail("can't create extraction directory: " + ec.message());
+    return fail(Format(Tr("can't create extraction directory: %s"), ec.message().c_str()));
 
   {
     std::lock_guard lock(state->mutex);
-    state->status = "Extracting system data";
+    state->status = Tr("Extracting system data");
   }
   if (!DiscIO::ExportSystemData(*volume, partition, staging.string()))
   {
     fs::remove_all(staging, ec);
-    return fail("Dolphin failed while extracting the disc system data");
+    return fail(Tr("Dolphin failed while extracting the disc system data"));
   }
 
   state->total = std::max(1u, filesystem->GetRoot().GetTotalChildren());
   {
     std::lock_guard lock(state->mutex);
-    state->status = "Extracting game files";
+    state->status = Tr("Extracting game files");
   }
   DiscIO::ExportDirectory(*volume, partition, filesystem->GetRoot(), true, "",
                           (staging / "files").string(),
@@ -464,7 +481,7 @@ bool ExtractDisc(const fs::path& image, const fs::path& user_directory,
                           {
                             ++state->completed;
                             std::lock_guard lock(state->mutex);
-                            state->status = "Extracting " + path;
+                            state->status = Format(Tr("Extracting %s"), path.c_str());
                             return false;
                           });
 
@@ -473,27 +490,27 @@ bool ExtractDisc(const fs::path& image, const fs::path& user_directory,
   if (!ApplyBundledDolPatch(staging, release_directory, &dol_changed, &dol_patch_error))
   {
     fs::remove_all(staging, ec);
-    return fail("extracted DOL patching failed: " + dol_patch_error);
+    return fail(Format(Tr("extracted DOL patching failed: %s"), dol_patch_error.c_str()));
   }
 
   const auto inspected = InspectForLauncher(staging);
   if (!inspected)
   {
     fs::remove_all(staging, ec);
-    return fail("extracted game validation failed: " + inspected.error);
+    return fail(Format(Tr("extracted game validation failed: %s"), inspected.error.c_str()));
   }
   if (const std::string identity_error = RequiredGameError(*inspected.metadata);
       !identity_error.empty())
   {
     fs::remove_all(staging, ec);
-    return fail("extracted game validation failed: " + identity_error);
+    return fail(Format(Tr("extracted game validation failed: %s"), identity_error.c_str()));
   }
 
   fs::remove_all(output, ec);
   ec.clear();
   fs::rename(staging, output, ec);
   if (ec)
-    return fail("can't publish extracted game: " + ec.message());
+    return fail(Format(Tr("can't publish extracted game: %s"), ec.message().c_str()));
   std::string error;
   if (!WriteDefaultGame(user_directory, release_directory, output, &error))
     return fail(error);
@@ -501,7 +518,7 @@ bool ExtractDisc(const fs::path& image, const fs::path& user_directory,
   {
     std::lock_guard lock(state->mutex);
     state->finished_game = output;
-    state->status = "Extraction complete";
+    state->status = Tr("Extraction complete");
   }
   state->running = false;
   return true;
@@ -1610,7 +1627,7 @@ constexpr std::array<LegendRow, 10> LEGEND_ROWS = {{
     {"L", INPUT_L, INPUT_L},
     {"R", INPUT_R, INPUT_R},
     {"Start", INPUT_START, INPUT_START},
-    {"Stick", INPUT_STICK_UP, INPUT_DPAD_RIGHT},  // stick and D-pad
+    {MODERNGEKKO_UI_TEXT("Stick"), INPUT_STICK_UP, INPUT_DPAD_RIGHT},  // stick and D-pad
     {"C", INPUT_C, INPUT_C},
 }};
 
@@ -1684,8 +1701,8 @@ constexpr std::array<LegendRow, 9> LEGEND_ROWS = {{
     {"\xE2\x88\x92", INPUT_MINUS, INPUT_MINUS},
     {"+", INPUT_PLUS, INPUT_PLUS},
     {"HOME", INPUT_HOME, INPUT_HOME},
-    {"D-Pad", INPUT_UP, INPUT_RIGHT},
-    {"Shake", INPUT_SHAKE, INPUT_SHAKE},
+    {MODERNGEKKO_UI_TEXT("D-Pad"), INPUT_UP, INPUT_RIGHT},
+    {MODERNGEKKO_UI_TEXT("Shake"), INPUT_SHAKE, INPUT_SHAKE},
 }};
 
 // Wii A and B on the shoulders, as the generated profile maps them, 1 and 2
@@ -1878,14 +1895,20 @@ std::string SourceName(SDL_Gamepad* gamepad, const InputSource& source)
   if (source.button < 0)
   {
     if (source.axis == SDL_GAMEPAD_AXIS_LEFT_TRIGGER)
-      return "L trigger";
+      return Tr("L trigger");
     if (source.axis == SDL_GAMEPAD_AXIS_RIGHT_TRIGGER)
-      return "R trigger";
+      return Tr("R trigger");
+    // Left stick (axes 0 and 1) or right stick (2 and 3), then the direction.
+    constexpr std::array<std::array<const char*, 4>, 2> directions = {{
+        {MODERNGEKKO_UI_TEXT("Left stick left"), MODERNGEKKO_UI_TEXT("Left stick right"),
+         MODERNGEKKO_UI_TEXT("Left stick up"), MODERNGEKKO_UI_TEXT("Left stick down")},
+        {MODERNGEKKO_UI_TEXT("Right stick left"), MODERNGEKKO_UI_TEXT("Right stick right"),
+         MODERNGEKKO_UI_TEXT("Right stick up"), MODERNGEKKO_UI_TEXT("Right stick down")},
+    }};
     const bool horizontal = source.axis % 2 == 0;
-    const std::string stick = source.axis < 2 ? "Left stick " : "Right stick ";
-    if (horizontal)
-      return stick + (source.direction > 0 ? "right" : "left");
-    return stick + (source.direction > 0 ? "down" : "up");
+    const std::size_t direction =
+        (horizontal ? 0 : 2) + (source.direction > 0 ? 1 : 0);
+    return Tr(directions[source.axis < 2 ? 0 : 1][direction]);
   }
   const auto button = static_cast<SDL_GamepadButton>(source.button);
   if (source.button <= SDL_GAMEPAD_BUTTON_NORTH)
@@ -1902,44 +1925,45 @@ std::string SourceName(SDL_Gamepad* gamepad, const InputSource& source)
     case SDL_GAMEPAD_BUTTON_LABEL_Y:
       return "Y";
     case SDL_GAMEPAD_BUTTON_LABEL_CROSS:
-      return "Cross";
+      return Tr("Cross");
     case SDL_GAMEPAD_BUTTON_LABEL_CIRCLE:
-      return "Circle";
+      return Tr("Circle");
     case SDL_GAMEPAD_BUTTON_LABEL_SQUARE:
-      return "Square";
+      return Tr("Square");
     case SDL_GAMEPAD_BUTTON_LABEL_TRIANGLE:
-      return "Triangle";
+      return Tr("Triangle");
     default:
       break;
     }
-    constexpr std::array<const char*, 4> positions = {"South button", "East button",
-                                                      "West button", "North button"};
-    return positions[static_cast<std::size_t>(source.button)];
+    constexpr std::array<const char*, 4> positions = {
+        MODERNGEKKO_UI_TEXT("South button"), MODERNGEKKO_UI_TEXT("East button"),
+        MODERNGEKKO_UI_TEXT("West button"), MODERNGEKKO_UI_TEXT("North button")};
+    return Tr(positions[static_cast<std::size_t>(source.button)]);
   }
   switch (button)
   {
   case SDL_GAMEPAD_BUTTON_BACK:
-    return "Back";
+    return Tr("Back");
   case SDL_GAMEPAD_BUTTON_GUIDE:
     return "Home";
   case SDL_GAMEPAD_BUTTON_START:
     return "Start";
   case SDL_GAMEPAD_BUTTON_LEFT_STICK:
-    return "L stick press";
+    return Tr("L stick press");
   case SDL_GAMEPAD_BUTTON_RIGHT_STICK:
-    return "R stick press";
+    return Tr("R stick press");
   case SDL_GAMEPAD_BUTTON_LEFT_SHOULDER:
-    return "L shoulder";
+    return Tr("L shoulder");
   case SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER:
-    return "R shoulder";
+    return Tr("R shoulder");
   case SDL_GAMEPAD_BUTTON_DPAD_UP:
-    return "D-pad up";
+    return Tr("D-pad up");
   case SDL_GAMEPAD_BUTTON_DPAD_DOWN:
-    return "D-pad down";
+    return Tr("D-pad down");
   case SDL_GAMEPAD_BUTTON_DPAD_LEFT:
-    return "D-pad left";
+    return Tr("D-pad left");
   case SDL_GAMEPAD_BUTTON_DPAD_RIGHT:
-    return "D-pad right";
+    return Tr("D-pad right");
   default:
     return std::string(DOLPHIN_SDL_BUTTON_NAMES[static_cast<std::size_t>(source.button)]);
   }
@@ -1953,15 +1977,15 @@ std::string SourceGroup(SDL_Gamepad* gamepad, const InputSource& source)
   {
     if (source.key == SDL_SCANCODE_UP || source.key == SDL_SCANCODE_DOWN ||
         source.key == SDL_SCANCODE_LEFT || source.key == SDL_SCANCODE_RIGHT)
-      return "Arrow keys";
+      return Tr("Arrow keys");
     return SourceName(gamepad, source);
   }
   if (source.button >= SDL_GAMEPAD_BUTTON_DPAD_UP && source.button <= SDL_GAMEPAD_BUTTON_DPAD_RIGHT)
-    return "D-pad";
+    return Tr("D-pad");
   if (source.button < 0 && source.axis <= SDL_GAMEPAD_AXIS_LEFTY)
-    return "Left stick";
+    return Tr("Left stick");
   if (source.button < 0 && source.axis <= SDL_GAMEPAD_AXIS_RIGHTY)
-    return "Right stick";
+    return Tr("Right stick");
   return SourceName(gamepad, source);
 }
 
@@ -2145,7 +2169,7 @@ void DrawInputLegend(const ControllerTester& tester, bool keys, ImFont* bold)
   ImGui::PushFont(bold, 0.0f);
   float label_width = 0.0f;
   for (const LegendRow& row : LEGEND_ROWS)
-    label_width = std::max(label_width, ImGui::CalcTextSize(row.label).x);
+    label_width = std::max(label_width, ImGui::CalcTextSize(Tr(row.label)).x);
   ImGui::PopFont();
   label_width = std::max(label_width, ImGui::CalcTextSize(PROFILE_LEGEND_TITLE).x);
   label_width += style.ItemSpacing.x * 2.0f;
@@ -2154,7 +2178,7 @@ void DrawInputLegend(const ControllerTester& tester, bool keys, ImFont* bold)
   // Inside a group, SameLine() offsets count from the group's left edge.
   ImGui::TextDisabled("%s", PROFILE_LEGEND_TITLE);
   ImGui::SameLine(label_width);
-  ImGui::TextDisabled(keys ? "Key" : "Your controller");
+  ImGui::TextDisabled("%s", keys ? Tr("Key") : Tr("Your controller"));
   for (const LegendRow& row : LEGEND_ROWS)
   {
     bool down = false;
@@ -2178,14 +2202,14 @@ void DrawInputLegend(const ControllerTester& tester, bool keys, ImFont* bold)
     for (const std::string& name : names)
       text += (text.empty() ? "" : ", ") + name;
     if (custom)
-      text = "edited by hand";
+      text = Tr("edited by hand");
     else if (text.empty())
-      text = "not set";
+      text = Tr("not set");
     ImGui::PushFont(bold, 0.0f);
     if (down)
-      ImGui::TextColored(LAUNCHER_ACCENT, "%s", row.label);
+      ImGui::TextColored(LAUNCHER_ACCENT, "%s", Tr(row.label));
     else
-      ImGui::TextUnformatted(row.label);
+      ImGui::TextUnformatted(Tr(row.label));
     ImGui::PopFont();
     ImGui::SameLine(label_width);
     ImGui::PushTextWrapPos(0.0f);
@@ -2229,16 +2253,16 @@ void DrawControllerTester(ControllerTester& tester, const LauncherImage& control
   const ImGuiStyle& style = ImGui::GetStyle();
   if (tester.has_pad_sources && tester.has_key_sources)
   {
-    const float tabs_width = ImGui::CalcTextSize("Controller").x +
-                             ImGui::CalcTextSize("Keyboard").x + style.FramePadding.x * 4.0f +
-                             style.ItemSpacing.x;
+    const float tabs_width = ImGui::CalcTextSize(Tr("Controller")).x +
+                             ImGui::CalcTextSize(Tr("Keyboard")).x +
+                             style.FramePadding.x * 4.0f + style.ItemSpacing.x;
     ImGui::SameLine();
     ImGui::SetCursorPosX(ImGui::GetCursorPosX() +
                          std::max(0.0f, ImGui::GetContentRegionAvail().x - tabs_width));
-    if (DrawTesterTab("Controller", !tester.show_keyboard))
+    if (DrawTesterTab(Tr("Controller"), !tester.show_keyboard))
       tester.show_keyboard = false;
     ImGui::SameLine();
-    if (DrawTesterTab("Keyboard", tester.show_keyboard))
+    if (DrawTesterTab(Tr("Keyboard"), tester.show_keyboard))
       tester.show_keyboard = true;
   }
   ImGui::Spacing();
@@ -2248,12 +2272,12 @@ void DrawControllerTester(ControllerTester& tester, const LauncherImage& control
     if (keyboard_art.texture)
     {
       DrawKeyboardArt(tester, keyboard_art, bold, scale);
-      ImGui::TextColored(LAUNCHER_ACCENT, "Press keys to test them.");
+      ImGui::TextColored(LAUNCHER_ACCENT, "%s", Tr("Press keys to test them."));
     }
     else
     {
       DrawInputLegend(tester, true, bold);
-      ImGui::TextColored(LAUNCHER_ACCENT, "Press keys to test them.");
+      ImGui::TextColored(LAUNCHER_ACCENT, "%s", Tr("Press keys to test them."));
       EndInputLegend();
     }
     return;
@@ -2264,11 +2288,13 @@ void DrawControllerTester(ControllerTester& tester, const LauncherImage& control
   {
     if (tester.gamepad)
     {
-      ImGui::TextColored(LAUNCHER_ACCENT, "Press buttons to test them.");
+      ImGui::TextColored(LAUNCHER_ACCENT, "%s", Tr("Press buttons to test them."));
     }
     else if (tester.device.empty())
     {
-      ImGui::TextDisabled("No controller in %s.", std::string(CONTROLLER_PROFILE_NAME).c_str());
+      ImGui::TextDisabled("%s", Format(Tr("No controller in %s."),
+                                       std::string(CONTROLLER_PROFILE_NAME).c_str())
+                                    .c_str());
     }
     else
     {
@@ -2276,7 +2302,8 @@ void DrawControllerTester(ControllerTester& tester, const LauncherImage& control
       const std::size_t name_start = tester.device.find('/', tester.device.find('/') + 1);
       const std::string name =
           name_start == std::string::npos ? tester.device : tester.device.substr(name_start + 1);
-      ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.3f, 1.0f), "Connect %s.", name.c_str());
+      ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.3f, 1.0f), "%s",
+                         Format(Tr("Connect %s."), name.c_str()).c_str());
     }
   };
   if (!controller_art.texture)
@@ -2482,7 +2509,7 @@ int main(int argc, char** argv)
   std::string selected_controller =
       configured_controllers.empty() ? config.controller : configured_controllers.front();
   int controller_index = FindController(controllers, selected_controller);
-  std::string controller_status;
+  StatusText controller_status;
   const fs::path controller_profile = user_directory / "Config" / CONTROLLER_PROFILE_NAME;
   ControllerTester controller_tester;
   const auto select_controller = [&](int index)
@@ -2510,7 +2537,7 @@ int main(int argc, char** argv)
     config.resolution = resolutions[resolution_index].text;
     config.show_fps_in_title = show_fps_in_title;
     controller_profile_exists = true;
-    controller_status = std::move(message);
+    controller_status = {CONTROLLER_MAPPED_STATUS};
     controller_tester.loaded = false;  // read the new profile on the next frame
     return true;
   };
@@ -2534,9 +2561,9 @@ int main(int argc, char** argv)
     config.resolution = resolutions[resolution_index].text;
     config.show_fps_in_title = show_fps_in_title;
     controller_index = index;
-    controller_status = std::string(CONTROLLER_PROFILE_NAME) + " now uses " +
-                        controllers[index].label + " with the same buttons";
-    std::cout << "controller: " << controller_status << '\n';
+    controller_status = {MODERNGEKKO_UI_TEXT("%s now uses %s with the same buttons"),
+                         std::string(CONTROLLER_PROFILE_NAME), controllers[index].label};
+    std::cout << "controller: " << controller_status.English() << '\n';
     controller_tester.loaded = false;
     return true;
   };
@@ -2545,8 +2572,8 @@ int main(int argc, char** argv)
   // connected later takes the keyboard's place as the profile's device
   // (retarget_controller), and the keys keep working.
   const std::string keyboard_device(moderngekko::frontend::KeyboardDevice());
-  const std::string keyboard_only_status =
-      "Keyboard only. A controller you connect is added to the same profile.";
+  const StatusText keyboard_only_status = {
+      MODERNGEKKO_UI_TEXT("Keyboard only. A controller you connect is added to the same profile.")};
   const auto select_keyboard_only = [&]
   {
     std::string message;
@@ -2582,8 +2609,8 @@ int main(int argc, char** argv)
       if (configured_controllers.empty())
       {
         std::lock_guard lock(dialog.mutex);
-        dialog.error = std::string(CONTROLLER_PROFILE_NAME) +
-                       " has no configured controller device";
+        dialog.error = Format(Tr("%s has no configured controller device"),
+                              std::string(CONTROLLER_PROFILE_NAME).c_str());
         return false;
       }
       // The profile's pad isn't connected but exactly one other pad is: most
@@ -2592,7 +2619,8 @@ int main(int argc, char** argv)
         return retarget_controller(0);
       selected_controller = configured_controllers.front();
       controller_index = FindController(controllers, selected_controller);
-      controller_status = "Using existing " + std::string(CONTROLLER_PROFILE_NAME);
+      controller_status = {MODERNGEKKO_UI_TEXT("Using existing %s"),
+                           std::string(CONTROLLER_PROFILE_NAME)};
       return true;
     }
     if (controller_index < 0)
@@ -2601,7 +2629,7 @@ int main(int argc, char** argv)
       return select_keyboard_only();
 #else
       std::lock_guard lock(dialog.mutex);
-      dialog.error = "Connect an SDL-compatible controller before playing";
+      dialog.error = Tr("Connect an SDL-compatible controller before playing");
       return false;
 #endif
     }
@@ -2624,7 +2652,7 @@ int main(int argc, char** argv)
 #ifdef MODERNGEKKO_GAMECUBE_CONTROLLERS
         select_keyboard_only();
 #else
-        controller_status = "No SDL gamepad detected";
+        controller_status = {MODERNGEKKO_UI_TEXT("No SDL gamepad detected")};
 #endif
     }
     else if (controller_index < 0 && controllers.size() == 1)
@@ -2639,7 +2667,8 @@ int main(int argc, char** argv)
 #endif
     else
     {
-      controller_status = "Using existing " + std::string(CONTROLLER_PROFILE_NAME);
+      controller_status = {MODERNGEKKO_UI_TEXT("Using existing %s"),
+                           std::string(CONTROLLER_PROFILE_NAME)};
     }
   };
   refresh_controllers();
@@ -3213,28 +3242,28 @@ int main(int argc, char** argv)
     }
       if (current_page == LauncherPage::Controls)
       {
-    DrawPageHeader("Controls",
-                   "Choose the controller to play with. The launcher writes its button "
-                   "mapping for you.",
+    DrawPageHeader(Tr("Controls"),
+                   Tr("Choose the controller to play with. The launcher writes its button "
+                      "mapping for you."),
                    fonts.bold);
-    BeginSection("##controls_controller", "CONTROLLER");
+    BeginSection("##controls_controller", Tr("CONTROLLER"));
 #ifdef MODERNGEKKO_GAMECUBE_CONTROLLERS
     const bool keyboard_only = controller_index < 0 && selected_controller == keyboard_device;
 #else
     const bool keyboard_only = false;
 #endif
     if (controller_index >= 0)
-      DrawStatusPill("CONNECTED", LAUNCHER_ACCENT, scale, false);
+      DrawStatusPill(Tr("CONNECTED"), LAUNCHER_ACCENT, scale, false);
     else if (keyboard_only)
-      DrawStatusPill("KEYBOARD ONLY", LAUNCHER_ACCENT, scale, false);
+      DrawStatusPill(Tr("KEYBOARD ONLY"), LAUNCHER_ACCENT, scale, false);
     else
-      DrawStatusPill("NOT DETECTED", ImVec4(1.0f, 0.75f, 0.3f, 1.0f), scale, false);
+      DrawStatusPill(Tr("NOT DETECTED"), ImVec4(1.0f, 0.75f, 0.3f, 1.0f), scale, false);
     ImGui::Spacing();
     ImGui::SetNextItemWidth(-1.0f);
     const char* controller_preview = controller_index >= 0
                                          ? controllers[controller_index].label.c_str()
-                                     : keyboard_only ? "Keyboard only"
-                                     : selected_controller.empty() ? "No SDL gamepad detected"
+                                     : keyboard_only ? Tr("Keyboard only")
+                                     : selected_controller.empty() ? Tr("No SDL gamepad detected")
                                                                    : selected_controller.c_str();
     if (ImGui::BeginCombo("##controller", controller_preview))
     {
@@ -3253,7 +3282,7 @@ int main(int argc, char** argv)
           {
             controller_index = static_cast<int>(i);
             selected_controller = controllers[i].device;
-            controller_status = "Ready to generate controller profile";
+            controller_status = {MODERNGEKKO_UI_TEXT("Ready to generate controller profile")};
           }
         }
         if (selected)
@@ -3262,15 +3291,19 @@ int main(int argc, char** argv)
       ImGui::EndCombo();
     }
     ImGui::PushTextWrapPos(0.0f);
-    ImGui::TextDisabled("%s", controller_status.c_str());
+    ImGui::TextDisabled("%s", controller_status.Text().c_str());
     ImGui::PopTextWrapPos();
     EndSection();
-    BeginSection("##controls_mapping", "BUTTON MAPPING");
+    BeginSection("##controls_mapping", Tr("BUTTON MAPPING"));
     ImGui::PushTextWrapPos(0.0f);
     if (controller_profile_exists)
-      ImGui::TextDisabled("Using %s from your user folder.", std::string(CONTROLLER_PROFILE_NAME).c_str());
+      ImGui::TextDisabled("%s", Format(Tr("Using %s from your user folder."),
+                                       std::string(CONTROLLER_PROFILE_NAME).c_str())
+                                    .c_str());
     else
-      ImGui::TextDisabled("%s is created the first time you play.", std::string(CONTROLLER_PROFILE_NAME).c_str());
+      ImGui::TextDisabled("%s", Format(Tr("%s is created the first time you play."),
+                                       std::string(CONTROLLER_PROFILE_NAME).c_str())
+                                    .c_str());
     ImGui::PopTextWrapPos();
     // The tester starts on the line above, where it puts its tabs.
     if (controller_profile_exists)
@@ -3282,9 +3315,7 @@ int main(int argc, char** argv)
 #else
     ImGui::BeginDisabled(controller_index < 0);
 #endif
-    const std::string replace_profile =
-        "Replace with generated " + std::string(GENERATED_PROFILE_LABEL);
-    if (ImGui::Button(replace_profile.c_str()))
+    if (ImGui::Button(Tr(REPLACE_PROFILE_BUTTON)))
     {
 #ifdef MODERNGEKKO_GAMECUBE_CONTROLLERS
       if (controller_index < 0)
@@ -3298,15 +3329,15 @@ int main(int argc, char** argv)
     }
       if (current_page == LauncherPage::GameFiles)
       {
-    DrawPageHeader("Game Files",
-                   "Use your own copy of the game as an ISO, WBFS or RVZ image. It is "
-                   "extracted once and reused afterwards.",
+    DrawPageHeader(Tr("Game Files"),
+                   Tr("Use your own copy of the game as an ISO, WBFS or RVZ image. It is "
+                      "extracted once and reused afterwards."),
                    fonts.bold);
-    BeginSection("##files_installed", "INSTALLED GAME");
+    BeginSection("##files_installed", Tr("INSTALLED GAME"));
     if (current_metadata)
     {
-      const std::string ready =
-          "GAME READY \xC2\xB7 " + current_metadata.metadata->disc_id;
+      const std::string ready = Format(Tr("GAME READY \xC2\xB7 %s"),
+                                       current_metadata.metadata->disc_id.c_str());
       DrawStatusPill(ready.c_str(), LAUNCHER_ACCENT, scale, false);
       ImGui::Spacing();
       ImGui::TextUnformatted(current_metadata.metadata->game_name.c_str());
@@ -3316,26 +3347,26 @@ int main(int argc, char** argv)
     }
     else
     {
-      DrawStatusPill("NOT INSTALLED", ImVec4(1.0f, 0.75f, 0.3f, 1.0f), scale, false);
+      DrawStatusPill(Tr("NOT INSTALLED"), ImVec4(1.0f, 0.75f, 0.3f, 1.0f), scale, false);
       ImGui::Spacing();
-      ImGui::TextDisabled("Select a disc image below and extract it.");
+      ImGui::TextDisabled("%s", Tr("Select a disc image below and extract it."));
     }
     EndSection();
-    BeginSection("##files_image", "DISC IMAGE");
+    BeginSection("##files_image", Tr("DISC IMAGE"));
     if (selected_image)
       ImGui::TextWrapped("%s", selected_image->string().c_str());
     else
-      ImGui::TextDisabled("No ISO, WBFS, or RVZ selected");
+      ImGui::TextDisabled("%s", Tr("No ISO, WBFS, or RVZ selected"));
     ImGui::Spacing();
     if (!extraction.running)
     {
-      if (ImGui::Button("Browse for ISO / WBFS / RVZ"))
+      if (ImGui::Button(Tr("Browse for ISO / WBFS / RVZ")))
       {
-        static constexpr SDL_DialogFileFilter filters[] = {
-            {"Disc images", "iso;wbfs;rvz"},
-            {"ISO", "iso"},
-            {"WBFS", "wbfs"},
-            {"RVZ", "rvz"}};
+        // Static: SDL reads the filters until the dialog closes. Tr() returns
+        // texts that live as long as the program.
+        static SDL_DialogFileFilter filters[] = {
+            {"", "iso;wbfs;rvz"}, {"ISO", "iso"}, {"WBFS", "wbfs"}, {"RVZ", "rvz"}};
+        filters[0].name = Tr("Disc images");
         const std::string documents = DocumentsDirectory().string();
         SDL_ShowOpenFileDialog(FileDialogCallback, &dialog, window, filters,
                                static_cast<int>(std::size(filters)), documents.c_str(), false);
@@ -3343,7 +3374,7 @@ int main(int argc, char** argv)
       if (selected_image)
       {
         ImGui::SameLine();
-        if (ImGui::Button("Extract Game"))
+        if (ImGui::Button(Tr("Extract Game")))
         {
           extraction.completed = 0;
           extraction.total = 1;
@@ -3388,7 +3419,7 @@ int main(int argc, char** argv)
     }
     ImGui::Spacing();
     ImGui::Separator();
-    ImGui::TextWrapped("%s", Format(Tr("Controller: %s"), controller_status.c_str()).c_str());
+    ImGui::TextWrapped("%s", Format(Tr("Controller: %s"), controller_status.Text().c_str()).c_str());
     ImGui::End();
 
     ImGui::Render();
@@ -3409,7 +3440,8 @@ int main(int argc, char** argv)
     if (!WriteDefaultGame(user_directory, release_directory, current_game,
                           &launch_error))
     {
-      SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Launch failed", launch_error.c_str(), window);
+      SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, Tr("Launch failed"), launch_error.c_str(),
+                               window);
       result = 1;
     }
     else
@@ -3493,8 +3525,9 @@ int main(int argc, char** argv)
       }
       if (!process)
       {
-        launch_error = "Could not start " + SiblingRunner(argv[0]).string() + ": " + process_error;
-        SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Launch failed", launch_error.c_str(),
+        launch_error = Format(Tr("Could not start %s: %s"), SiblingRunner(argv[0]).string().c_str(),
+                              process_error.c_str());
+        SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, Tr("Launch failed"), launch_error.c_str(),
                                  window);
         result = 1;
       }
@@ -3509,52 +3542,51 @@ int main(int argc, char** argv)
           SDL_ShowWindow(window);
           if (!waited)
           {
-            launch_error =
-                "The game process could not be monitored: " + std::string(SDL_GetError());
+            launch_error = Format(Tr("The game process could not be monitored: %s"), SDL_GetError());
           }
           else if (launch_mode == LaunchMode::Join)
           {
             switch (static_cast<moderngekko::frontend::NetplayExitCode>(exit_code))
             {
             case moderngekko::frontend::NetplayExitCode::VersionMismatch:
-              launch_error = "The host is running an incompatible netplay build. Both "
-                             "players must use the same release.";
+              launch_error = Tr("The host is running an incompatible netplay build. Both "
+                                "players must use the same release.");
               break;
             case moderngekko::frontend::NetplayExitCode::CompatibilityMismatch:
-              launch_error = "The extracted game or recomp module does not match the "
-                             "host. Both players need the same game revision and "
-                             "release.";
+              launch_error = Tr("The extracted game or recomp module does not match the "
+                                "host. Both players need the same game revision and "
+                                "release.");
               break;
             case moderngekko::frontend::NetplayExitCode::RoomFull:
-              launch_error = "All four controller slots are already occupied.";
+              launch_error = Tr("All four controller slots are already occupied.");
               break;
             case moderngekko::frontend::NetplayExitCode::GameRunning:
-              launch_error = "The host has already started the game.";
+              launch_error = Tr("The host has already started the game.");
               break;
             case moderngekko::frontend::NetplayExitCode::ServerFull:
-              launch_error = "The netplay server is full.";
+              launch_error = Tr("The netplay server is full.");
               break;
             case moderngekko::frontend::NetplayExitCode::NicknameRejected:
-              launch_error = "The nickname was rejected by the host.";
+              launch_error = Tr("The nickname was rejected by the host.");
               break;
             default:
-              launch_error = "Could not reach the netplay host. Check the host name, UDP "
-                             "port, and firewall.";
+              launch_error = Tr("Could not reach the netplay host. Check the host name, UDP "
+                                "port, and firewall.");
               break;
             }
           }
           else if (launch_mode == LaunchMode::Host)
           {
-            launch_error = "Could not create the netplay session. Check the UDP port "
-                           "and firewall settings.";
+            launch_error = Tr("Could not create the netplay session. Check the UDP port "
+                              "and firewall settings.");
           }
           else
           {
-            launch_error = "The game process exited with code " + std::to_string(exit_code) + ".";
+            launch_error = Format(Tr("The game process exited with code %d."), exit_code);
           }
           if (!log_error)
-            launch_error += "\n\nDetails were written to:\n" + log_path.string();
-          SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Session failed", launch_error.c_str(),
+            launch_error += Format(Tr("\n\nDetails were written to:\n%s"), log_path.string().c_str());
+          SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, Tr("Session failed"), launch_error.c_str(),
                                    window);
           result = 1;
         }

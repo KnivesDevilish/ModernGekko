@@ -457,6 +457,10 @@ if(MODERNGEKKO_ENABLE_DOLPHIN_RUNTIME)
         ModernGekko::Runtime core uicommon imgui ${_moderngekko_sdl_target})
     set_target_properties(moderngekko-run PROPERTIES
         OUTPUT_NAME "${MODERNGEKKO_RUNNER_OUTPUT_NAME}")
+    # The Netplay lobby uses the launcher's UTF-8 translations.
+    if(MSVC)
+        target_compile_options(moderngekko-run PRIVATE /utf-8)
+    endif()
     target_compile_definitions(moderngekko-run PRIVATE
         MODERNGEKKO_RUNNER_NAME="${MODERNGEKKO_RUNNER_OUTPUT_NAME}"
         MODERNGEKKO_USER_DIRECTORY_NAME="${MODERNGEKKO_USER_DIRECTORY_NAME}")

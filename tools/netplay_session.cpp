@@ -1,5 +1,6 @@
 #include "netplay_session.hpp"
 
+#include "launcher_text.hpp"
 #include "netplay_compatibility.hpp"
 
 #include "Core/Boot/Boot.h"
@@ -41,6 +42,16 @@ namespace fs = std::filesystem;
 
 namespace moderngekko::frontend {
 namespace {
+// The system's first preferred language, such as "es" (as in the launcher).
+std::string SystemLanguageCode() {
+  int count = 0;
+  SDL_Locale **locales = SDL_GetPreferredLocales(&count);
+  std::string language =
+      locales && count > 0 && locales[0]->language ? locales[0]->language : "";
+  SDL_free(locales);
+  return language;
+}
+
 #ifdef MODERNGEKKO_GAMECUBE_CONTROLLERS
 // The game reads GameCube controllers. The server hands out seats in its Wii
 // Remote table, which also sets the room size and when Start is allowed, so
@@ -168,7 +179,7 @@ public:
   void OnMsgChangeGame(const NetPlay::SyncIdentifier &,
                        const std::string &name) override {
     std::lock_guard lock(m_mutex);
-    m_status = "Game: " + name;
+    m_status = Format(Tr("Game: %s"), name.c_str());
   }
 
   void OnMsgChangeGBARom(int, const NetPlay::GBAConfig &) override {}
@@ -181,12 +192,12 @@ public:
 
   void OnPlayerConnect(const std::string &player) override {
     std::lock_guard lock(m_mutex);
-    m_status = player + " joined";
+    m_status = Format(Tr("%s joined"), player.c_str());
   }
 
   void OnPlayerDisconnect(const std::string &player) override {
     std::lock_guard lock(m_mutex);
-    m_status = player + " left";
+    m_status = Format(Tr("%s left"), player.c_str());
   }
 
   void OnPadBufferChanged(u32 buffer) override { m_buffer_size = buffer; }
@@ -196,9 +207,10 @@ public:
   void OnDesync(u32 frame, const std::string &player) override {
     {
       std::lock_guard lock(m_mutex);
-      m_error = "Desync at frame " + std::to_string(frame);
-      if (!player.empty())
-        m_error += " reported for " + player;
+      m_error = player.empty()
+                    ? Format(Tr("Desync at frame %u"), frame)
+                    : Format(Tr("Desync at frame %u reported for %s"), frame,
+                             player.c_str());
     }
     StopGame();
   }
@@ -207,7 +219,7 @@ public:
     m_connection_lost = true;
     {
       std::lock_guard lock(m_mutex);
-      m_error = "Connection to the netplay host was lost";
+      m_error = Tr("Connection to the netplay host was lost");
     }
     StopGame();
   }
@@ -218,14 +230,14 @@ public:
   }
 
   void OnTraversalError(Common::TraversalClient::FailureReason) override {
-    OnConnectionError("Direct connection failed");
+    OnConnectionError(Tr("Direct connection failed"));
   }
 
   void OnTraversalStateChanged(Common::TraversalClient::State) override {}
 
   void OnGameStartAborted() override {
     std::lock_guard lock(m_mutex);
-    m_error = "Game start was aborted";
+    m_error = Tr("Game start was aborted");
   }
 
   void OnGolferChanged(bool, const std::string &) override {}
@@ -445,32 +457,38 @@ bool RunLobbyWindow(RuntimeConfig &runtime_config,
     ImGui::Begin("Netplay", nullptr,
                  ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove |
                      ImGuiWindowFlags_NoSavedSettings);
-    ImGui::TextUnformatted(server ? "Hosting direct-IP netplay"
-                                  : "Connected to direct-IP host");
+    ImGui::TextUnformatted(server ? Tr("Hosting direct-IP netplay")
+                                  : Tr("Connected to direct-IP host"));
     if (server) {
-      ImGui::Text("UDP port: %u", server->GetPort());
+      ImGui::TextUnformatted(
+          Format(Tr("UDP port: %u"), unsigned(server->GetPort())).c_str());
       for (const std::string &interface_name : server->GetInterfaceSet())
         ImGui::Text("%s: %s", interface_name.c_str(),
                     server->GetInterfaceHost(interface_name).c_str());
     } else {
-      ImGui::Text("Host: %s:%u", options.address.c_str(), options.port);
+      ImGui::TextUnformatted(Format(Tr("Host: %s:%u"), options.address.c_str(),
+                                    unsigned(options.port))
+                                 .c_str());
     }
-    ImGui::Text("Input buffer: %u frames%s", ui.BufferSize(),
-                server && options.buffer == "auto" ? " (auto)" : "");
+    ImGui::TextUnformatted(
+        Format(Tr("Input buffer: %u frames%s"), unsigned(ui.BufferSize()),
+               server && options.buffer == "auto" ? " (auto)" : "")
+            .c_str());
     if (server)
-      ImGui::Text("CPU core for every player: %s",
-                  CPUCoreLabel(detail::SelectedCPUCore()));
+      ImGui::TextUnformatted(Format(Tr("CPU core for every player: %s"),
+                                    CPUCoreLabel(detail::SelectedCPUCore()))
+                                 .c_str());
     else
-      ImGui::TextUnformatted("CPU core: the host's choice");
+      ImGui::TextUnformatted(Tr("CPU core: the host's choice"));
     ImGui::Separator();
 
     if (ImGui::BeginTable("players", 5,
                           ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg)) {
-      ImGui::TableSetupColumn("Player");
+      ImGui::TableSetupColumn(Tr("Player"));
       ImGui::TableSetupColumn("Ping");
-      ImGui::TableSetupColumn("Controllers");
-      ImGui::TableSetupColumn("Game");
-      ImGui::TableSetupColumn("Ready");
+      ImGui::TableSetupColumn(Tr("Controllers"));
+      ImGui::TableSetupColumn(Tr("Game"));
+      ImGui::TableSetupColumn(Tr("Ready"));
       ImGui::TableHeadersRow();
       for (const NetPlay::Player &player : players) {
         ImGui::TableNextRow();
@@ -485,25 +503,26 @@ bool RunLobbyWindow(RuntimeConfig &runtime_config,
             continue;
           if (!slots.empty())
             slots += ", ";
-          slots += (GAMECUBE_PORTS ? "Port " : "Wii ") + std::to_string(i + 1);
+          slots += GAMECUBE_PORTS ? Format(Tr("Port %d"), int(i + 1))
+                                  : "Wii " + std::to_string(i + 1);
         }
-        ImGui::TextUnformatted(slots.empty() ? "None" : slots.c_str());
+        ImGui::TextUnformatted(slots.empty() ? Tr("None") : slots.c_str());
         ImGui::TableSetColumnIndex(3);
         ImGui::TextUnformatted(
             player.game_status == NetPlay::SyncIdentifierComparison::SameGame
-                ? "Match"
-                : "Mismatch");
+                ? Tr("Match")
+                : Tr("Mismatch"));
         ImGui::TableSetColumnIndex(4);
-        ImGui::TextUnformatted(player.ready ? "Ready" : "Not ready");
+        ImGui::TextUnformatted(player.ready ? Tr("Ready") : Tr("Not ready"));
       }
       ImGui::EndTable();
     }
 
     ImGui::Spacing();
     ImGui::TextUnformatted(GAMECUBE_PORTS
-                               ? "Controllers on this computer (the first one "
-                                 "also answers to the keyboard)"
-                               : "Local sideways Wii Remotes");
+                               ? Tr("Controllers on this computer (the first one "
+                                    "also answers to the keyboard)")
+                               : Tr("Local sideways Wii Remotes"));
     std::size_t total_assigned = 0;
     for (const NetPlay::Player &player : players)
       total_assigned += player.controller_count;
@@ -547,19 +566,19 @@ bool RunLobbyWindow(RuntimeConfig &runtime_config,
         });
     const bool local_ready =
         local_player != players.end() && local_player->ready;
-    if (ImGui::Button(local_ready ? "Not Ready" : "Ready", ImVec2(140, 38)))
+    if (ImGui::Button(local_ready ? Tr("Not Ready") : Tr("Ready"), ImVec2(140, 38)))
       client.SetReady(!local_ready);
 
     if (server) {
       ImGui::SameLine();
       const bool can_start = server->CanStart();
       ImGui::BeginDisabled(!can_start);
-      if (ImGui::Button("Start", ImVec2(140, 38)))
+      if (ImGui::Button(Tr("Start game"), ImVec2(140, 38)))
         server->RequestStartGame();
       ImGui::EndDisabled();
       if (!can_start)
         ImGui::TextDisabled(
-            "Two controller slots and every machine ready are required");
+            "%s", Tr("Two controller slots and every machine ready are required"));
     }
 
     const std::string status = ui.Status();
@@ -587,6 +606,8 @@ int RunNetplayLobby(RuntimeConfig runtime_config, ConfigResult frontend_config,
   UICommon::SetUserDirectory(runtime_config.user_directory.string());
   UICommon::Init();
   detail::SetExternalUICommon(true);
+  // The lobby speaks the launcher's language (config.ini, or the system's).
+  ActiveLanguage() = ResolveLanguage(frontend_config.language, SystemLanguageCode());
 
   Config::SetBase(Config::MAIN_CPU_THREAD, true);
   // The server sends the host's core to every player when the match starts,
