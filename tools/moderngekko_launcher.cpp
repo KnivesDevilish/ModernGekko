@@ -511,6 +511,134 @@ fs::path SiblingRunner(const char* argv0)
   const fs::path sibling = self.parent_path() / runner;
   return fs::is_regular_file(sibling) ? sibling : runner;
 }
+
+// SR-ZGS accent: a neon lime green. Shared by the theme and the few texts that
+// pick a colour explicitly (the Play header and the READY status).
+constexpr ImVec4 LAUNCHER_ACCENT(0.72f, 1.0f, 0.18f, 1.0f);
+
+// Launcher colours and shapes: near-black neutral background, soft grey panels
+// and the lime accent. Sizes are unscaled; the caller applies ScaleAllSizes()
+// for the display's DPI afterwards.
+void ApplyLauncherTheme(ImGuiStyle& style)
+{
+  style.WindowPadding = ImVec2(18.0f, 16.0f);
+  style.FramePadding = ImVec2(10.0f, 6.0f);
+  style.ItemSpacing = ImVec2(10.0f, 8.0f);
+  style.ItemInnerSpacing = ImVec2(8.0f, 6.0f);
+  style.ScrollbarSize = 12.0f;
+  style.WindowRounding = 0.0f;
+  style.ChildRounding = 10.0f;
+  style.FrameRounding = 6.0f;
+  style.PopupRounding = 8.0f;
+  style.ScrollbarRounding = 8.0f;
+  style.GrabRounding = 6.0f;
+  style.TabRounding = 6.0f;
+  style.WindowBorderSize = 0.0f;
+  style.ChildBorderSize = 1.0f;
+  style.PopupBorderSize = 1.0f;
+  style.FrameBorderSize = 0.0f;
+
+  const ImVec4 accent = LAUNCHER_ACCENT;
+  const auto with_alpha = [](ImVec4 color, float alpha) {
+    color.w = alpha;
+    return color;
+  };
+  ImVec4* colors = style.Colors;
+  colors[ImGuiCol_Text] = ImVec4(0.94f, 0.94f, 0.94f, 1.0f);
+  colors[ImGuiCol_TextDisabled] = ImVec4(0.58f, 0.58f, 0.60f, 1.0f);
+  colors[ImGuiCol_WindowBg] = ImVec4(0.031f, 0.031f, 0.035f, 1.0f);
+  colors[ImGuiCol_ChildBg] = ImVec4(0.067f, 0.067f, 0.075f, 1.0f);
+  colors[ImGuiCol_PopupBg] = ImVec4(0.075f, 0.075f, 0.082f, 0.98f);
+  colors[ImGuiCol_Border] = ImVec4(0.157f, 0.157f, 0.169f, 1.0f);
+  colors[ImGuiCol_BorderShadow] = ImVec4(0.0f, 0.0f, 0.0f, 0.0f);
+  colors[ImGuiCol_FrameBg] = ImVec4(0.098f, 0.098f, 0.110f, 1.0f);
+  colors[ImGuiCol_FrameBgHovered] = ImVec4(0.133f, 0.133f, 0.149f, 1.0f);
+  colors[ImGuiCol_FrameBgActive] = ImVec4(0.165f, 0.165f, 0.184f, 1.0f);
+  colors[ImGuiCol_Button] = ImVec4(0.110f, 0.110f, 0.122f, 1.0f);
+  colors[ImGuiCol_ButtonHovered] = ImVec4(0.153f, 0.153f, 0.169f, 1.0f);
+  colors[ImGuiCol_ButtonActive] = ImVec4(0.196f, 0.196f, 0.216f, 1.0f);
+  colors[ImGuiCol_Header] = with_alpha(accent, 0.18f);
+  colors[ImGuiCol_HeaderHovered] = with_alpha(accent, 0.28f);
+  colors[ImGuiCol_HeaderActive] = with_alpha(accent, 0.38f);
+  colors[ImGuiCol_CheckMark] = accent;
+  colors[ImGuiCol_SliderGrab] = accent;
+  colors[ImGuiCol_SliderGrabActive] = ImVec4(0.82f, 1.0f, 0.45f, 1.0f);
+  colors[ImGuiCol_Separator] = colors[ImGuiCol_Border];
+  colors[ImGuiCol_SeparatorHovered] = with_alpha(accent, 0.6f);
+  colors[ImGuiCol_SeparatorActive] = accent;
+  colors[ImGuiCol_Tab] = colors[ImGuiCol_ChildBg];
+  colors[ImGuiCol_TabHovered] = with_alpha(accent, 0.25f);
+  colors[ImGuiCol_TabSelected] = ImVec4(0.14f, 0.19f, 0.06f, 1.0f);
+  colors[ImGuiCol_TabSelectedOverline] = accent;
+  colors[ImGuiCol_TabDimmed] = colors[ImGuiCol_ChildBg];
+  colors[ImGuiCol_TabDimmedSelected] = ImVec4(0.11f, 0.14f, 0.06f, 1.0f);
+  colors[ImGuiCol_ScrollbarBg] = ImVec4(0.0f, 0.0f, 0.0f, 0.0f);
+  colors[ImGuiCol_ScrollbarGrab] = ImVec4(0.20f, 0.20f, 0.22f, 1.0f);
+  colors[ImGuiCol_ScrollbarGrabHovered] = ImVec4(0.26f, 0.26f, 0.29f, 1.0f);
+  colors[ImGuiCol_ScrollbarGrabActive] = ImVec4(0.32f, 0.32f, 0.35f, 1.0f);
+  colors[ImGuiCol_PlotHistogram] = accent;
+  colors[ImGuiCol_TextLink] = accent;
+  colors[ImGuiCol_NavCursor] = accent;
+  colors[ImGuiCol_ResizeGrip] = ImVec4(0.0f, 0.0f, 0.0f, 0.0f);
+  colors[ImGuiCol_ModalWindowDimBg] = ImVec4(0.0f, 0.0f, 0.0f, 0.6f);
+}
+
+// stb_truetype (used by ImGui) reads TrueType outlines only, and a file it cannot
+// parse would trip an assert. Check the header before handing a file over.
+bool IsTrueTypeFont(const fs::path& path)
+{
+  std::ifstream file(path, std::ios::binary);
+  std::array<unsigned char, 4> tag{};
+  if (!file.read(reinterpret_cast<char*>(tag.data()), tag.size()))
+    return false;
+  constexpr std::array<unsigned char, 4> version_1 = {0x00, 0x01, 0x00, 0x00};
+  constexpr std::array<unsigned char, 4> apple_true = {'t', 'r', 'u', 'e'};
+  return tag == version_1 || tag == apple_true;
+}
+
+// A clean sans-serif for the interface: the system's usual UI fonts first
+// (Windows, Fedora/Bazzite and its Distrobox mount, Debian/Ubuntu, Arch), then
+// the font Dolphin ships in Sys/, then ImGui's built-in bitmap font.
+void LoadInterfaceFont(const fs::path& release_directory, float size)
+{
+  std::vector<fs::path> candidates;
+#if defined(_WIN32)
+  if (const char* windows = std::getenv("WINDIR"))
+    candidates.push_back(fs::path(windows) / "Fonts" / "segoeui.ttf");
+#endif
+  for (const char* path : {
+           "/usr/share/fonts/google-noto/NotoSans-Regular.ttf",
+           "/usr/local/share/fonts/google-noto/NotoSans-Regular.ttf",
+           "/usr/share/fonts/noto/NotoSans-Regular.ttf",
+           "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
+           "/usr/share/fonts/liberation-sans-fonts/LiberationSans-Regular.ttf",
+           "/usr/local/share/fonts/liberation-sans-fonts/LiberationSans-Regular.ttf",
+           "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+           "/usr/share/fonts/TTF/DejaVuSans.ttf",
+           "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+           "/usr/share/fonts/dejavu-sans-fonts/DejaVuSans.ttf",
+       })
+  {
+    candidates.emplace_back(path);
+  }
+  candidates.push_back(release_directory / "Sys" / "Resources" / "OSD_Font.ttf");
+
+  ImGuiIO& io = ImGui::GetIO();
+  for (const fs::path& candidate : candidates)
+  {
+    std::error_code ec;
+    if (!fs::is_regular_file(candidate, ec) || !IsTrueTypeFont(candidate))
+      continue;
+    if (io.Fonts->AddFontFromFileTTF(candidate.string().c_str(), size))
+    {
+      ImGui::GetStyle().FontSizeBase = size;
+      std::cout << "launcher font: " << candidate.string() << '\n';
+      return;
+    }
+  }
+  io.Fonts->AddFontDefault();
+  std::cout << "launcher font: ImGui default\n";
+}
 } // namespace
 
 int main(int argc, char** argv)
@@ -587,8 +715,12 @@ int main(int argc, char** argv)
   io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
   io.IniFilename = nullptr;
   ImGui::StyleColorsDark();
+  ApplyLauncherTheme(ImGui::GetStyle());
   ImGui::GetStyle().ScaleAllSizes(scale);
   ImGui::GetStyle().FontScaleDpi = scale;
+  // ImGui sizes a font by its full line height. 18 px gives Noto Sans and Segoe
+  // UI a comfortable reading size while the Play page still fits in 700 px.
+  LoadInterfaceFont(release_directory, 18.0f);
   ImGui_ImplSDL3_InitForSDLRenderer(window, renderer);
   ImGui_ImplSDLRenderer3_Init(renderer);
 
@@ -815,18 +947,19 @@ int main(int argc, char** argv)
       if (ImGui::BeginTabItem("Play"))
       {
         ImGui::Spacing();
-        ImGui::TextColored(ImVec4(0.35f, 0.78f, 1.0f, 1.0f), "SONIC RIDERS");
+        ImGui::TextColored(LAUNCHER_ACCENT, "SONIC RIDERS");
         ImGui::SameLine();
-        ImGui::TextDisabled("ZERO GRAVITY");
+        ImGui::TextColored(LAUNCHER_ACCENT, "ZERO GRAVITY");
         ImGui::TextDisabled("Static Recompilation");
         ImGui::Separator();
         ImGui::Spacing();
 
         if (current_metadata)
         {
-          ImGui::BeginChild("##game_status", ImVec2(0, 82 * scale), true);
+          ImGui::BeginChild("##game_status", ImVec2(0, 0),
+                            ImGuiChildFlags_Borders | ImGuiChildFlags_AutoResizeY);
           ImGui::TextDisabled("GAME STATUS");
-          ImGui::TextColored(ImVec4(0.35f, 0.85f, 0.55f, 1.0f), "READY");
+          ImGui::TextColored(LAUNCHER_ACCENT, "READY");
           ImGui::SameLine();
           ImGui::Text("%s", current_metadata.metadata->game_name.c_str());
           ImGui::TextDisabled("Disc ID: %s",
@@ -964,7 +1097,8 @@ int main(int argc, char** argv)
         }
         else
         {
-          ImGui::BeginChild("##game_status_missing", ImVec2(0, 96 * scale), true);
+          ImGui::BeginChild("##game_status_missing", ImVec2(0, 0),
+                            ImGuiChildFlags_Borders | ImGuiChildFlags_AutoResizeY);
           ImGui::TextDisabled("GAME NOT INSTALLED");
           ImGui::TextUnformatted("No extracted game is configured yet.");
           ImGui::TextDisabled("Open Manage Game Files to select and extract your game.");
@@ -1219,7 +1353,7 @@ int main(int argc, char** argv)
 
     ImGui::Render();
     SDL_SetRenderScale(renderer, io.DisplayFramebufferScale.x, io.DisplayFramebufferScale.y);
-    SDL_SetRenderDrawColor(renderer, 18, 20, 28, 255);
+    SDL_SetRenderDrawColor(renderer, 8, 8, 9, 255);  // ImGuiCol_WindowBg of the theme
     SDL_RenderClear(renderer);
     ImGui_ImplSDLRenderer3_RenderDrawData(ImGui::GetDrawData(), renderer);
     SDL_RenderPresent(renderer);
