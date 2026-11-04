@@ -980,11 +980,11 @@ bool RetargetControllerProfile(const fs::path& profile, std::string_view device,
   return true;
 }
 
-#ifndef MODERNGEKKO_GAMECUBE_CONTROLLERS
 // ---- Controller tester (Controls page) -------------------------------------
-// Reads [Wiimote1] from WiimoteNew.ini and lights up the Wii Remote buttons
-// that the pad's current input presses. It only reads: neither the profile
-// nor the pad settings are changed here.
+// Reads the first slot of the controller profile ([GCPad1] or [Wiimote1]) and
+// lights up, on drawings of the controller and of the keyboard, the inputs
+// the player presses. It only reads: neither the profile nor the pad
+// settings are changed here.
 
 // Names that Dolphin's SDL backend gives to SDL3 gamepad buttons, in
 // SDL_GamepadButton order (InputCommon/ControllerInterface/SDL/SDLGamepad.h).
@@ -993,20 +993,24 @@ constexpr std::array<std::string_view, 21> DOLPHIN_SDL_BUTTON_NAMES = {
     "Thumb L",  "Thumb R",    "Shoulder L", "Shoulder R", "Pad N",  "Pad S",    "Pad W",
     "Pad E",    "Misc 1",     "Paddle 1",   "Paddle 2", "Paddle 3", "Paddle 4", "Touchpad"};
 
-// One physical input: a gamepad button, or one direction of an axis.
-struct PadSource
+// One physical input: a gamepad button, one direction of a gamepad axis, or a
+// keyboard key.
+struct InputSource
 {
-  int button = -1;    // SDL_GamepadButton, or -1 for an axis
+  int button = -1;    // SDL_GamepadButton
   int axis = -1;      // SDL_GamepadAxis
   int direction = 1;  // +1 or -1: the side of the axis that presses
+  int key = -1;       // SDL_Scancode
+
+  bool IsKey() const { return key >= 0; }
 };
 
-std::optional<PadSource> ParseDolphinPadInput(std::string_view name)
+std::optional<InputSource> ParseDolphinPadInput(std::string_view name)
 {
   for (std::size_t i = 0; i < DOLPHIN_SDL_BUTTON_NAMES.size(); ++i)
   {
     if (name == DOLPHIN_SDL_BUTTON_NAMES[i])
-      return PadSource{.button = static_cast<int>(i)};
+      return InputSource{.button = static_cast<int>(i)};
   }
   // Dolphin also matches the face buttons by their XInput position names.
   constexpr std::array<std::pair<std::string_view, SDL_GamepadButton>, 4> face_aliases = {{
@@ -1018,12 +1022,12 @@ std::optional<PadSource> ParseDolphinPadInput(std::string_view name)
   for (const auto& [alias, button] : face_aliases)
   {
     if (name == alias)
-      return PadSource{.button = static_cast<int>(button)};
+      return InputSource{.button = static_cast<int>(button)};
   }
   if (name == "Trigger L")
-    return PadSource{.axis = SDL_GAMEPAD_AXIS_LEFT_TRIGGER};
+    return InputSource{.axis = SDL_GAMEPAD_AXIS_LEFT_TRIGGER};
   if (name == "Trigger R")
-    return PadSource{.axis = SDL_GAMEPAD_AXIS_RIGHT_TRIGGER};
+    return InputSource{.axis = SDL_GAMEPAD_AXIS_RIGHT_TRIGGER};
   constexpr std::array<std::string_view, 4> stick_axes = {"Left X", "Left Y", "Right X",
                                                           "Right Y"};
   for (std::size_t i = 0; i < stick_axes.size(); ++i)
@@ -1038,33 +1042,86 @@ std::optional<PadSource> ParseDolphinPadInput(std::string_view name)
     // reports as a negative value.
     if (i % 2 == 1)
       direction = -direction;
-    return PadSource{.axis = static_cast<int>(i), .direction = direction};
+    return InputSource{.axis = static_cast<int>(i), .direction = direction};
+  }
+  return std::nullopt;
+}
+
+// Keyboard keys as Dolphin's backends name them; X11, DirectInput and macOS
+// spell some of them differently.
+std::optional<SDL_Scancode> ParseDolphinKey(std::string_view name)
+{
+  if (name.size() == 1)
+  {
+    const char c = static_cast<char>(std::toupper(static_cast<unsigned char>(name[0])));
+    if (c >= 'A' && c <= 'Z')
+      return static_cast<SDL_Scancode>(SDL_SCANCODE_A + (c - 'A'));
+    if (c >= '1' && c <= '9')
+      return static_cast<SDL_Scancode>(SDL_SCANCODE_1 + (c - '1'));
+    if (c == '0')
+      return SDL_SCANCODE_0;
+  }
+  constexpr std::array<std::pair<std::string_view, SDL_Scancode>, 29> named_keys = {{
+      {"Return", SDL_SCANCODE_RETURN},     {"RETURN", SDL_SCANCODE_RETURN},
+      {"Up", SDL_SCANCODE_UP},             {"UP", SDL_SCANCODE_UP},
+      {"Up Arrow", SDL_SCANCODE_UP},       {"Down", SDL_SCANCODE_DOWN},
+      {"DOWN", SDL_SCANCODE_DOWN},         {"Down Arrow", SDL_SCANCODE_DOWN},
+      {"Left", SDL_SCANCODE_LEFT},         {"LEFT", SDL_SCANCODE_LEFT},
+      {"Left Arrow", SDL_SCANCODE_LEFT},   {"Right", SDL_SCANCODE_RIGHT},
+      {"RIGHT", SDL_SCANCODE_RIGHT},       {"Right Arrow", SDL_SCANCODE_RIGHT},
+      {"Shift_L", SDL_SCANCODE_LSHIFT},    {"LSHIFT", SDL_SCANCODE_LSHIFT},
+      {"Left Shift", SDL_SCANCODE_LSHIFT}, {"Shift_R", SDL_SCANCODE_RSHIFT},
+      {"RSHIFT", SDL_SCANCODE_RSHIFT},     {"Right Shift", SDL_SCANCODE_RSHIFT},
+      {"space", SDL_SCANCODE_SPACE},       {"SPACE", SDL_SCANCODE_SPACE},
+      {"Space", SDL_SCANCODE_SPACE},       {"Tab", SDL_SCANCODE_TAB},
+      {"TAB", SDL_SCANCODE_TAB},           {"Control_L", SDL_SCANCODE_LCTRL},
+      {"LCONTROL", SDL_SCANCODE_LCTRL},    {"Escape", SDL_SCANCODE_ESCAPE},
+      {"ESCAPE", SDL_SCANCODE_ESCAPE},
+  }};
+  for (const auto& [key_name, scancode] : named_keys)
+  {
+    if (name == key_name)
+      return scancode;
   }
   return std::nullopt;
 }
 
 // The tester understands the bindings the launcher writes: input names joined
-// by "|", such as "`Pad N` | `Left Y+`". Anything else (Dolphin's "&", "!",
-// functions...) is reported as custom and not tested.
-struct WiiBinding
+// by "|", such as "`Pad N` | `Left Y+`". A name may carry its device, as in
+// "`XInput2/0/Virtual core pointer:A`"; names without one belong to the
+// profile's Device. Anything else (Dolphin's "&", "!", functions...) is
+// reported as custom and not tested.
+struct ProfileBinding
 {
-  std::vector<PadSource> sources;
+  std::vector<InputSource> sources;
   bool custom = false;
 };
 
-void ParseBindingExpression(std::string_view expression, WiiBinding& binding)
+void ParseBindingExpression(std::string_view expression, bool device_is_pad,
+                            ProfileBinding& binding)
 {
   std::string term;
   bool quoted = false;
   const auto finish_term = [&]
   {
     std::string_view name = TrimView(term);
-    // A device-qualified name, such as `SDL/0/Pad:Button S`, keeps its input part.
+    bool pad = device_is_pad;
     if (const std::size_t colon = name.rfind(':'); colon != std::string_view::npos)
+    {
+      pad = TrimView(name.substr(0, colon)).starts_with("SDL/");
       name = TrimView(name.substr(colon + 1));
-    // Inputs that are not pad buttons or axes (motors, IR, motion) are skipped.
-    if (const std::optional<PadSource> source = ParseDolphinPadInput(name))
-      binding.sources.push_back(*source);
+    }
+    // Inputs that are neither pad buttons, pad axes nor known keys (motors,
+    // IR, motion sensors) are skipped.
+    if (pad)
+    {
+      if (const std::optional<InputSource> source = ParseDolphinPadInput(name))
+        binding.sources.push_back(*source);
+    }
+    else if (const std::optional<SDL_Scancode> key = ParseDolphinKey(name))
+    {
+      binding.sources.push_back(InputSource{.key = *key});
+    }
     term.clear();
   };
   for (const char c : expression)
@@ -1095,25 +1152,146 @@ void ParseBindingExpression(std::string_view expression, WiiBinding& binding)
   finish_term();
 }
 
-// The Wii Remote inputs the tester shows, with the profile keys behind them.
-enum WiiInput : std::size_t
+// A spot of the controller drawing: a circle, a rectangle or a convex polygon,
+// in pixels of the drawing's 1024 x 1024 canvas.
+struct ArtHotspot
 {
-  WII_A,
-  WII_B,
-  WII_1,
-  WII_2,
-  WII_MINUS,
-  WII_PLUS,
-  WII_HOME,
-  WII_UP,
-  WII_DOWN,
-  WII_LEFT,
-  WII_RIGHT,
-  WII_SHAKE,
-  WII_INPUT_COUNT,
+  std::size_t input;
+  int point_count;  // 1: circle at points[0], 2: rectangle, 3+: convex polygon
+  std::array<ImVec2, 6> points;
+  float radius;
 };
 
-constexpr std::array<std::array<std::string_view, 3>, WII_INPUT_COUNT> WII_PROFILE_KEYS = {{
+// One row of the list beside the drawing; the stick and D-pad rows cover
+// several inputs.
+struct LegendRow
+{
+  const char* label;
+  std::size_t first;
+  std::size_t last;
+};
+
+// Where the SR-ZGS controller drawing has each of its buttons. These belong
+// to that drawing: other artwork bundled with
+// MODERNGEKKO_LAUNCHER_CONTROLLER_ART needs its own positions here.
+constexpr float CONTROLLER_ART_CANVAS = 1024.0f;
+constexpr ImVec2 CONTROLLER_ART_MIN(40.0f, 258.0f);   // the drawing's bounds; the rest
+constexpr ImVec2 CONTROLLER_ART_MAX(984.0f, 854.0f);  // of the canvas is transparent
+constexpr std::array<ImVec2, 6> ART_LEFT_SHOULDER = {
+    {{189, 337}, {209, 314}, {244, 295}, {286, 284}, {336, 283}, {370, 312}}};
+constexpr std::array<ImVec2, 6> ART_RIGHT_SHOULDER = {
+    {{654, 312}, {720, 282}, {749, 286}, {785, 297}, {827, 325}, {834, 337}}};
+constexpr std::array<ImVec2, 6> ART_DPAD_UP = {{{256, 430}, {298, 498}}};
+constexpr std::array<ImVec2, 6> ART_DPAD_DOWN = {{{256, 532}, {298, 600}}};
+constexpr std::array<ImVec2, 6> ART_DPAD_LEFT = {{{193, 494}, {261, 536}}};
+constexpr std::array<ImVec2, 6> ART_DPAD_RIGHT = {{{293, 494}, {361, 536}}};
+
+#ifdef MODERNGEKKO_GAMECUBE_CONTROLLERS
+// The GameCube controller inputs the tester shows, with the profile keys
+// behind each one.
+enum ProfileInput : std::size_t
+{
+  INPUT_A,
+  INPUT_B,
+  INPUT_X,
+  INPUT_Y,
+  INPUT_Z,
+  INPUT_L,
+  INPUT_R,
+  INPUT_START,
+  INPUT_STICK_UP,
+  INPUT_STICK_DOWN,
+  INPUT_STICK_LEFT,
+  INPUT_STICK_RIGHT,
+  INPUT_DPAD_UP,
+  INPUT_DPAD_DOWN,
+  INPUT_DPAD_LEFT,
+  INPUT_DPAD_RIGHT,
+  INPUT_COUNT,
+};
+
+constexpr std::array<std::array<std::string_view, 3>, INPUT_COUNT> PROFILE_INPUT_KEYS = {{
+    {"Buttons/A"},
+    {"Buttons/B"},
+    {"Buttons/X"},
+    {"Buttons/Y"},
+    {"Buttons/Z"},
+    {"Triggers/L", "Triggers/L-Analog"},
+    {"Triggers/R", "Triggers/R-Analog"},
+    {"Buttons/Start"},
+    {"Main Stick/Up"},
+    {"Main Stick/Down"},
+    {"Main Stick/Left"},
+    {"Main Stick/Right"},
+    {"D-Pad/Up"},
+    {"D-Pad/Down"},
+    {"D-Pad/Left"},
+    {"D-Pad/Right"},
+}};
+
+constexpr const char* PROFILE_LEGEND_TITLE = "GameCube";
+
+// What a keyboard key shows on the keyboard drawing: the button's name, or
+// an arrow (1 up, 2 down, 3 left, 4 right) for the stick and the D-pad.
+constexpr std::array<const char*, INPUT_COUNT> INPUT_KEY_LABELS = {
+    "A", "B", "X", "Y", "Z", "L", "R", "START", "", "", "", "", "", "", "", ""};
+constexpr std::array<int, INPUT_COUNT> INPUT_KEY_ARROWS = {0, 0, 0, 0, 0, 0, 0, 0,
+                                                           1, 2, 3, 4, 1, 2, 3, 4};
+
+constexpr std::array<LegendRow, 9> LEGEND_ROWS = {{
+    {"A", INPUT_A, INPUT_A},
+    {"B", INPUT_B, INPUT_B},
+    {"X", INPUT_X, INPUT_X},
+    {"Y", INPUT_Y, INPUT_Y},
+    {"Z", INPUT_Z, INPUT_Z},
+    {"L", INPUT_L, INPUT_L},
+    {"R", INPUT_R, INPUT_R},
+    {"Start", INPUT_START, INPUT_START},
+    {"Stick", INPUT_STICK_UP, INPUT_DPAD_RIGHT},  // stick and D-pad
+}};
+
+// The drawing's six face buttons are A, B, C and X, Y, Z; GameCube has no C,
+// so C is the R trigger, like the right shoulder. The D-pad arms light for
+// the stick as well as for the D-pad.
+constexpr std::array<ArtHotspot, 17> CONTROLLER_ART_HOTSPOTS = {{
+    {INPUT_A, 1, {{{646, 605}}}, 42},
+    {INPUT_B, 1, {{{735, 553}}}, 42},
+    {INPUT_X, 1, {{{599, 515}}}, 42},
+    {INPUT_Y, 1, {{{688, 461}}}, 42},
+    {INPUT_Z, 1, {{{786, 427}}}, 42},
+    {INPUT_R, 1, {{{831, 518}}}, 42},  // C
+    {INPUT_R, 6, ART_RIGHT_SHOULDER, 0},
+    {INPUT_L, 6, ART_LEFT_SHOULDER, 0},
+    {INPUT_START, 1, {{{595, 405}}}, 22},  // +
+    {INPUT_STICK_UP, 2, ART_DPAD_UP, 0},
+    {INPUT_STICK_DOWN, 2, ART_DPAD_DOWN, 0},
+    {INPUT_STICK_LEFT, 2, ART_DPAD_LEFT, 0},
+    {INPUT_STICK_RIGHT, 2, ART_DPAD_RIGHT, 0},
+    {INPUT_DPAD_UP, 2, ART_DPAD_UP, 0},
+    {INPUT_DPAD_DOWN, 2, ART_DPAD_DOWN, 0},
+    {INPUT_DPAD_LEFT, 2, ART_DPAD_LEFT, 0},
+    {INPUT_DPAD_RIGHT, 2, ART_DPAD_RIGHT, 0},
+}};
+#else
+// The Wii Remote inputs the tester shows, with the profile keys behind each one.
+enum ProfileInput : std::size_t
+{
+  INPUT_A,
+  INPUT_B,
+  INPUT_1,
+  INPUT_2,
+  INPUT_MINUS,
+  INPUT_PLUS,
+  INPUT_HOME,
+  INPUT_UP,
+  INPUT_DOWN,
+  INPUT_LEFT,
+  INPUT_RIGHT,
+  INPUT_SHAKE,
+  INPUT_COUNT,
+};
+
+constexpr std::array<std::array<std::string_view, 3>, INPUT_COUNT> PROFILE_INPUT_KEYS = {{
     {"Buttons/A"},
     {"Buttons/B"},
     {"Buttons/1"},
@@ -1128,11 +1306,76 @@ constexpr std::array<std::array<std::string_view, 3>, WII_INPUT_COUNT> WII_PROFI
     {"Shake/X", "Shake/Y", "Shake/Z"},
 }};
 
+constexpr const char* PROFILE_LEGEND_TITLE = "Wii Remote";
+
+constexpr std::array<const char*, INPUT_COUNT> INPUT_KEY_LABELS = {
+    "A", "B", "1", "2", "\xE2\x88\x92", "+", "HOME", "", "", "", "", "SHAKE"};
+constexpr std::array<int, INPUT_COUNT> INPUT_KEY_ARROWS = {0, 0, 0, 0, 0, 0, 0, 1, 2, 3, 4, 0};
+
+constexpr std::array<LegendRow, 9> LEGEND_ROWS = {{
+    {"A", INPUT_A, INPUT_A},
+    {"B", INPUT_B, INPUT_B},
+    {"1", INPUT_1, INPUT_1},
+    {"2", INPUT_2, INPUT_2},
+    {"\xE2\x88\x92", INPUT_MINUS, INPUT_MINUS},
+    {"+", INPUT_PLUS, INPUT_PLUS},
+    {"HOME", INPUT_HOME, INPUT_HOME},
+    {"D-Pad", INPUT_UP, INPUT_RIGHT},
+    {"Shake", INPUT_SHAKE, INPUT_SHAKE},
+}};
+
+// Wii A and B on the shoulders, as the generated profile maps them, 1 and 2
+// on X (west) and A (south), and the shake on Z.
+constexpr std::array<ArtHotspot, 12> CONTROLLER_ART_HOTSPOTS = {{
+    {INPUT_A, 6, ART_LEFT_SHOULDER, 0},
+    {INPUT_B, 6, ART_RIGHT_SHOULDER, 0},
+    {INPUT_1, 1, {{{599, 515}}}, 42},
+    {INPUT_2, 1, {{{646, 605}}}, 42},
+    {INPUT_MINUS, 1, {{{429, 405}}}, 22},
+    {INPUT_PLUS, 1, {{{595, 405}}}, 22},
+    {INPUT_HOME, 3, {{{512, 566}, {554, 642}, {470, 642}}}, 0},  // centre triangle
+    {INPUT_UP, 2, ART_DPAD_UP, 0},
+    {INPUT_DOWN, 2, ART_DPAD_DOWN, 0},
+    {INPUT_LEFT, 2, ART_DPAD_LEFT, 0},
+    {INPUT_RIGHT, 2, ART_DPAD_RIGHT, 0},
+    {INPUT_SHAKE, 1, {{{786, 427}}}, 42},
+}};
+#endif
+
+// Where the SR-ZGS keyboard drawing (1768 x 608) has the keys the generated
+// profile uses: the top of each keycap. Keys missing here are still listed by
+// name when the drawing isn't bundled. Like the controller positions, these
+// belong to that drawing (MODERNGEKKO_LAUNCHER_KEYBOARD_ART).
+constexpr ImVec2 KEYBOARD_ART_SIZE(1768.0f, 608.0f);
+struct KeyboardArtKey
+{
+  SDL_Scancode key;
+  ImVec2 min;
+  ImVec2 max;
+};
+constexpr std::array<KeyboardArtKey, 12> KEYBOARD_ART_KEYS = {{
+    {SDL_SCANCODE_Q, {226, 156}, {320, 232}},
+    {SDL_SCANCODE_W, {330, 156}, {422, 232}},
+    {SDL_SCANCODE_E, {432, 156}, {524, 232}},
+    {SDL_SCANCODE_A, {246, 259}, {336, 334}},
+    {SDL_SCANCODE_S, {351, 259}, {439, 334}},
+    {SDL_SCANCODE_D, {455, 259}, {543, 334}},
+    {SDL_SCANCODE_LSHIFT, {56, 360}, {278, 433}},
+    {SDL_SCANCODE_RETURN, {1403, 260}, {1604, 332}},
+    {SDL_SCANCODE_UP, {1528, 361}, {1612, 431}},
+    {SDL_SCANCODE_LEFT, {1428, 462}, {1512, 535}},
+    {SDL_SCANCODE_DOWN, {1537, 462}, {1619, 535}},
+    {SDL_SCANCODE_RIGHT, {1636, 462}, {1722, 535}},
+}};
+
 struct ControllerTester
 {
-  bool loaded = false;  // WiimoteNew.ini read since the Controls page opened
-  std::string device;   // [Wiimote1] Device: the pad Dolphin will use
-  std::array<WiiBinding, WII_INPUT_COUNT> bindings;
+  bool loaded = false;  // the profile was read since the Controls page opened
+  std::string device;   // the profile's Device: the pad Dolphin will use
+  std::array<ProfileBinding, INPUT_COUNT> bindings;
+  bool has_pad_sources = false;
+  bool has_key_sources = false;
+  bool show_keyboard = false;  // which drawing the page shows
   SDL_JoystickID open_id = 0;
   SDL_Gamepad* gamepad = nullptr;
 };
@@ -1144,61 +1387,59 @@ void LoadTesterProfile(ControllerTester& tester, const fs::path& profile)
   std::unordered_map<std::string, std::string> values;
   std::ifstream input(profile);
   std::string line;
-  bool in_first_remote = false;
+  bool in_first_slot = false;
   while (std::getline(input, line))
   {
     const std::string_view trimmed = TrimView(line);
     if (trimmed.starts_with('['))
     {
-      in_first_remote = trimmed == "[Wiimote1]";
+      in_first_slot = trimmed == CONTROLLER_PROFILE_SECTION;
       continue;
     }
     const std::size_t separator = trimmed.find('=');
-    if (!in_first_remote || separator == std::string_view::npos)
+    if (!in_first_slot || separator == std::string_view::npos)
       continue;
     values[std::string(TrimView(trimmed.substr(0, separator)))] =
         std::string(TrimView(trimmed.substr(separator + 1)));
   }
   if (const auto device = values.find("Device"); device != values.end())
     tester.device = device->second;
-  for (std::size_t input_index = 0; input_index < WII_INPUT_COUNT; ++input_index)
+  // Names without a device belong to the profile's Device: a gamepad unless
+  // the profile points at a keyboard.
+  const bool device_is_pad = tester.device.empty() || tester.device.starts_with("SDL/");
+  for (std::size_t input_index = 0; input_index < INPUT_COUNT; ++input_index)
   {
-    for (const std::string_view key : WII_PROFILE_KEYS[input_index])
+    for (const std::string_view key : PROFILE_INPUT_KEYS[input_index])
     {
       if (key.empty())
         continue;
       if (const auto found = values.find(std::string(key)); found != values.end())
-        ParseBindingExpression(found->second, tester.bindings[input_index]);
+        ParseBindingExpression(found->second, device_is_pad, tester.bindings[input_index]);
+    }
+  }
+  tester.has_pad_sources = false;
+  tester.has_key_sources = false;
+  for (const ProfileBinding& binding : tester.bindings)
+  {
+    for (const InputSource& source : binding.sources)
+    {
+      tester.has_pad_sources = tester.has_pad_sources || !source.IsKey();
+      tester.has_key_sources = tester.has_key_sources || source.IsKey();
     }
   }
   tester.loaded = true;
 }
 
-// Reads the profile when the Controls page opens and keeps the profile's pad
-// open only while the page is shown.
-void UpdateControllerTester(ControllerTester& tester, bool page_visible, const fs::path& profile,
-                            const std::vector<ControllerOption>& controllers)
+bool IsSourceDown(SDL_Gamepad* gamepad, const InputSource& source)
 {
-  if (!page_visible)
-    tester.loaded = false;
-  else if (!tester.loaded)
-    LoadTesterProfile(tester, profile);
-  SDL_JoystickID wanted = 0;
-  if (page_visible)
+  if (source.IsKey())
   {
-    if (const int index = FindController(controllers, tester.device); index >= 0)
-      wanted = controllers[static_cast<std::size_t>(index)].joystick_id;
+    int key_count = 0;
+    const bool* keys = SDL_GetKeyboardState(&key_count);
+    return keys && source.key < key_count && keys[source.key];
   }
-  if (wanted == tester.open_id)
-    return;
-  if (tester.gamepad)
-    SDL_CloseGamepad(tester.gamepad);
-  tester.gamepad = wanted != 0 ? SDL_OpenGamepad(wanted) : nullptr;
-  tester.open_id = wanted;
-}
-
-bool IsPadSourceDown(SDL_Gamepad* gamepad, const PadSource& source)
-{
+  if (!gamepad)
+    return false;
   if (source.button >= 0)
     return SDL_GetGamepadButton(gamepad, static_cast<SDL_GamepadButton>(source.button));
   const float value =
@@ -1207,18 +1448,69 @@ bool IsPadSourceDown(SDL_Gamepad* gamepad, const PadSource& source)
   return value * static_cast<float>(source.direction) > 0.5f;
 }
 
-bool IsWiiInputDown(const ControllerTester& tester, std::size_t input)
+bool IsInputDown(const ControllerTester& tester, std::size_t input)
 {
-  if (!tester.gamepad)
-    return false;
-  return std::ranges::any_of(tester.bindings[input].sources, [&](const PadSource& source)
-                             { return IsPadSourceDown(tester.gamepad, source); });
+  return std::ranges::any_of(tester.bindings[input].sources, [&](const InputSource& source)
+                             { return IsSourceDown(tester.gamepad, source); });
 }
 
-// A short, readable name for a pad input. The face buttons use the label SDL
-// knows for this pad (A, Cross...), or their position when it knows none.
-std::string PadSourceName(SDL_Gamepad* gamepad, const PadSource& source)
+// Reads the profile when the Controls page opens, keeps the profile's pad open
+// only while the page is shown, and turns to the drawing of the controller or
+// of the keyboard, whichever was pressed last.
+void UpdateControllerTester(ControllerTester& tester, bool page_visible, const fs::path& profile,
+                            const std::vector<ControllerOption>& controllers)
 {
+  bool just_loaded = false;
+  if (!page_visible)
+  {
+    tester.loaded = false;
+  }
+  else if (!tester.loaded)
+  {
+    LoadTesterProfile(tester, profile);
+    just_loaded = true;
+  }
+  SDL_JoystickID wanted = 0;
+  if (page_visible)
+  {
+    if (const int index = FindController(controllers, tester.device); index >= 0)
+      wanted = controllers[static_cast<std::size_t>(index)].joystick_id;
+  }
+  if (wanted != tester.open_id)
+  {
+    if (tester.gamepad)
+      SDL_CloseGamepad(tester.gamepad);
+    tester.gamepad = wanted != 0 ? SDL_OpenGamepad(wanted) : nullptr;
+    tester.open_id = wanted;
+  }
+  if (!page_visible)
+    return;
+  if (just_loaded)
+    tester.show_keyboard = !tester.gamepad && tester.has_key_sources;
+  bool pad_down = false;
+  bool key_down = false;
+  for (const ProfileBinding& binding : tester.bindings)
+  {
+    for (const InputSource& source : binding.sources)
+    {
+      if (IsSourceDown(tester.gamepad, source))
+        (source.IsKey() ? key_down : pad_down) = true;
+    }
+  }
+  if (pad_down != key_down)
+    tester.show_keyboard = key_down;
+  if (!tester.has_key_sources)
+    tester.show_keyboard = false;
+  else if (!tester.has_pad_sources)
+    tester.show_keyboard = true;
+}
+
+// A short, readable name for an input. The face buttons use the label SDL
+// knows for this pad (A, Cross...), or their position when it knows none.
+std::string SourceName(SDL_Gamepad* gamepad, const InputSource& source)
+{
+  if (source.IsKey())
+    return SDL_GetScancodeName(static_cast<SDL_Scancode>(source.key));
   if (source.button < 0)
   {
     if (source.axis == SDL_GAMEPAD_AXIS_LEFT_TRIGGER)
@@ -1289,49 +1581,31 @@ std::string PadSourceName(SDL_Gamepad* gamepad, const PadSource& source)
   }
 }
 
-// The D-pad row names whole controls ("D-pad, Left stick") instead of listing
-// the twelve directions.
-std::string PadSourceGroup(SDL_Gamepad* gamepad, const PadSource& source)
+// Rows that cover several directions name whole controls ("D-pad, Left
+// stick", "Arrow keys") instead of listing every direction.
+std::string SourceGroup(SDL_Gamepad* gamepad, const InputSource& source)
 {
+  if (source.IsKey())
+  {
+    if (source.key == SDL_SCANCODE_UP || source.key == SDL_SCANCODE_DOWN ||
+        source.key == SDL_SCANCODE_LEFT || source.key == SDL_SCANCODE_RIGHT)
+      return "Arrow keys";
+    return SourceName(gamepad, source);
+  }
   if (source.button >= SDL_GAMEPAD_BUTTON_DPAD_UP && source.button <= SDL_GAMEPAD_BUTTON_DPAD_RIGHT)
     return "D-pad";
   if (source.button < 0 && source.axis <= SDL_GAMEPAD_AXIS_LEFTY)
     return "Left stick";
   if (source.button < 0 && source.axis <= SDL_GAMEPAD_AXIS_RIGHTY)
     return "Right stick";
-  return PadSourceName(gamepad, source);
+  return SourceName(gamepad, source);
 }
 
-// Button positions in the SR-ZGS controller artwork, in pixels of its
-// 1024 x 1024 canvas. They belong to that drawing: other artwork bundled with
-// MODERNGEKKO_LAUNCHER_CONTROLLER_ART needs its own positions here.
-constexpr float CONTROLLER_ART_CANVAS = 1024.0f;
-constexpr ImVec2 CONTROLLER_ART_MIN(40.0f, 258.0f);   // the drawing's bounds; the rest
-constexpr ImVec2 CONTROLLER_ART_MAX(984.0f, 854.0f);  // of the canvas is transparent
-
-struct ArtHotspot
+ImU32 HighlightFill()
 {
-  WiiInput input;
-  int point_count;  // 1: circle at points[0], 2: rectangle, 3+: convex polygon
-  std::array<ImVec2, 6> points;
-  float radius;
-};
-
-constexpr std::array<ArtHotspot, WII_INPUT_COUNT> CONTROLLER_ART_HOTSPOTS = {{
-    // Wii A and B on the shoulder buttons, as the generated profile maps them.
-    {WII_A, 6, {{{189, 337}, {209, 314}, {244, 295}, {286, 284}, {336, 283}, {370, 312}}}, 0},
-    {WII_B, 6, {{{654, 312}, {720, 282}, {749, 286}, {785, 297}, {827, 325}, {834, 337}}}, 0},
-    {WII_1, 1, {{{599, 515}}}, 42},  // X (west)
-    {WII_2, 1, {{{646, 605}}}, 42},  // A (south)
-    {WII_MINUS, 1, {{{429, 405}}}, 22},
-    {WII_PLUS, 1, {{{595, 405}}}, 22},
-    {WII_HOME, 3, {{{512, 566}, {554, 642}, {470, 642}}}, 0},  // centre triangle
-    {WII_UP, 2, {{{256, 430}, {298, 498}}}, 0},
-    {WII_DOWN, 2, {{{256, 532}, {298, 600}}}, 0},
-    {WII_LEFT, 2, {{{193, 494}, {261, 536}}}, 0},
-    {WII_RIGHT, 2, {{{293, 494}, {361, 536}}}, 0},
-    {WII_SHAKE, 1, {{{786, 427}}}, 42},  // Z
-}};
+  return ImGui::GetColorU32(
+      ImVec4(LAUNCHER_ACCENT.x, LAUNCHER_ACCENT.y, LAUNCHER_ACCENT.z, 0.45f));
+}
 
 void DrawArtHotspot(ImDrawList* draw_list, const ArtHotspot& spot, ImVec2 origin, float zoom,
                     float scale)
@@ -1341,8 +1615,7 @@ void DrawArtHotspot(ImDrawList* draw_list, const ArtHotspot& spot, ImVec2 origin
     return ImVec2(origin.x + (point.x - CONTROLLER_ART_MIN.x) * zoom,
                   origin.y + (point.y - CONTROLLER_ART_MIN.y) * zoom);
   };
-  const ImU32 fill =
-      ImGui::GetColorU32(ImVec4(LAUNCHER_ACCENT.x, LAUNCHER_ACCENT.y, LAUNCHER_ACCENT.z, 0.45f));
+  const ImU32 fill = HighlightFill();
   const ImU32 edge = ImGui::GetColorU32(LAUNCHER_ACCENT);
   const float thickness = 2.5f * scale;
   if (spot.point_count == 1)
@@ -1368,79 +1641,171 @@ void DrawArtHotspot(ImDrawList* draw_list, const ArtHotspot& spot, ImVec2 origin
   }
 }
 
-// The artwork (when the build bundled it) with the pressed buttons lit, and
-// beside it the list of Wii Remote buttons and the pad inputs behind each one.
-void DrawControllerTester(const ControllerTester& tester, const LauncherImage& art, ImFont* bold,
-                          float scale)
+// A small filled triangle pointing up (1), down (2), left (3) or right (4).
+void DrawArrowGlyph(ImDrawList* draw_list, ImVec2 center, float half, int direction, ImU32 color)
+{
+  const float x = center.x;
+  const float y = center.y;
+  switch (direction)
+  {
+  case 1:
+    draw_list->AddTriangleFilled({x, y - half}, {x + half, y + half * 0.7f},
+                                 {x - half, y + half * 0.7f}, color);
+    break;
+  case 2:
+    draw_list->AddTriangleFilled({x - half, y - half * 0.7f}, {x + half, y - half * 0.7f},
+                                 {x, y + half}, color);
+    break;
+  case 3:
+    draw_list->AddTriangleFilled({x - half, y}, {x + half * 0.7f, y - half},
+                                 {x + half * 0.7f, y + half}, color);
+    break;
+  case 4:
+    draw_list->AddTriangleFilled({x - half * 0.7f, y - half}, {x + half, y},
+                                 {x - half * 0.7f, y + half}, color);
+    break;
+  default:
+    break;
+  }
+}
+
+// The controller drawing, scaled to `width`, with the pressed inputs lit.
+void DrawControllerArt(const ControllerTester& tester, const LauncherImage& art, float width,
+                       float scale)
+{
+  const float zoom = width / (CONTROLLER_ART_MAX.x - CONTROLLER_ART_MIN.x);
+  const ImVec2 size(width, (CONTROLLER_ART_MAX.y - CONTROLLER_ART_MIN.y) * zoom);
+  const ImVec2 origin = ImGui::GetCursorScreenPos();
+  ImDrawList* draw_list = ImGui::GetWindowDrawList();
+  draw_list->AddImage(
+      ImTextureRef(static_cast<ImTextureID>(reinterpret_cast<std::uintptr_t>(art.texture))),
+      origin, ImVec2(origin.x + size.x, origin.y + size.y),
+      ImVec2(CONTROLLER_ART_MIN.x / CONTROLLER_ART_CANVAS,
+             CONTROLLER_ART_MIN.y / CONTROLLER_ART_CANVAS),
+      ImVec2(CONTROLLER_ART_MAX.x / CONTROLLER_ART_CANVAS,
+             CONTROLLER_ART_MAX.y / CONTROLLER_ART_CANVAS));
+  for (const ArtHotspot& spot : CONTROLLER_ART_HOTSPOTS)
+  {
+    if (IsInputDown(tester, spot.input))
+      DrawArtHotspot(draw_list, spot, origin, zoom, scale);
+  }
+  ImGui::Dummy(size);
+}
+
+// The keyboard drawing, centred. Every key the profile uses is outlined and
+// labelled with what it presses, and lights up while held.
+void DrawKeyboardArt(const ControllerTester& tester, const LauncherImage& art, ImFont* bold,
+                     float scale)
+{
+  // A little narrower than the panel, so that with its hint line it is no
+  // taller than the controller drawing's list and the page doesn't scroll.
+  const float available = ImGui::GetContentRegionAvail().x;
+  const float width = std::floor(available * 0.9f);
+  ImGui::SetCursorPosX(ImGui::GetCursorPosX() + std::floor((available - width) * 0.5f));
+  const float zoom = width / KEYBOARD_ART_SIZE.x;
+  const ImVec2 size(width, KEYBOARD_ART_SIZE.y * zoom);
+  const ImVec2 origin = ImGui::GetCursorScreenPos();
+  ImDrawList* draw_list = ImGui::GetWindowDrawList();
+  draw_list->AddImage(
+      ImTextureRef(static_cast<ImTextureID>(reinterpret_cast<std::uintptr_t>(art.texture))),
+      origin, ImVec2(origin.x + size.x, origin.y + size.y));
+  const auto to_screen = [&](ImVec2 point)
+  { return ImVec2(origin.x + point.x * zoom, origin.y + point.y * zoom); };
+
+  const ImU32 edge = ImGui::GetColorU32(LAUNCHER_ACCENT);
+  const ImU32 quiet_edge =
+      ImGui::GetColorU32(ImVec4(LAUNCHER_ACCENT.x, LAUNCHER_ACCENT.y, LAUNCHER_ACCENT.z, 0.55f));
+  const ImU32 label_background = IM_COL32(0, 0, 0, 190);
+  const float rounding = 3.0f * scale;
+  ImGui::PushFont(bold, ImGui::GetStyle().FontSizeBase * 0.68f);
+  const float label_height = ImGui::GetFontSize();
+  std::vector<std::pair<int, std::size_t>> drawn;  // L and L-Analog share a key
+  for (std::size_t input = 0; input < INPUT_COUNT; ++input)
+  {
+    for (const InputSource& source : tester.bindings[input].sources)
+    {
+      if (!source.IsKey() ||
+          std::ranges::find(drawn, std::pair{source.key, input}) != drawn.end())
+        continue;
+      const auto spot = std::ranges::find(KEYBOARD_ART_KEYS, static_cast<SDL_Scancode>(source.key),
+                                          &KeyboardArtKey::key);
+      if (spot == KEYBOARD_ART_KEYS.end())
+        continue;
+      drawn.emplace_back(source.key, input);
+      const ImVec2 min = to_screen(spot->min);
+      const ImVec2 max = to_screen(spot->max);
+      const bool down = IsSourceDown(tester.gamepad, source);
+      if (down)
+      {
+        draw_list->AddRectFilled(min, max, HighlightFill(), rounding);
+        draw_list->AddRect(min, max, edge, rounding, 0, 2.5f * scale);
+      }
+      else
+      {
+        draw_list->AddRect(min, max, quiet_edge, rounding, 0, 1.5f * scale);
+      }
+      const ImVec2 center((min.x + max.x) * 0.5f, (min.y + max.y) * 0.5f);
+      const ImU32 label_color = down ? edge : IM_COL32_WHITE;
+      if (INPUT_KEY_ARROWS[input] != 0)
+      {
+        const float half = label_height * 0.5f;
+        draw_list->AddRectFilled({center.x - half - 2.0f * scale, center.y - half - 2.0f * scale},
+                                 {center.x + half + 2.0f * scale, center.y + half + 2.0f * scale},
+                                 label_background, rounding);
+        DrawArrowGlyph(draw_list, center, half * 0.7f, INPUT_KEY_ARROWS[input], label_color);
+      }
+      else
+      {
+        const char* label = INPUT_KEY_LABELS[input];
+        const ImVec2 text = ImGui::CalcTextSize(label);
+        const ImVec2 padding(4.0f * scale, 1.0f * scale);
+        draw_list->AddRectFilled(
+            {center.x - text.x * 0.5f - padding.x, center.y - text.y * 0.5f - padding.y},
+            {center.x + text.x * 0.5f + padding.x, center.y + text.y * 0.5f + padding.y},
+            label_background, rounding);
+        draw_list->AddText({center.x - text.x * 0.5f, center.y - text.y * 0.5f}, label_color,
+                           label);
+      }
+    }
+  }
+  ImGui::PopFont();
+  ImGui::Dummy(size);
+}
+
+// The rows beside the controller drawing (or alone, without one): each
+// button of the emulated controller and the pad inputs or keys behind it.
+void DrawInputLegend(const ControllerTester& tester, bool keys, ImFont* bold)
 {
   const ImGuiStyle& style = ImGui::GetStyle();
-  if (art.texture)
-  {
-    const float width = std::floor(ImGui::GetContentRegionAvail().x * 0.56f);
-    const float zoom = width / (CONTROLLER_ART_MAX.x - CONTROLLER_ART_MIN.x);
-    const ImVec2 size(width, (CONTROLLER_ART_MAX.y - CONTROLLER_ART_MIN.y) * zoom);
-    const ImVec2 origin = ImGui::GetCursorScreenPos();
-    ImDrawList* draw_list = ImGui::GetWindowDrawList();
-    draw_list->AddImage(
-        ImTextureRef(static_cast<ImTextureID>(reinterpret_cast<std::uintptr_t>(art.texture))),
-        origin, ImVec2(origin.x + size.x, origin.y + size.y),
-        ImVec2(CONTROLLER_ART_MIN.x / CONTROLLER_ART_CANVAS,
-               CONTROLLER_ART_MIN.y / CONTROLLER_ART_CANVAS),
-        ImVec2(CONTROLLER_ART_MAX.x / CONTROLLER_ART_CANVAS,
-               CONTROLLER_ART_MAX.y / CONTROLLER_ART_CANVAS));
-    for (const ArtHotspot& spot : CONTROLLER_ART_HOTSPOTS)
-    {
-      if (IsWiiInputDown(tester, spot.input))
-        DrawArtHotspot(draw_list, spot, origin, zoom, scale);
-    }
-    ImGui::Dummy(size);
-    ImGui::SameLine(0.0f, style.ItemSpacing.x * 2.0f);
-  }
-
-  struct LegendRow
-  {
-    const char* label;
-    WiiInput first;
-    WiiInput last;  // the D-Pad row covers four inputs
-  };
-  constexpr std::array<LegendRow, 9> rows = {{
-      {"A", WII_A, WII_A},
-      {"B", WII_B, WII_B},
-      {"1", WII_1, WII_1},
-      {"2", WII_2, WII_2},
-      {"\xE2\x88\x92", WII_MINUS, WII_MINUS},
-      {"+", WII_PLUS, WII_PLUS},
-      {"HOME", WII_HOME, WII_HOME},
-      {"D-Pad", WII_UP, WII_RIGHT},
-      {"Shake", WII_SHAKE, WII_SHAKE},
-  }};
   ImGui::BeginGroup();
   ImGui::PushFont(bold, 0.0f);
   float label_width = 0.0f;
-  for (const LegendRow& row : rows)
+  for (const LegendRow& row : LEGEND_ROWS)
     label_width = std::max(label_width, ImGui::CalcTextSize(row.label).x);
   ImGui::PopFont();
-  label_width = std::max(label_width, ImGui::CalcTextSize("Wii Remote").x);
+  label_width = std::max(label_width, ImGui::CalcTextSize(PROFILE_LEGEND_TITLE).x);
   label_width += style.ItemSpacing.x * 2.0f;
   // Rows sit close together so the list is about as tall as the artwork.
   ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(style.ItemSpacing.x, 0.0f));
   // Inside a group, SameLine() offsets count from the group's left edge.
-  ImGui::TextDisabled("Wii Remote");
+  ImGui::TextDisabled("%s", PROFILE_LEGEND_TITLE);
   ImGui::SameLine(label_width);
-  ImGui::TextDisabled("Your controller");
-  for (const LegendRow& row : rows)
+  ImGui::TextDisabled(keys ? "Key" : "Your controller");
+  for (const LegendRow& row : LEGEND_ROWS)
   {
     bool down = false;
     bool custom = false;
     std::vector<std::string> names;
     for (std::size_t input = row.first; input <= row.last; ++input)
     {
-      down = down || IsWiiInputDown(tester, input);
+      down = down || IsInputDown(tester, input);
       custom = custom || tester.bindings[input].custom;
-      for (const PadSource& source : tester.bindings[input].sources)
+      for (const InputSource& source : tester.bindings[input].sources)
       {
-        std::string name = row.first == row.last ? PadSourceName(tester.gamepad, source) :
-                                                   PadSourceGroup(tester.gamepad, source);
+        if (source.IsKey() != keys)
+          continue;
+        std::string name = row.first == row.last ? SourceName(tester.gamepad, source) :
+                                                   SourceGroup(tester.gamepad, source);
         if (std::ranges::find(names, name) == names.end())
           names.push_back(std::move(name));
       }
@@ -1466,6 +1831,77 @@ void DrawControllerTester(const ControllerTester& tester, const LauncherImage& a
       ImGui::TextDisabled("%s", text.c_str());
     ImGui::PopTextWrapPos();
   }
+}
+
+void EndInputLegend()
+{
+  ImGui::PopStyleVar();
+  ImGui::EndGroup();
+}
+
+// A quiet tab: the current one in the accent colour.
+bool DrawTesterTab(const char* label, bool selected)
+{
+  const ImGuiStyle& style = ImGui::GetStyle();
+  ImGui::PushStyleColor(ImGuiCol_Button,
+                        selected ? ImVec4(LAUNCHER_ACCENT.x, LAUNCHER_ACCENT.y,
+                                          LAUNCHER_ACCENT.z, 0.16f) :
+                                   ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
+  ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(1.0f, 1.0f, 1.0f, 0.06f));
+  ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(1.0f, 1.0f, 1.0f, 0.10f));
+  ImGui::PushStyleColor(ImGuiCol_Text,
+                        selected ? LAUNCHER_ACCENT : style.Colors[ImGuiCol_TextDisabled]);
+  const bool clicked = ImGui::SmallButton(label);
+  ImGui::PopStyleColor(4);
+  return clicked;
+}
+
+// The tester under the profile line of the Controls page. It starts on that
+// line, with the Controller / Keyboard tabs at its right end when the profile
+// has both, then shows the matching drawing (or its list of inputs).
+void DrawControllerTester(ControllerTester& tester, const LauncherImage& controller_art,
+                          const LauncherImage& keyboard_art, ImFont* bold, float scale)
+{
+  const ImGuiStyle& style = ImGui::GetStyle();
+  if (tester.has_pad_sources && tester.has_key_sources)
+  {
+    const float tabs_width = ImGui::CalcTextSize("Controller").x +
+                             ImGui::CalcTextSize("Keyboard").x + style.FramePadding.x * 4.0f +
+                             style.ItemSpacing.x;
+    ImGui::SameLine();
+    ImGui::SetCursorPosX(ImGui::GetCursorPosX() +
+                         std::max(0.0f, ImGui::GetContentRegionAvail().x - tabs_width));
+    if (DrawTesterTab("Controller", !tester.show_keyboard))
+      tester.show_keyboard = false;
+    ImGui::SameLine();
+    if (DrawTesterTab("Keyboard", tester.show_keyboard))
+      tester.show_keyboard = true;
+  }
+  ImGui::Spacing();
+
+  if (tester.show_keyboard)
+  {
+    if (keyboard_art.texture)
+    {
+      DrawKeyboardArt(tester, keyboard_art, bold, scale);
+      ImGui::TextColored(LAUNCHER_ACCENT, "Press keys to test them.");
+    }
+    else
+    {
+      DrawInputLegend(tester, true, bold);
+      ImGui::TextColored(LAUNCHER_ACCENT, "Press keys to test them.");
+      EndInputLegend();
+    }
+    return;
+  }
+
+  if (controller_art.texture)
+  {
+    DrawControllerArt(tester, controller_art,
+                      std::floor(ImGui::GetContentRegionAvail().x * 0.56f), scale);
+    ImGui::SameLine(0.0f, style.ItemSpacing.x * 2.0f);
+  }
+  DrawInputLegend(tester, false, bold);
   // Last line: how to use the tester, or why it can't light anything up.
   ImGui::PushTextWrapPos(0.0f);
   if (tester.gamepad)
@@ -1474,7 +1910,7 @@ void DrawControllerTester(const ControllerTester& tester, const LauncherImage& a
   }
   else if (tester.device.empty())
   {
-    ImGui::TextDisabled("No controller in WiimoteNew.ini.");
+    ImGui::TextDisabled("No controller in %s.", std::string(CONTROLLER_PROFILE_NAME).c_str());
   }
   else
   {
@@ -1485,10 +1921,8 @@ void DrawControllerTester(const ControllerTester& tester, const LauncherImage& a
     ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.3f, 1.0f), "Connect %s to test it.", name.c_str());
   }
   ImGui::PopTextWrapPos();
-  ImGui::PopStyleVar();
-  ImGui::EndGroup();
+  EndInputLegend();
 }
-#endif
 } // namespace
 
 int main(int argc, char** argv)
@@ -1580,10 +2014,10 @@ int main(int argc, char** argv)
   ImGui_ImplSDL3_InitForSDLRenderer(window, renderer);
   ImGui_ImplSDLRenderer3_Init(renderer);
   const LauncherBanner banner = LoadLauncherBanner(renderer, release_directory);
-#ifndef MODERNGEKKO_GAMECUBE_CONTROLLERS
   const LauncherImage controller_art = LoadLauncherImage(
       renderer, release_directory, "launcher-controller.png", "launcher controller art");
-#endif
+  const LauncherImage keyboard_art = LoadLauncherImage(
+      renderer, release_directory, "launcher-keyboard.png", "launcher keyboard art");
 
   std::vector<fs::path> images = FindDiscImages();
   std::optional<fs::path> selected_image = images.empty() ? std::nullopt : std::optional(images[0]);
@@ -1659,9 +2093,7 @@ int main(int argc, char** argv)
   int controller_index = FindController(controllers, selected_controller);
   std::string controller_status;
   const fs::path controller_profile = user_directory / "Config" / CONTROLLER_PROFILE_NAME;
-#ifndef MODERNGEKKO_GAMECUBE_CONTROLLERS
   ControllerTester controller_tester;
-#endif
   const auto select_controller = [&](int index)
   {
     std::string message;
@@ -1688,9 +2120,7 @@ int main(int argc, char** argv)
     config.show_fps_in_title = show_fps_in_title;
     controller_profile_exists = true;
     controller_status = std::move(message);
-#ifndef MODERNGEKKO_GAMECUBE_CONTROLLERS
     controller_tester.loaded = false;  // read the new profile on the next frame
-#endif
     return true;
   };
   // Like select_controller, but keeps the profile's button mapping and only
@@ -1716,9 +2146,7 @@ int main(int argc, char** argv)
     controller_status = std::string(CONTROLLER_PROFILE_NAME) + " now uses " +
                         controllers[index].label + " with the same buttons";
     std::cout << "controller: " << controller_status << '\n';
-#ifndef MODERNGEKKO_GAMECUBE_CONTROLLERS
     controller_tester.loaded = false;
-#endif
     return true;
   };
   const auto ensure_controller = [&]
@@ -1808,10 +2236,14 @@ int main(int argc, char** argv)
     }
     if (controllers_changed)
       refresh_controllers();
-#ifndef MODERNGEKKO_GAMECUBE_CONTROLLERS
     UpdateControllerTester(controller_tester, current_page == LauncherPage::Controls,
                            controller_profile, controllers);
-#endif
+    // On the Controls page the keyboard is being tested: its keys must not
+    // also move ImGui's focus or press the page's buttons.
+    if (current_page == LauncherPage::Controls)
+      io.ConfigFlags &= ~ImGuiConfigFlags_NavEnableKeyboard;
+    else
+      io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
 
     {
       std::lock_guard lock(dialog.mutex);
@@ -2273,14 +2705,10 @@ int main(int argc, char** argv)
     else
       ImGui::TextDisabled("%s is created the first time you play.", std::string(CONTROLLER_PROFILE_NAME).c_str());
     ImGui::PopTextWrapPos();
-    ImGui::Spacing();
-#ifndef MODERNGEKKO_GAMECUBE_CONTROLLERS
+    // The tester starts on the line above, where it puts its tabs.
     if (controller_profile_exists)
-    {
-      DrawControllerTester(controller_tester, controller_art, fonts.bold, scale);
-      ImGui::Spacing();
-    }
-#endif
+      DrawControllerTester(controller_tester, controller_art, keyboard_art, fonts.bold, scale);
+    ImGui::Spacing();
     ImGui::BeginDisabled(controller_index < 0);
     const std::string replace_profile =
         "Replace with generated " + std::string(GENERATED_PROFILE_LABEL);
@@ -2556,12 +2984,12 @@ int main(int argc, char** argv)
   ImGui_ImplSDLRenderer3_Shutdown();
   ImGui_ImplSDL3_Shutdown();
   ImGui::DestroyContext();
-#ifndef MODERNGEKKO_GAMECUBE_CONTROLLERS
   if (controller_tester.gamepad)
     SDL_CloseGamepad(controller_tester.gamepad);
   if (controller_art.texture)
     SDL_DestroyTexture(controller_art.texture);
-#endif
+  if (keyboard_art.texture)
+    SDL_DestroyTexture(keyboard_art.texture);
   if (banner.texture)
     SDL_DestroyTexture(banner.texture);
   SDL_DestroyRenderer(renderer);

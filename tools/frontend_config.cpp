@@ -1,6 +1,7 @@
 #include "frontend_config.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <charconv>
 #include <fstream>
@@ -79,6 +80,31 @@ std::string_view ControllerSectionPrefix() {
   return "[Wiimote";
 #endif
 }
+
+#ifdef MODERNGEKKO_GAMECUBE_CONTROLLERS
+// The first GameCube controller also answers to the keyboard: A, S, D and
+// Q, W, E for the buttons laid out as A, B, R and X, Y, Z, left Shift for L,
+// Enter for Start and the arrows for the control stick. Device and key names
+// are the ones Dolphin's keyboard backend uses on each platform; on Linux that
+// is the X11 backend, which the runner uses unless started with --wayland.
+#if defined(_WIN32)
+constexpr std::string_view KEYBOARD_DEVICE = "DInput/0/Keyboard Mouse";
+constexpr std::string_view KEY_START = "RETURN";
+constexpr std::string_view KEY_LEFT_SHIFT = "LSHIFT";
+constexpr std::array<std::string_view, 4> KEY_ARROWS = {"UP", "DOWN", "LEFT", "RIGHT"};
+#elif defined(__APPLE__)
+constexpr std::string_view KEYBOARD_DEVICE = "Quartz/0/Keyboard & Mouse";
+constexpr std::string_view KEY_START = "Return";
+constexpr std::string_view KEY_LEFT_SHIFT = "Left Shift";
+constexpr std::array<std::string_view, 4> KEY_ARROWS = {"Up Arrow", "Down Arrow", "Left Arrow",
+                                                        "Right Arrow"};
+#else
+constexpr std::string_view KEYBOARD_DEVICE = "XInput2/0/Virtual core pointer";
+constexpr std::string_view KEY_START = "Return";
+constexpr std::string_view KEY_LEFT_SHIFT = "Shift_L";
+constexpr std::array<std::string_view, 4> KEY_ARROWS = {"Up", "Down", "Left", "Right"};
+#endif
+#endif
 
 } // namespace
 
@@ -404,28 +430,35 @@ bool GenerateControllerConfig(const fs::path &user_directory,
     output << "[GCPad" << i + 1 << "]\n";
     if (i >= controllers.size())
       continue;
+    // " | `<keyboard>:<key>`" on the first controller, nothing on the others.
+    const auto key = [i](std::string_view name) {
+      if (i != 0)
+        return std::string();
+      return " | `" + std::string(KEYBOARD_DEVICE) + ':' + std::string(name) +
+             '`';
+    };
     output << "Device = " << controllers[i] << '\n'
-           << "Buttons/A = `Button A`\n"
-              "Buttons/B = `Button B`\n"
-              "Buttons/X = `Button X`\n"
-              "Buttons/Y = `Button Y`\n"
-              "Buttons/Z = `Shoulder R`\n"
-              "Buttons/Start = Start\n"
-              "Main Stick/Up = `Left Y+`\n"
-              "Main Stick/Down = `Left Y-`\n"
-              "Main Stick/Left = `Left X-`\n"
-              "Main Stick/Right = `Left X+`\n"
-              "Main Stick/Calibration = 100.00\n"
-              "C-Stick/Up = `Right Y+`\n"
+           << "Buttons/A = `Button A`" << key("A") << '\n'
+           << "Buttons/B = `Button B`" << key("S") << '\n'
+           << "Buttons/X = `Button X`" << key("Q") << '\n'
+           << "Buttons/Y = `Button Y`" << key("W") << '\n'
+           << "Buttons/Z = `Shoulder R`" << key("E") << '\n'
+           << "Buttons/Start = Start" << key(KEY_START) << '\n'
+           << "Main Stick/Up = `Left Y+`" << key(KEY_ARROWS[0]) << '\n'
+           << "Main Stick/Down = `Left Y-`" << key(KEY_ARROWS[1]) << '\n'
+           << "Main Stick/Left = `Left X-`" << key(KEY_ARROWS[2]) << '\n'
+           << "Main Stick/Right = `Left X+`" << key(KEY_ARROWS[3]) << '\n'
+           << "Main Stick/Calibration = 100.00\n"
+           << "C-Stick/Up = `Right Y+`\n"
               "C-Stick/Down = `Right Y-`\n"
               "C-Stick/Left = `Right X-`\n"
               "C-Stick/Right = `Right X+`\n"
               "C-Stick/Calibration = 100.00\n"
-              "Triggers/L = `Trigger L`\n"
-              "Triggers/R = `Trigger R`\n"
-              "Triggers/L-Analog = `Trigger L`\n"
-              "Triggers/R-Analog = `Trigger R`\n"
-              "D-Pad/Up = `Pad N`\n"
+           << "Triggers/L = `Trigger L`" << key(KEY_LEFT_SHIFT) << '\n'
+           << "Triggers/R = `Trigger R`" << key("D") << '\n'
+           << "Triggers/L-Analog = `Trigger L`" << key(KEY_LEFT_SHIFT) << '\n'
+           << "Triggers/R-Analog = `Trigger R`" << key("D") << '\n'
+           << "D-Pad/Up = `Pad N`\n"
               "D-Pad/Down = `Pad S`\n"
               "D-Pad/Left = `Pad W`\n"
               "D-Pad/Right = `Pad E`\n"
@@ -490,6 +523,18 @@ bool GenerateControllerConfig(const fs::path &user_directory,
       *message = "can't write " + destination.string();
     return false;
   }
+#ifdef MODERNGEKKO_GAMECUBE_CONTROLLERS
+  // Without WiimoteNew.ini Dolphin gives the emulated Wii Remote its keyboard
+  // defaults, which overlap the GameCube keys above: Enter would also press
+  // HOME and Q the minus button. An idle profile keeps the Wii Remote
+  // connected, in case the game expects one, but with nothing bound. An
+  // existing file is the player's and is left alone.
+  const fs::path wii_remotes = destination.parent_path() / "WiimoteNew.ini";
+  if (!fs::exists(wii_remotes, ec)) {
+    std::ofstream idle(wii_remotes);
+    idle << "[Wiimote1]\n[Wiimote2]\n[Wiimote3]\n[Wiimote4]\n[BalanceBoard]\n";
+  }
+#endif
   if (message)
     *message = std::to_string(controllers.size()) +
 #ifdef MODERNGEKKO_GAMECUBE_CONTROLLERS

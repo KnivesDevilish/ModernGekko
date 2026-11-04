@@ -95,8 +95,24 @@ int main() {
       !generated.contains("Triggers/L-Analog = `Trigger L`\n") ||
       !generated.contains("Rumble/Motor = `Motor L` | `Motor R`\n") ||
       !generated.contains("[GCPad2]\nDevice = SDL/1/Second Controller\n") ||
+      // Only the first controller also answers to the keyboard.
+      !generated.contains("[GCPad1]\nDevice = SDL/0/Test Controller\n"
+                          "Buttons/A = `Button A` | `") ||
+      !generated.contains("Device = SDL/1/Second Controller\n"
+                          "Buttons/A = `Button A`\n") ||
+      // Its R trigger is also the D key; the D-pad has no keys.
+      !generated.contains(":D`\nTriggers/L-Analog") ||
+      generated.contains("D-Pad/Up = `Pad N` | `") ||
       generated.contains("[Wiimote") || generated.contains("[BalanceBoard]")) {
     return 5;
+  }
+  // The Wii Remote stays connected with nothing bound.
+  {
+    std::ifstream idle(directory / "Config" / "WiimoteNew.ini");
+    const std::string wii_remotes((std::istreambuf_iterator<char>(idle)),
+                                  std::istreambuf_iterator<char>());
+    if (wii_remotes != "[Wiimote1]\n[Wiimote2]\n[Wiimote3]\n[Wiimote4]\n[BalanceBoard]\n")
+      return 14;
   }
 #else
   if (!generated.contains("Buttons/A = `Shoulder L`\n") ||
