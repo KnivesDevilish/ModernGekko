@@ -58,6 +58,8 @@ set(MODERNGEKKO_ACCEPTED_SOURCE_DISC_ID "" CACHE STRING
     "Source disc ID accepted by the optional disc preparer")
 set(MODERNGEKKO_LAUNCHER_BANNER "" CACHE FILEPATH
     "Optional PNG shown at the top of the launcher's Play page")
+set(MODERNGEKKO_LAUNCHER_CONTROLLER_ART "" CACHE FILEPATH
+    "Optional PNG of the SR-ZGS controller drawing for the Controls page tester")
 option(MODERNGEKKO_USER_DIRECTORY_IN_DOCUMENTS
        "Place the branded user directory in Documents" OFF)
 set(MODERNGEKKO_FRONTEND_SDK "" CACHE PATH
@@ -597,6 +599,17 @@ if(MODERNGEKKO_ENABLE_DOLPHIN_RUNTIME)
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
                     "${MODERNGEKKO_LAUNCHER_BANNER}"
                     "$<TARGET_FILE_DIR:moderngekko-launcher>/Resources/launcher-banner.png")
+    endif()
+    # The Controls page tester draws Resources/launcher-controller.png and lights
+    # up its buttons; the button positions in the launcher match that drawing.
+    # Without it the tester shows the button list alone.
+    if(MODERNGEKKO_LAUNCHER_CONTROLLER_ART)
+        add_custom_command(TARGET moderngekko-launcher POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E make_directory
+                    "$<TARGET_FILE_DIR:moderngekko-launcher>/Resources"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                    "${MODERNGEKKO_LAUNCHER_CONTROLLER_ART}"
+                    "$<TARGET_FILE_DIR:moderngekko-launcher>/Resources/launcher-controller.png")
     endif()
     if(MODERNGEKKO_FRONTEND_SDK AND UNIX AND NOT APPLE AND
        MODERNGEKKO_PORTABLE_DEFAULT_GAME)

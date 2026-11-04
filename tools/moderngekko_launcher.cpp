@@ -16,6 +16,8 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <cctype>
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -25,8 +27,10 @@
 #include <mutex>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 namespace fs = std::filesystem;
@@ -79,6 +83,7 @@ struct ControllerOption
 {
   std::string label;
   std::string device;
+  SDL_JoystickID joystick_id = 0;  // lets the Controls page tester open this pad
 };
 
 std::string RequiredGameError(const moderngekko::GameMetadata& metadata)
@@ -134,6 +139,7 @@ std::vector<ControllerOption> EnumerateControllers()
     ControllerOption option;
     option.label = device_id == 0 ? name : name + " (" + std::to_string(device_id + 1) + ")";
     option.device = "SDL/" + std::to_string(device_id) + "/" + name;
+    option.joystick_id = joystick_id;
     result.emplace_back(std::move(option));
   }
   SDL_free(joystick_ids);
@@ -747,40 +753,48 @@ void DrawStatusPill(const char* text, ImVec4 color, float scale, bool in_top_bar
   ImGui::Dummy(size);
 }
 
-// Optional header image for the Play page. The build copies it next to the
-// launcher when MODERNGEKKO_LAUNCHER_BANNER is set; a missing or unreadable
-// file just means no image, and the page shows its text header alone.
-struct LauncherBanner
+// Optional images the build copies into Resources/ next to the launcher: the
+// Play page banner (MODERNGEKKO_LAUNCHER_BANNER) and the controller artwork
+// of the Controls page (MODERNGEKKO_LAUNCHER_CONTROLLER_ART). A missing or
+// unreadable file just means no image, and the page shows its text alone.
+struct LauncherImage
 {
   SDL_Texture* texture = nullptr;
   float aspect = 0.0f;  // height / width
 };
+using LauncherBanner = LauncherImage;
 
-LauncherBanner LoadLauncherBanner(SDL_Renderer* renderer, const fs::path& release_directory)
+LauncherImage LoadLauncherImage(SDL_Renderer* renderer, const fs::path& release_directory,
+                                std::string_view file_name, std::string_view log_label)
 {
-  LauncherBanner banner;
-  const fs::path path = release_directory / "Resources" / "launcher-banner.png";
+  LauncherImage image;
+  const fs::path path = release_directory / "Resources" / file_name;
   std::error_code ec;
   if (!fs::is_regular_file(path, ec))
-    return banner;
+    return image;
   SDL_Surface* surface = SDL_LoadPNG(path.string().c_str());
   if (!surface)
   {
-    std::cout << "launcher banner: can't load " << path.string() << ": " << SDL_GetError()
+    std::cout << log_label << ": can't load " << path.string() << ": " << SDL_GetError()
               << '\n';
-    return banner;
+    return image;
   }
   if (surface->w > 0 && surface->h > 0)
   {
-    banner.texture = SDL_CreateTextureFromSurface(renderer, surface);
-    if (banner.texture)
+    image.texture = SDL_CreateTextureFromSurface(renderer, surface);
+    if (image.texture)
     {
-      banner.aspect = static_cast<float>(surface->h) / static_cast<float>(surface->w);
-      std::cout << "launcher banner: " << path.string() << '\n';
+      image.aspect = static_cast<float>(surface->h) / static_cast<float>(surface->w);
+      std::cout << log_label << ": " << path.string() << '\n';
     }
   }
   SDL_DestroySurface(surface);
-  return banner;
+  return image;
+}
+
+LauncherBanner LoadLauncherBanner(SDL_Renderer* renderer, const fs::path& release_directory)
+{
+  return LoadLauncherImage(renderer, release_directory, "launcher-banner.png", "launcher banner");
 }
 
 // Draws the banner across the full content width with the panels' rounding.
@@ -854,6 +868,525 @@ bool DrawLinkButton(const char* label)
   ImGui::PopStyleColor(4);
   return clicked;
 }
+
+#ifndef MODERNGEKKO_GAMECUBE_CONTROLLERS
+// ---- Controller tester (Controls page) -------------------------------------
+// Reads [Wiimote1] from WiimoteNew.ini and lights up the Wii Remote buttons
+// that the pad's current input presses. It only reads: neither the profile
+// nor the pad settings are changed here.
+
+std::string_view TrimView(std::string_view text)
+{
+  const std::size_t first = text.find_first_not_of(" \t\r\n");
+  if (first == std::string_view::npos)
+    return {};
+  const std::size_t last = text.find_last_not_of(" \t\r\n");
+  return text.substr(first, last - first + 1);
+}
+
+// Names that Dolphin's SDL backend gives to SDL3 gamepad buttons, in
+// SDL_GamepadButton order (InputCommon/ControllerInterface/SDL/SDLGamepad.h).
+constexpr std::array<std::string_view, 21> DOLPHIN_SDL_BUTTON_NAMES = {
+    "Button S", "Button E",   "Button W",   "Button N", "Back",     "Guide",    "Start",
+    "Thumb L",  "Thumb R",    "Shoulder L", "Shoulder R", "Pad N",  "Pad S",    "Pad W",
+    "Pad E",    "Misc 1",     "Paddle 1",   "Paddle 2", "Paddle 3", "Paddle 4", "Touchpad"};
+
+// One physical input: a gamepad button, or one direction of an axis.
+struct PadSource
+{
+  int button = -1;    // SDL_GamepadButton, or -1 for an axis
+  int axis = -1;      // SDL_GamepadAxis
+  int direction = 1;  // +1 or -1: the side of the axis that presses
+};
+
+std::optional<PadSource> ParseDolphinPadInput(std::string_view name)
+{
+  for (std::size_t i = 0; i < DOLPHIN_SDL_BUTTON_NAMES.size(); ++i)
+  {
+    if (name == DOLPHIN_SDL_BUTTON_NAMES[i])
+      return PadSource{.button = static_cast<int>(i)};
+  }
+  // Dolphin also matches the face buttons by their XInput position names.
+  constexpr std::array<std::pair<std::string_view, SDL_GamepadButton>, 4> face_aliases = {{
+      {"Button A", SDL_GAMEPAD_BUTTON_SOUTH},
+      {"Button B", SDL_GAMEPAD_BUTTON_EAST},
+      {"Button X", SDL_GAMEPAD_BUTTON_WEST},
+      {"Button Y", SDL_GAMEPAD_BUTTON_NORTH},
+  }};
+  for (const auto& [alias, button] : face_aliases)
+  {
+    if (name == alias)
+      return PadSource{.button = static_cast<int>(button)};
+  }
+  if (name == "Trigger L")
+    return PadSource{.axis = SDL_GAMEPAD_AXIS_LEFT_TRIGGER};
+  if (name == "Trigger R")
+    return PadSource{.axis = SDL_GAMEPAD_AXIS_RIGHT_TRIGGER};
+  constexpr std::array<std::string_view, 4> stick_axes = {"Left X", "Left Y", "Right X",
+                                                          "Right Y"};
+  for (std::size_t i = 0; i < stick_axes.size(); ++i)
+  {
+    if (name.size() != stick_axes[i].size() + 1 || !name.starts_with(stick_axes[i]))
+      continue;
+    const char sign = name.back();
+    if (sign != '+' && sign != '-')
+      continue;
+    int direction = sign == '+' ? 1 : -1;
+    // Dolphin names the vertical axes the XInput way: "Y+" is up, which SDL
+    // reports as a negative value.
+    if (i % 2 == 1)
+      direction = -direction;
+    return PadSource{.axis = static_cast<int>(i), .direction = direction};
+  }
+  return std::nullopt;
+}
+
+// The tester understands the bindings the launcher writes: input names joined
+// by "|", such as "`Pad N` | `Left Y+`". Anything else (Dolphin's "&", "!",
+// functions...) is reported as custom and not tested.
+struct WiiBinding
+{
+  std::vector<PadSource> sources;
+  bool custom = false;
+};
+
+void ParseBindingExpression(std::string_view expression, WiiBinding& binding)
+{
+  std::string term;
+  bool quoted = false;
+  const auto finish_term = [&]
+  {
+    std::string_view name = TrimView(term);
+    // A device-qualified name, such as `SDL/0/Pad:Button S`, keeps its input part.
+    if (const std::size_t colon = name.rfind(':'); colon != std::string_view::npos)
+      name = TrimView(name.substr(colon + 1));
+    // Inputs that are not pad buttons or axes (motors, IR, motion) are skipped.
+    if (const std::optional<PadSource> source = ParseDolphinPadInput(name))
+      binding.sources.push_back(*source);
+    term.clear();
+  };
+  for (const char c : expression)
+  {
+    if (c == '`')
+    {
+      quoted = !quoted;
+      continue;
+    }
+    if (quoted || std::isalnum(static_cast<unsigned char>(c)) || c == ' ' || c == '\t')
+    {
+      term += c;
+      continue;
+    }
+    if (c == '|')
+    {
+      finish_term();
+      continue;
+    }
+    binding.custom = true;
+    return;
+  }
+  if (quoted)
+  {
+    binding.custom = true;
+    return;
+  }
+  finish_term();
+}
+
+// The Wii Remote inputs the tester shows, with the profile keys behind them.
+enum WiiInput : std::size_t
+{
+  WII_A,
+  WII_B,
+  WII_1,
+  WII_2,
+  WII_MINUS,
+  WII_PLUS,
+  WII_HOME,
+  WII_UP,
+  WII_DOWN,
+  WII_LEFT,
+  WII_RIGHT,
+  WII_SHAKE,
+  WII_INPUT_COUNT,
+};
+
+constexpr std::array<std::array<std::string_view, 3>, WII_INPUT_COUNT> WII_PROFILE_KEYS = {{
+    {"Buttons/A"},
+    {"Buttons/B"},
+    {"Buttons/1"},
+    {"Buttons/2"},
+    {"Buttons/-"},
+    {"Buttons/+"},
+    {"Buttons/Home"},
+    {"D-Pad/Up"},
+    {"D-Pad/Down"},
+    {"D-Pad/Left"},
+    {"D-Pad/Right"},
+    {"Shake/X", "Shake/Y", "Shake/Z"},
+}};
+
+struct ControllerTester
+{
+  bool loaded = false;  // WiimoteNew.ini read since the Controls page opened
+  std::string device;   // [Wiimote1] Device: the pad Dolphin will use
+  std::array<WiiBinding, WII_INPUT_COUNT> bindings;
+  SDL_JoystickID open_id = 0;
+  SDL_Gamepad* gamepad = nullptr;
+};
+
+void LoadTesterProfile(ControllerTester& tester, const fs::path& profile)
+{
+  tester.device.clear();
+  tester.bindings = {};
+  std::unordered_map<std::string, std::string> values;
+  std::ifstream input(profile);
+  std::string line;
+  bool in_first_remote = false;
+  while (std::getline(input, line))
+  {
+    const std::string_view trimmed = TrimView(line);
+    if (trimmed.starts_with('['))
+    {
+      in_first_remote = trimmed == "[Wiimote1]";
+      continue;
+    }
+    const std::size_t separator = trimmed.find('=');
+    if (!in_first_remote || separator == std::string_view::npos)
+      continue;
+    values[std::string(TrimView(trimmed.substr(0, separator)))] =
+        std::string(TrimView(trimmed.substr(separator + 1)));
+  }
+  if (const auto device = values.find("Device"); device != values.end())
+    tester.device = device->second;
+  for (std::size_t input_index = 0; input_index < WII_INPUT_COUNT; ++input_index)
+  {
+    for (const std::string_view key : WII_PROFILE_KEYS[input_index])
+    {
+      if (key.empty())
+        continue;
+      if (const auto found = values.find(std::string(key)); found != values.end())
+        ParseBindingExpression(found->second, tester.bindings[input_index]);
+    }
+  }
+  tester.loaded = true;
+}
+
+// Reads the profile when the Controls page opens and keeps the profile's pad
+// open only while the page is shown.
+void UpdateControllerTester(ControllerTester& tester, bool page_visible, const fs::path& profile,
+                            const std::vector<ControllerOption>& controllers)
+{
+  if (!page_visible)
+    tester.loaded = false;
+  else if (!tester.loaded)
+    LoadTesterProfile(tester, profile);
+  SDL_JoystickID wanted = 0;
+  if (page_visible)
+  {
+    if (const int index = FindController(controllers, tester.device); index >= 0)
+      wanted = controllers[static_cast<std::size_t>(index)].joystick_id;
+  }
+  if (wanted == tester.open_id)
+    return;
+  if (tester.gamepad)
+    SDL_CloseGamepad(tester.gamepad);
+  tester.gamepad = wanted != 0 ? SDL_OpenGamepad(wanted) : nullptr;
+  tester.open_id = wanted;
+}
+
+bool IsPadSourceDown(SDL_Gamepad* gamepad, const PadSource& source)
+{
+  if (source.button >= 0)
+    return SDL_GetGamepadButton(gamepad, static_cast<SDL_GamepadButton>(source.button));
+  const float value =
+      static_cast<float>(SDL_GetGamepadAxis(gamepad, static_cast<SDL_GamepadAxis>(source.axis))) /
+      32767.0f;
+  return value * static_cast<float>(source.direction) > 0.5f;
+}
+
+bool IsWiiInputDown(const ControllerTester& tester, std::size_t input)
+{
+  if (!tester.gamepad)
+    return false;
+  return std::ranges::any_of(tester.bindings[input].sources, [&](const PadSource& source)
+                             { return IsPadSourceDown(tester.gamepad, source); });
+}
+
+// A short, readable name for a pad input. The face buttons use the label SDL
+// knows for this pad (A, Cross...), or their position when it knows none.
+std::string PadSourceName(SDL_Gamepad* gamepad, const PadSource& source)
+{
+  if (source.button < 0)
+  {
+    if (source.axis == SDL_GAMEPAD_AXIS_LEFT_TRIGGER)
+      return "L trigger";
+    if (source.axis == SDL_GAMEPAD_AXIS_RIGHT_TRIGGER)
+      return "R trigger";
+    const bool horizontal = source.axis % 2 == 0;
+    const std::string stick = source.axis < 2 ? "Left stick " : "Right stick ";
+    if (horizontal)
+      return stick + (source.direction > 0 ? "right" : "left");
+    return stick + (source.direction > 0 ? "down" : "up");
+  }
+  const auto button = static_cast<SDL_GamepadButton>(source.button);
+  if (source.button <= SDL_GAMEPAD_BUTTON_NORTH)
+  {
+    switch (gamepad ? SDL_GetGamepadButtonLabel(gamepad, button) :
+                      SDL_GAMEPAD_BUTTON_LABEL_UNKNOWN)
+    {
+    case SDL_GAMEPAD_BUTTON_LABEL_A:
+      return "A";
+    case SDL_GAMEPAD_BUTTON_LABEL_B:
+      return "B";
+    case SDL_GAMEPAD_BUTTON_LABEL_X:
+      return "X";
+    case SDL_GAMEPAD_BUTTON_LABEL_Y:
+      return "Y";
+    case SDL_GAMEPAD_BUTTON_LABEL_CROSS:
+      return "Cross";
+    case SDL_GAMEPAD_BUTTON_LABEL_CIRCLE:
+      return "Circle";
+    case SDL_GAMEPAD_BUTTON_LABEL_SQUARE:
+      return "Square";
+    case SDL_GAMEPAD_BUTTON_LABEL_TRIANGLE:
+      return "Triangle";
+    default:
+      break;
+    }
+    constexpr std::array<const char*, 4> positions = {"South button", "East button",
+                                                      "West button", "North button"};
+    return positions[static_cast<std::size_t>(source.button)];
+  }
+  switch (button)
+  {
+  case SDL_GAMEPAD_BUTTON_BACK:
+    return "Back";
+  case SDL_GAMEPAD_BUTTON_GUIDE:
+    return "Home";
+  case SDL_GAMEPAD_BUTTON_START:
+    return "Start";
+  case SDL_GAMEPAD_BUTTON_LEFT_STICK:
+    return "L stick press";
+  case SDL_GAMEPAD_BUTTON_RIGHT_STICK:
+    return "R stick press";
+  case SDL_GAMEPAD_BUTTON_LEFT_SHOULDER:
+    return "L shoulder";
+  case SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER:
+    return "R shoulder";
+  case SDL_GAMEPAD_BUTTON_DPAD_UP:
+    return "D-pad up";
+  case SDL_GAMEPAD_BUTTON_DPAD_DOWN:
+    return "D-pad down";
+  case SDL_GAMEPAD_BUTTON_DPAD_LEFT:
+    return "D-pad left";
+  case SDL_GAMEPAD_BUTTON_DPAD_RIGHT:
+    return "D-pad right";
+  default:
+    return std::string(DOLPHIN_SDL_BUTTON_NAMES[static_cast<std::size_t>(source.button)]);
+  }
+}
+
+// The D-pad row names whole controls ("D-pad, Left stick") instead of listing
+// the twelve directions.
+std::string PadSourceGroup(SDL_Gamepad* gamepad, const PadSource& source)
+{
+  if (source.button >= SDL_GAMEPAD_BUTTON_DPAD_UP && source.button <= SDL_GAMEPAD_BUTTON_DPAD_RIGHT)
+    return "D-pad";
+  if (source.button < 0 && source.axis <= SDL_GAMEPAD_AXIS_LEFTY)
+    return "Left stick";
+  if (source.button < 0 && source.axis <= SDL_GAMEPAD_AXIS_RIGHTY)
+    return "Right stick";
+  return PadSourceName(gamepad, source);
+}
+
+// Button positions in the SR-ZGS controller artwork, in pixels of its
+// 1024 x 1024 canvas. They belong to that drawing: other artwork bundled with
+// MODERNGEKKO_LAUNCHER_CONTROLLER_ART needs its own positions here.
+constexpr float CONTROLLER_ART_CANVAS = 1024.0f;
+constexpr ImVec2 CONTROLLER_ART_MIN(40.0f, 258.0f);   // the drawing's bounds; the rest
+constexpr ImVec2 CONTROLLER_ART_MAX(984.0f, 854.0f);  // of the canvas is transparent
+
+struct ArtHotspot
+{
+  WiiInput input;
+  int point_count;  // 1: circle at points[0], 2: rectangle, 3+: convex polygon
+  std::array<ImVec2, 6> points;
+  float radius;
+};
+
+constexpr std::array<ArtHotspot, WII_INPUT_COUNT> CONTROLLER_ART_HOTSPOTS = {{
+    // Wii A and B on the shoulder buttons, as the generated profile maps them.
+    {WII_A, 6, {{{189, 337}, {209, 314}, {244, 295}, {286, 284}, {336, 283}, {370, 312}}}, 0},
+    {WII_B, 6, {{{654, 312}, {720, 282}, {749, 286}, {785, 297}, {827, 325}, {834, 337}}}, 0},
+    {WII_1, 1, {{{599, 515}}}, 42},  // X (west)
+    {WII_2, 1, {{{646, 605}}}, 42},  // A (south)
+    {WII_MINUS, 1, {{{429, 405}}}, 22},
+    {WII_PLUS, 1, {{{595, 405}}}, 22},
+    {WII_HOME, 3, {{{512, 566}, {554, 642}, {470, 642}}}, 0},  // centre triangle
+    {WII_UP, 2, {{{256, 430}, {298, 498}}}, 0},
+    {WII_DOWN, 2, {{{256, 532}, {298, 600}}}, 0},
+    {WII_LEFT, 2, {{{193, 494}, {261, 536}}}, 0},
+    {WII_RIGHT, 2, {{{293, 494}, {361, 536}}}, 0},
+    {WII_SHAKE, 1, {{{786, 427}}}, 42},  // Z
+}};
+
+void DrawArtHotspot(ImDrawList* draw_list, const ArtHotspot& spot, ImVec2 origin, float zoom,
+                    float scale)
+{
+  const auto to_screen = [&](ImVec2 point)
+  {
+    return ImVec2(origin.x + (point.x - CONTROLLER_ART_MIN.x) * zoom,
+                  origin.y + (point.y - CONTROLLER_ART_MIN.y) * zoom);
+  };
+  const ImU32 fill =
+      ImGui::GetColorU32(ImVec4(LAUNCHER_ACCENT.x, LAUNCHER_ACCENT.y, LAUNCHER_ACCENT.z, 0.45f));
+  const ImU32 edge = ImGui::GetColorU32(LAUNCHER_ACCENT);
+  const float thickness = 2.5f * scale;
+  if (spot.point_count == 1)
+  {
+    const ImVec2 center = to_screen(spot.points[0]);
+    draw_list->AddCircleFilled(center, spot.radius * zoom, fill);
+    draw_list->AddCircle(center, spot.radius * zoom + thickness, edge, 0, thickness);
+  }
+  else if (spot.point_count == 2)
+  {
+    const float rounding = 4.0f * scale;
+    draw_list->AddRectFilled(to_screen(spot.points[0]), to_screen(spot.points[1]), fill, rounding);
+    draw_list->AddRect(to_screen(spot.points[0]), to_screen(spot.points[1]), edge, rounding, 0,
+                       thickness);
+  }
+  else
+  {
+    std::array<ImVec2, 6> screen{};
+    for (int i = 0; i < spot.point_count; ++i)
+      screen[static_cast<std::size_t>(i)] = to_screen(spot.points[static_cast<std::size_t>(i)]);
+    draw_list->AddConvexPolyFilled(screen.data(), spot.point_count, fill);
+    draw_list->AddPolyline(screen.data(), spot.point_count, edge, ImDrawFlags_Closed, thickness);
+  }
+}
+
+// The artwork (when the build bundled it) with the pressed buttons lit, and
+// beside it the list of Wii Remote buttons and the pad inputs behind each one.
+void DrawControllerTester(const ControllerTester& tester, const LauncherImage& art, ImFont* bold,
+                          float scale)
+{
+  const ImGuiStyle& style = ImGui::GetStyle();
+  if (art.texture)
+  {
+    const float width = std::floor(ImGui::GetContentRegionAvail().x * 0.56f);
+    const float zoom = width / (CONTROLLER_ART_MAX.x - CONTROLLER_ART_MIN.x);
+    const ImVec2 size(width, (CONTROLLER_ART_MAX.y - CONTROLLER_ART_MIN.y) * zoom);
+    const ImVec2 origin = ImGui::GetCursorScreenPos();
+    ImDrawList* draw_list = ImGui::GetWindowDrawList();
+    draw_list->AddImage(
+        ImTextureRef(static_cast<ImTextureID>(reinterpret_cast<std::uintptr_t>(art.texture))),
+        origin, ImVec2(origin.x + size.x, origin.y + size.y),
+        ImVec2(CONTROLLER_ART_MIN.x / CONTROLLER_ART_CANVAS,
+               CONTROLLER_ART_MIN.y / CONTROLLER_ART_CANVAS),
+        ImVec2(CONTROLLER_ART_MAX.x / CONTROLLER_ART_CANVAS,
+               CONTROLLER_ART_MAX.y / CONTROLLER_ART_CANVAS));
+    for (const ArtHotspot& spot : CONTROLLER_ART_HOTSPOTS)
+    {
+      if (IsWiiInputDown(tester, spot.input))
+        DrawArtHotspot(draw_list, spot, origin, zoom, scale);
+    }
+    ImGui::Dummy(size);
+    ImGui::SameLine(0.0f, style.ItemSpacing.x * 2.0f);
+  }
+
+  struct LegendRow
+  {
+    const char* label;
+    WiiInput first;
+    WiiInput last;  // the D-Pad row covers four inputs
+  };
+  constexpr std::array<LegendRow, 9> rows = {{
+      {"A", WII_A, WII_A},
+      {"B", WII_B, WII_B},
+      {"1", WII_1, WII_1},
+      {"2", WII_2, WII_2},
+      {"\xE2\x88\x92", WII_MINUS, WII_MINUS},
+      {"+", WII_PLUS, WII_PLUS},
+      {"HOME", WII_HOME, WII_HOME},
+      {"D-Pad", WII_UP, WII_RIGHT},
+      {"Shake", WII_SHAKE, WII_SHAKE},
+  }};
+  ImGui::BeginGroup();
+  ImGui::PushFont(bold, 0.0f);
+  float label_width = 0.0f;
+  for (const LegendRow& row : rows)
+    label_width = std::max(label_width, ImGui::CalcTextSize(row.label).x);
+  ImGui::PopFont();
+  label_width = std::max(label_width, ImGui::CalcTextSize("Wii Remote").x);
+  label_width += style.ItemSpacing.x * 2.0f;
+  // Rows sit close together so the list is about as tall as the artwork.
+  ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(style.ItemSpacing.x, 0.0f));
+  // Inside a group, SameLine() offsets count from the group's left edge.
+  ImGui::TextDisabled("Wii Remote");
+  ImGui::SameLine(label_width);
+  ImGui::TextDisabled("Your controller");
+  for (const LegendRow& row : rows)
+  {
+    bool down = false;
+    bool custom = false;
+    std::vector<std::string> names;
+    for (std::size_t input = row.first; input <= row.last; ++input)
+    {
+      down = down || IsWiiInputDown(tester, input);
+      custom = custom || tester.bindings[input].custom;
+      for (const PadSource& source : tester.bindings[input].sources)
+      {
+        std::string name = row.first == row.last ? PadSourceName(tester.gamepad, source) :
+                                                   PadSourceGroup(tester.gamepad, source);
+        if (std::ranges::find(names, name) == names.end())
+          names.push_back(std::move(name));
+      }
+    }
+    std::string text;
+    for (const std::string& name : names)
+      text += (text.empty() ? "" : ", ") + name;
+    if (custom)
+      text = "edited by hand";
+    else if (text.empty())
+      text = "not set";
+    ImGui::PushFont(bold, 0.0f);
+    if (down)
+      ImGui::TextColored(LAUNCHER_ACCENT, "%s", row.label);
+    else
+      ImGui::TextUnformatted(row.label);
+    ImGui::PopFont();
+    ImGui::SameLine(label_width);
+    ImGui::PushTextWrapPos(0.0f);
+    if (down)
+      ImGui::TextWrapped("%s", text.c_str());
+    else
+      ImGui::TextDisabled("%s", text.c_str());
+    ImGui::PopTextWrapPos();
+  }
+  // Last line: how to use the tester, or why it can't light anything up.
+  ImGui::PushTextWrapPos(0.0f);
+  if (tester.gamepad)
+  {
+    ImGui::TextColored(LAUNCHER_ACCENT, "Press buttons to test them.");
+  }
+  else if (tester.device.empty())
+  {
+    ImGui::TextDisabled("No controller in WiimoteNew.ini.");
+  }
+  else
+  {
+    // "SDL/0/PS3 Controller" -> "PS3 Controller"
+    const std::size_t name_start = tester.device.find('/', tester.device.find('/') + 1);
+    const std::string name =
+        name_start == std::string::npos ? tester.device : tester.device.substr(name_start + 1);
+    ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.3f, 1.0f), "Connect %s to test it.", name.c_str());
+  }
+  ImGui::PopTextWrapPos();
+  ImGui::PopStyleVar();
+  ImGui::EndGroup();
+}
+#endif
 } // namespace
 
 int main(int argc, char** argv)
@@ -941,6 +1474,10 @@ int main(int argc, char** argv)
   ImGui_ImplSDL3_InitForSDLRenderer(window, renderer);
   ImGui_ImplSDLRenderer3_Init(renderer);
   const LauncherBanner banner = LoadLauncherBanner(renderer, release_directory);
+#ifndef MODERNGEKKO_GAMECUBE_CONTROLLERS
+  const LauncherImage controller_art = LoadLauncherImage(
+      renderer, release_directory, "launcher-controller.png", "launcher controller art");
+#endif
 
   std::vector<fs::path> images = FindDiscImages();
   std::optional<fs::path> selected_image = images.empty() ? std::nullopt : std::optional(images[0]);
@@ -1091,6 +1628,10 @@ int main(int argc, char** argv)
     }
   };
   refresh_controllers();
+#ifndef MODERNGEKKO_GAMECUBE_CONTROLLERS
+  ControllerTester controller_tester;
+  const fs::path controller_profile = user_directory / "Config" / CONTROLLER_PROFILE_NAME;
+#endif
   ExtractionState extraction;
   std::jthread extraction_thread;
   enum class LaunchMode
@@ -1122,6 +1663,10 @@ int main(int argc, char** argv)
     }
     if (controllers_changed)
       refresh_controllers();
+#ifndef MODERNGEKKO_GAMECUBE_CONTROLLERS
+    UpdateControllerTester(controller_tester, current_page == LauncherPage::Controls,
+                           controller_profile, controllers);
+#endif
 
     {
       std::lock_guard lock(dialog.mutex);
@@ -1578,11 +2123,23 @@ int main(int argc, char** argv)
       ImGui::TextDisabled("%s is created the first time you play.", std::string(CONTROLLER_PROFILE_NAME).c_str());
     ImGui::PopTextWrapPos();
     ImGui::Spacing();
+#ifndef MODERNGEKKO_GAMECUBE_CONTROLLERS
+    if (controller_profile_exists)
+    {
+      DrawControllerTester(controller_tester, controller_art, fonts.bold, scale);
+      ImGui::Spacing();
+    }
+#endif
     ImGui::BeginDisabled(controller_index < 0);
     const std::string replace_profile =
         "Replace with generated " + std::string(GENERATED_PROFILE_LABEL);
     if (ImGui::Button(replace_profile.c_str()))
+    {
       select_controller(controller_index);
+#ifndef MODERNGEKKO_GAMECUBE_CONTROLLERS
+      controller_tester.loaded = false;  // read the new profile on the next frame
+#endif
+    }
     ImGui::EndDisabled();
     EndSection();
     }
@@ -1853,6 +2410,12 @@ int main(int argc, char** argv)
   ImGui_ImplSDLRenderer3_Shutdown();
   ImGui_ImplSDL3_Shutdown();
   ImGui::DestroyContext();
+#ifndef MODERNGEKKO_GAMECUBE_CONTROLLERS
+  if (controller_tester.gamepad)
+    SDL_CloseGamepad(controller_tester.gamepad);
+  if (controller_art.texture)
+    SDL_DestroyTexture(controller_art.texture);
+#endif
   if (banner.texture)
     SDL_DestroyTexture(banner.texture);
   SDL_DestroyRenderer(renderer);
