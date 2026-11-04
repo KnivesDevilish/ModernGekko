@@ -53,6 +53,17 @@ std::string NormalizeCpuCore(std::string value) {
   return {};
 }
 
+std::string NormalizeAspectRatio(std::string value) {
+  const std::string lower = Lower(Trim(std::move(value)));
+  if (lower == "16:9" || lower == "widescreen" || lower == "wide")
+    return "16:9";
+  if (lower == "4:3" || lower == "standard")
+    return "4:3";
+  if (lower == "stretch" || lower == "stretched")
+    return "stretch";
+  return {};
+}
+
 bool ParseBoolean(const std::string &value, bool *result) {
   if (value == "true" || value == "1" || value == "yes" || value == "on") {
     *result = true;
@@ -164,6 +175,20 @@ const std::vector<CpuCoreOption> &SupportedCpuCores() {
   return cores;
 }
 
+const std::vector<AspectRatioOption> &SupportedAspectRatios() {
+  // The first entry is the default used when config.ini has no aspect_ratio.
+  static const std::vector<AspectRatioOption> ratios = {
+      {"16:9 (Widescreen)", "16:9",
+       "The game draws in widescreen. Best for most monitors and TVs."},
+      {"4:3", "4:3",
+       "The original 4:3 picture, with bars on the sides of a wide window."},
+      {"Stretch", "stretch",
+       "The widescreen picture stretched to fill the window, whatever its "
+       "shape. On a 16:9 screen it looks the same as 16:9."},
+  };
+  return ratios;
+}
+
 ConfigResult LoadConfig(const fs::path &user_directory,
                         bool create_if_missing) {
   const fs::path path = user_directory / "config.ini";
@@ -218,6 +243,10 @@ ConfigResult LoadConfig(const fs::path &user_directory,
     } else if (key == "fullscreen") {
       if (!ParseBoolean(value, &config.fullscreen))
         return {.error = "fullscreen must be true or false"};
+    } else if (key == "aspect_ratio") {
+      config.aspect_ratio = NormalizeAspectRatio(raw_value);
+      if (config.aspect_ratio.empty())
+        return {.error = "aspect_ratio must be 16:9, 4:3 or stretch"};
     } else if (key == "nickname")
       config.netplay_nickname = raw_value;
     else if (key == "address")
@@ -319,6 +348,12 @@ bool SaveConfig(const fs::path &user_directory, const ConfigResult &config,
       *error = "cpu_core must be jit64 or staticrecomp";
     return false;
   }
+  const std::string aspect_ratio = NormalizeAspectRatio(config.aspect_ratio);
+  if (aspect_ratio.empty()) {
+    if (error)
+      *error = "aspect_ratio must be 16:9, 4:3 or stretch";
+    return false;
+  }
   std::error_code ec;
   fs::create_directories(user_directory, ec);
   if (ec) {
@@ -339,6 +374,8 @@ bool SaveConfig(const fs::path &user_directory, const ConfigResult &config,
        << config.resolution << '\n'
        << "backend=" << graphics_backend << '\n'
        << "fullscreen=" << (config.fullscreen ? "true" : "false") << '\n'
+       << "# 16:9, 4:3 or stretch\n"
+       << "aspect_ratio=" << aspect_ratio << '\n'
        << "show_fps_in_title=" << (config.show_fps_in_title ? "true" : "false")
        << '\n'
        << "[Core]\n"

@@ -29,7 +29,7 @@ int main() {
   const auto loaded = moderngekko::frontend::LoadConfig(directory, false);
   if (!loaded || loaded.dolphin_scale != 3 || loaded.show_fps_in_title ||
       loaded.controller != controller ||
-      loaded.graphics_backend != "Vulkan") {
+      loaded.graphics_backend != "Vulkan" || loaded.aspect_ratio != "16:9") {
     return 2;
   }
 
@@ -193,6 +193,39 @@ int main() {
       return 18;
   }
 #endif
+
+  // Aspect ratio: saved, kept by the short SaveConfig the Settings page uses,
+  // read in any case, and an unknown shape is refused.
+  {
+    const fs::path aspect = directory / "aspect";
+    auto aspect_config = netplay_config;
+    aspect_config.aspect_ratio = "4:3";
+    if (!moderngekko::frontend::SaveConfig(aspect, aspect_config, &error) ||
+        moderngekko::frontend::LoadConfig(aspect, false).aspect_ratio != "4:3")
+      return 19;
+    if (!moderngekko::frontend::SaveConfig(aspect, "1920x1080", true, controller,
+                                           &error) ||
+        moderngekko::frontend::LoadConfig(aspect, false).aspect_ratio != "4:3")
+      return 20;
+    aspect_config.aspect_ratio = "21:9";
+    if (moderngekko::frontend::SaveConfig(aspect, aspect_config, &error))
+      return 21;
+    {
+      std::ofstream file(aspect / "config.ini", std::ios::trunc);
+      file << "[Video]\nresolution=1920x1080\naspect_ratio = Stretch\n";
+    }
+    if (moderngekko::frontend::LoadConfig(aspect, false).aspect_ratio != "stretch")
+      return 22;
+    {
+      std::ofstream file(aspect / "config.ini", std::ios::trunc);
+      file << "[Video]\nresolution=1920x1080\naspect_ratio=5:4\n";
+    }
+    if (moderngekko::frontend::LoadConfig(aspect, false))
+      return 23;
+    if (moderngekko::frontend::SupportedAspectRatios().front().value !=
+        std::string("16:9"))
+      return 24;
+  }
 
   fs::remove_all(directory);
   return 0;

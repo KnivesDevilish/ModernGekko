@@ -257,6 +257,12 @@ int RunMain(int argc, char **argv) {
     config.graphics.backend = frontend_config.graphics_backend;
   config.fullscreen = frontend_config.fullscreen;
   config.show_fps_in_title = frontend_config.show_fps_in_title;
+  if (frontend_config.aspect_ratio == "4:3")
+    config.graphics.aspect_ratio = moderngekko::AspectRatio::Standard;
+  else if (frontend_config.aspect_ratio == "stretch")
+    config.graphics.aspect_ratio = moderngekko::AspectRatio::Stretch;
+  else
+    config.graphics.aspect_ratio = moderngekko::AspectRatio::Widescreen;
 
   // CPU core: config.ini decides unless MODERNGEKKO_STATICRECOMP is already set,
   // so the shell can still force either core for testing. The runtime reads

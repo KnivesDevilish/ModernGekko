@@ -23,6 +23,12 @@ struct CpuCoreOption {
   const char *value;
 };
 
+struct AspectRatioOption {
+  const char *text;
+  const char *value;
+  const char *description;
+};
+
 struct ConfigResult {
   int dolphin_scale = 0;
   std::string resolution;
@@ -34,6 +40,8 @@ struct ConfigResult {
   std::vector<std::string> controllers;
   bool show_fps_in_title = true;
   bool fullscreen = false;
+  // "16:9", "4:3" or "stretch" (see SupportedAspectRatios).
+  std::string aspect_ratio = "16:9";
   std::string netplay_nickname = "Player";
   std::string netplay_address = "127.0.0.1";
   std::uint16_t netplay_port = 2626;
@@ -46,6 +54,7 @@ struct ConfigResult {
 const std::vector<ResolutionOption> &SupportedResolutions();
 const std::vector<GraphicsBackendOption> &SupportedGraphicsBackends();
 const std::vector<CpuCoreOption> &SupportedCpuCores();
+const std::vector<AspectRatioOption> &SupportedAspectRatios();
 ConfigResult LoadConfig(const std::filesystem::path &user_directory,
                         bool create_if_missing);
 bool SaveConfig(const std::filesystem::path &user_directory,

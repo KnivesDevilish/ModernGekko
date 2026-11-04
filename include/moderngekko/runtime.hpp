@@ -28,10 +28,21 @@ struct ModuleSource
   const ModernGekkoModuleDesc* descriptor = nullptr;
 };
 
+// How the picture fills the window. Widescreen and Standard also tell the Wii
+// which shape the game should draw (the system's 16:9 setting); Dolphin then
+// follows the game, so the image is never squashed.
+enum class AspectRatio
+{
+  Widescreen, // the game draws 16:9
+  Standard,   // the game draws 4:3, with bars on a wide window
+  Stretch,    // the game draws 16:9 stretched to fill the window
+};
+
 struct GraphicsSettings
 {
   std::string backend;
   std::optional<int> internal_resolution_scale;
+  AspectRatio aspect_ratio = AspectRatio::Widescreen;
 };
 
 struct AudioSettings

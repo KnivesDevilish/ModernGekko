@@ -8,6 +8,7 @@
 #include "Core/Boot/BootManager.h"
 #include "Core/Config/GraphicsSettings.h"
 #include "Core/Config/MainSettings.h"
+#include "Core/Config/SYSCONFSettings.h"
 #include "Core/Core.h"
 #include "Core/HW/GBACore.h"
 #include "Core/HW/Memmap.h"
@@ -527,6 +528,17 @@ void SetBootSessionData(std::unique_ptr<BootSessionData> boot_session_data) {
   std::lock_guard lock(s_runtime_mutex);
   s_boot_session_data = std::move(boot_session_data);
 }
+
+void ApplyAspectRatio(AspectRatio aspect_ratio) {
+  // The Wii's 16:9 setting decides what the game draws, and Dolphin's Auto
+  // mode follows the game. Netplay replaces the system setting with the
+  // host's, and Auto keeps every player's picture in the right shape.
+  Config::SetBase(Config::SYSCONF_WIDESCREEN,
+                  aspect_ratio != AspectRatio::Standard);
+  Config::SetBase(Config::GFX_ASPECT_RATIO, aspect_ratio == AspectRatio::Stretch
+                                                ? AspectMode::Stretch
+                                                : AspectMode::Auto);
+}
 } // namespace detail
 
 ModuleSource ModuleSource::DynamicPath(std::filesystem::path path) {
@@ -670,6 +682,7 @@ RuntimeCreateResult Runtime::Create(RuntimeConfig config) {
   Config::SetBase(Config::GFX_SHADER_COMPILATION_MODE,
                   ShaderCompilationMode::AsynchronousUberShaders);
   Config::SetBase(Config::GFX_WAIT_FOR_SHADERS_BEFORE_STARTING, true);
+  detail::ApplyAspectRatio(impl->config.graphics.aspect_ratio);
   const std::vector<std::string> audio_backends =
       AudioCommon::GetSoundBackends();
   if (impl->config.headless) {
