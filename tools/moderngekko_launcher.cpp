@@ -596,48 +596,146 @@ bool IsTrueTypeFont(const fs::path& path)
   return tag == version_1 || tag == apple_true;
 }
 
+struct LauncherFonts
+{
+  ImFont* regular = nullptr;
+  ImFont* bold = nullptr;  // the regular font when no bold face of its family exists
+};
+
 // A clean sans-serif for the interface: the system's usual UI fonts first
 // (Windows, Fedora/Bazzite and its Distrobox mount, Debian/Ubuntu, Arch), then
-// the font Dolphin ships in Sys/, then ImGui's built-in bitmap font.
-void LoadInterfaceFont(const fs::path& release_directory, float size)
+// the font Dolphin ships in Sys/, then ImGui's built-in bitmap font. The bold
+// face is taken from the same family as the regular one so the two match.
+LauncherFonts LoadInterfaceFont(const fs::path& release_directory, float size)
 {
-  std::vector<fs::path> candidates;
+  struct Candidate
+  {
+    fs::path regular;
+    fs::path bold;
+  };
+  std::vector<Candidate> candidates;
 #if defined(_WIN32)
   if (const char* windows = std::getenv("WINDIR"))
-    candidates.push_back(fs::path(windows) / "Fonts" / "segoeui.ttf");
+  {
+    candidates.push_back({fs::path(windows) / "Fonts" / "segoeui.ttf",
+                          fs::path(windows) / "Fonts" / "segoeuib.ttf"});
+  }
 #endif
-  for (const char* path : {
-           "/usr/share/fonts/google-noto/NotoSans-Regular.ttf",
-           "/usr/local/share/fonts/google-noto/NotoSans-Regular.ttf",
-           "/usr/share/fonts/noto/NotoSans-Regular.ttf",
-           "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
-           "/usr/share/fonts/liberation-sans-fonts/LiberationSans-Regular.ttf",
-           "/usr/local/share/fonts/liberation-sans-fonts/LiberationSans-Regular.ttf",
-           "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
-           "/usr/share/fonts/TTF/DejaVuSans.ttf",
-           "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-           "/usr/share/fonts/dejavu-sans-fonts/DejaVuSans.ttf",
-       })
+  for (const char* directory : {"/usr/share/fonts/google-noto", "/usr/local/share/fonts/google-noto",
+                                "/usr/share/fonts/noto", "/usr/share/fonts/truetype/noto"})
   {
-    candidates.emplace_back(path);
+    candidates.push_back({fs::path(directory) / "NotoSans-Regular.ttf",
+                          fs::path(directory) / "NotoSans-Bold.ttf"});
   }
-  candidates.push_back(release_directory / "Sys" / "Resources" / "OSD_Font.ttf");
+  for (const char* directory : {"/usr/share/fonts/liberation-sans-fonts",
+                                "/usr/local/share/fonts/liberation-sans-fonts",
+                                "/usr/share/fonts/truetype/liberation"})
+  {
+    candidates.push_back({fs::path(directory) / "LiberationSans-Regular.ttf",
+                          fs::path(directory) / "LiberationSans-Bold.ttf"});
+  }
+  for (const char* directory : {"/usr/share/fonts/TTF", "/usr/share/fonts/truetype/dejavu",
+                                "/usr/share/fonts/dejavu-sans-fonts"})
+  {
+    candidates.push_back(
+        {fs::path(directory) / "DejaVuSans.ttf", fs::path(directory) / "DejaVuSans-Bold.ttf"});
+  }
+  candidates.push_back({release_directory / "Sys" / "Resources" / "OSD_Font.ttf", {}});
 
-  ImGuiIO& io = ImGui::GetIO();
-  for (const fs::path& candidate : candidates)
-  {
+  const auto usable = [](const fs::path& path) {
     std::error_code ec;
-    if (!fs::is_regular_file(candidate, ec) || !IsTrueTypeFont(candidate))
+    return !path.empty() && fs::is_regular_file(path, ec) && IsTrueTypeFont(path);
+  };
+  ImGuiIO& io = ImGui::GetIO();
+  for (const Candidate& candidate : candidates)
+  {
+    if (!usable(candidate.regular))
       continue;
-    if (io.Fonts->AddFontFromFileTTF(candidate.string().c_str(), size))
-    {
-      ImGui::GetStyle().FontSizeBase = size;
-      std::cout << "launcher font: " << candidate.string() << '\n';
-      return;
-    }
+    LauncherFonts fonts;
+    fonts.regular = io.Fonts->AddFontFromFileTTF(candidate.regular.string().c_str(), size);
+    if (!fonts.regular)
+      continue;
+    ImGui::GetStyle().FontSizeBase = size;
+    if (usable(candidate.bold))
+      fonts.bold = io.Fonts->AddFontFromFileTTF(candidate.bold.string().c_str(), size);
+    std::cout << "launcher font: " << candidate.regular.string() << '\n';
+    if (fonts.bold)
+      std::cout << "launcher bold font: " << candidate.bold.string() << '\n';
+    else
+      fonts.bold = fonts.regular;
+    return fonts;
   }
-  io.Fonts->AddFontDefault();
+  LauncherFonts fonts;
+  fonts.regular = io.Fonts->AddFontDefault();
+  fonts.bold = fonts.regular;
   std::cout << "launcher font: ImGui default\n";
+  return fonts;
+}
+
+enum class LauncherPage
+{
+  Play,
+  Settings,
+  Controls,
+  GameFiles,
+};
+
+// One entry of the sidebar. The current page is drawn in bold with a lime bar
+// on its left edge, the others in the dimmed text colour.
+bool DrawNavigationItem(const char* label, bool selected, ImFont* bold, float scale)
+{
+  const ImGuiStyle& style = ImGui::GetStyle();
+  ImGui::PushStyleColor(ImGuiCol_Text, selected ? style.Colors[ImGuiCol_Text]
+                                                : style.Colors[ImGuiCol_TextDisabled]);
+  ImGui::PushStyleColor(ImGuiCol_Header, ImVec4(1.0f, 1.0f, 1.0f, 0.05f));
+  ImGui::PushStyleColor(ImGuiCol_HeaderHovered, ImVec4(1.0f, 1.0f, 1.0f, 0.07f));
+  ImGui::PushStyleColor(ImGuiCol_HeaderActive, ImVec4(1.0f, 1.0f, 1.0f, 0.10f));
+  if (selected)
+    ImGui::PushFont(bold, 0.0f);
+  ImGui::PushStyleVar(ImGuiStyleVar_SelectableTextAlign, ImVec2(0.0f, 0.5f));
+  const ImVec2 position = ImGui::GetCursorScreenPos();
+  const float height = ImGui::GetFrameHeight() + 6.0f * scale;
+  ImGui::Indent(12.0f * scale);
+  const bool clicked = ImGui::Selectable(label, selected, ImGuiSelectableFlags_None,
+                                         ImVec2(0.0f, height));
+  ImGui::Unindent(12.0f * scale);
+  if (selected)
+  {
+    ImGui::GetWindowDrawList()->AddRectFilled(
+        position, ImVec2(position.x + 3.0f * scale, position.y + height),
+        ImGui::GetColorU32(LAUNCHER_ACCENT), 2.0f * scale);
+  }
+  ImGui::PopStyleVar();
+  if (selected)
+    ImGui::PopFont();
+  ImGui::PopStyleColor(4);
+  return clicked;
+}
+
+// Small rounded label, e.g. the CPU core in the top bar. With in_top_bar it is
+// right-aligned to the window's content edge and centred on a frame-high line,
+// so it sits level with text drawn after AlignTextToFramePadding().
+void DrawStatusPill(const char* text, ImVec4 color, float scale, bool in_top_bar)
+{
+  const ImVec2 padding(10.0f * scale, 3.0f * scale);
+  const ImVec2 text_size = ImGui::CalcTextSize(text);
+  const ImVec2 size(text_size.x + padding.x * 2.0f, text_size.y + padding.y * 2.0f);
+  if (in_top_bar)
+  {
+    const float right = ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x;
+    ImGui::SetCursorPosX(std::max(ImGui::GetCursorPosX(), right - size.x));
+    ImGui::SetCursorPosY(ImGui::GetCursorPosY() +
+                         std::max(0.0f, (ImGui::GetFrameHeight() - size.y) * 0.5f));
+  }
+  const ImVec2 position = ImGui::GetCursorScreenPos();
+  ImVec4 background = color;
+  background.w = 0.14f;
+  ImDrawList* draw_list = ImGui::GetWindowDrawList();
+  draw_list->AddRectFilled(position, ImVec2(position.x + size.x, position.y + size.y),
+                           ImGui::GetColorU32(background), size.y * 0.5f);
+  draw_list->AddText(ImVec2(position.x + padding.x, position.y + padding.y),
+                     ImGui::GetColorU32(color), text);
+  ImGui::Dummy(size);
 }
 } // namespace
 
@@ -697,6 +795,8 @@ int main(int argc, char** argv)
     SDL_Quit();
     return 1;
   }
+  // Keeps the sidebar and the page readable when the window is resized.
+  SDL_SetWindowMinimumSize(window, static_cast<int>(680 * scale), static_cast<int>(560 * scale));
   SDL_Renderer* renderer = SDL_CreateRenderer(window, "vulkan");
   if (!renderer)
     renderer = SDL_CreateRenderer(window, nullptr);
@@ -720,7 +820,7 @@ int main(int argc, char** argv)
   ImGui::GetStyle().FontScaleDpi = scale;
   // ImGui sizes a font by its full line height. 18 px gives Noto Sans and Segoe
   // UI a comfortable reading size while the Play page still fits in 700 px.
-  LoadInterfaceFont(release_directory, 18.0f);
+  const LauncherFonts fonts = LoadInterfaceFont(release_directory, 18.0f);
   ImGui_ImplSDL3_InitForSDLRenderer(window, renderer);
   ImGui_ImplSDLRenderer3_Init(renderer);
 
@@ -884,6 +984,7 @@ int main(int argc, char** argv)
   };
   bool done = false;
   LaunchMode launch_mode = LaunchMode::None;
+  LauncherPage current_page = LauncherPage::Play;
   while (!done)
   {
     bool controllers_changed = false;
@@ -940,11 +1041,56 @@ int main(int argc, char** argv)
     ImGui::Begin(MODERNGEKKO_FRONTEND_NAME " Launcher", nullptr,
                  ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove |
                      ImGuiWindowFlags_NoSavedSettings);
+    // Top bar: frontend name on the left, the CPU core PLAY will use on the
+    // right (MODERNGEKKO_STATICRECOMP wins over config.ini, as in the runner).
+    ImGui::PushFont(fonts.bold, 0.0f);
+    ImGui::AlignTextToFramePadding();
     ImGui::TextUnformatted(MODERNGEKKO_FRONTEND_NAME);
-    ImGui::Separator();
-    if (ImGui::BeginTabBar("##srzgs_tabs"))
+    ImGui::PopFont();
+    ImGui::SameLine();
     {
-      if (ImGui::BeginTabItem("Play"))
+      const bool static_recomp = cpu_core_override.empty() ?
+                                     config.cpu_core == "staticrecomp" :
+                                     cpu_core_override.front() != '0';
+      DrawStatusPill(static_recomp ? "StaticRecomp" : "JIT64",
+                     static_recomp ? ImVec4(1.0f, 0.75f, 0.3f, 1.0f) : LAUNCHER_ACCENT, scale,
+                     true);
+    }
+    ImGui::Separator();
+    ImGui::Spacing();
+
+    // Body: sidebar on the left and the selected page on the right, leaving
+    // room under both for the footer (error line and controller status).
+    bool has_dialog_error = false;
+    {
+      std::lock_guard lock(dialog.mutex);
+      has_dialog_error = !dialog.error.empty();
+    }
+    const float footer_height =
+        ImGui::GetTextLineHeightWithSpacing() * (has_dialog_error ? 2.0f : 1.0f) +
+        ImGui::GetStyle().ItemSpacing.y * 2.0f + 1.0f;
+    const float body_height = std::max(1.0f, ImGui::GetContentRegionAvail().y - footer_height);
+    // The two columns show the window background; only panels inside a page
+    // (such as GAME STATUS) use the theme's panel colour.
+    ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
+    ImGui::BeginChild("##navigation", ImVec2(170.0f * scale, body_height));
+    ImGui::PopStyleColor();
+    if (DrawNavigationItem("PLAY", current_page == LauncherPage::Play, fonts.bold, scale))
+      current_page = LauncherPage::Play;
+    if (DrawNavigationItem("Settings", current_page == LauncherPage::Settings, fonts.bold, scale))
+      current_page = LauncherPage::Settings;
+    if (DrawNavigationItem("Controls", current_page == LauncherPage::Controls, fonts.bold, scale))
+      current_page = LauncherPage::Controls;
+    if (DrawNavigationItem("Game Files", current_page == LauncherPage::GameFiles, fonts.bold,
+                           scale))
+      current_page = LauncherPage::GameFiles;
+    ImGui::EndChild();
+    ImGui::SameLine();
+    ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
+    ImGui::BeginChild("##page", ImVec2(0.0f, body_height));
+    ImGui::PopStyleColor();
+    {
+      if (current_page == LauncherPage::Play)
       {
         ImGui::Spacing();
         ImGui::TextColored(LAUNCHER_ACCENT, "SONIC RIDERS");
@@ -1101,13 +1247,12 @@ int main(int argc, char** argv)
                             ImGuiChildFlags_Borders | ImGuiChildFlags_AutoResizeY);
           ImGui::TextDisabled("GAME NOT INSTALLED");
           ImGui::TextUnformatted("No extracted game is configured yet.");
-          ImGui::TextDisabled("Open Manage Game Files to select and extract your game.");
+          ImGui::TextDisabled("Open Game Files to select and extract your game.");
           ImGui::EndChild();
         }
 
-        ImGui::EndTabItem();
       }
-      if (ImGui::BeginTabItem("Settings"))
+      if (current_page == LauncherPage::Settings)
       {
     ImGui::Spacing();
     ImGui::TextUnformatted("CPU core");
@@ -1242,9 +1387,8 @@ int main(int argc, char** argv)
         config.show_fps_in_title = show_fps_in_title;
       }
     }
-      ImGui::EndTabItem();
     }
-      if (ImGui::BeginTabItem("Controls"))
+      if (current_page == LauncherPage::Controls)
       {
     ImGui::Spacing();
     ImGui::TextUnformatted("Controller profile");
@@ -1277,9 +1421,8 @@ int main(int argc, char** argv)
     if (ImGui::Button(replace_profile.c_str()))
       select_controller(controller_index);
     ImGui::EndDisabled();
-      ImGui::EndTabItem();
     }
-      if (ImGui::BeginTabItem("Manage Game Files"))
+      if (current_page == LauncherPage::GameFiles)
       {
     ImGui::Spacing();
     ImGui::TextUnformatted("Game disc image");
@@ -1337,10 +1480,9 @@ int main(int argc, char** argv)
       if (!extraction.error.empty())
         ImGui::TextColored(ImVec4(1.0f, 0.35f, 0.3f, 1.0f), "%s", extraction.error.c_str());
     }
-      ImGui::EndTabItem();
     }
-      ImGui::EndTabBar();
     }
+    ImGui::EndChild();
     {
       std::lock_guard lock(dialog.mutex);
       if (!dialog.error.empty())
