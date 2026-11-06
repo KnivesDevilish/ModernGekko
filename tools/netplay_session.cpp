@@ -1,5 +1,6 @@
 #include "netplay_session.hpp"
 
+#include "game_files_hash.hpp"
 #include "launcher_text.hpp"
 #include "launcher_ui.hpp"
 #include "netplay_address.hpp"
@@ -715,15 +716,36 @@ int RunNetplayLobby(RuntimeConfig runtime_config, ConfigResult frontend_config,
     return static_cast<int>(NetplayExitCode::InvalidConfiguration);
   }
 
-  const GameInspectResult inspected = InspectGame(runtime_config.game_root);
+  const GameInspectResult inspected =
+      InspectGame(runtime_config.game_root, {.hash_assets = false});
   if (!inspected) {
     detail::SetExternalUICommon(false);
     UICommon::Shutdown();
     return static_cast<int>(NetplayExitCode::InvalidConfiguration);
   }
+  // Every player's game files must match, so all of files/ is hashed. That
+  // is several GB; each file's hash is remembered until the file changes, so
+  // only the first lobby (or one after the files changed) reads them all.
+  const auto files_check_started = std::chrono::steady_clock::now();
+  std::size_t files_read = 0;
+  GameMetadata metadata = *inspected.metadata;
+  const auto files_hash = CachedDirectorySha256(
+      metadata.root / "files",
+      runtime_config.user_directory / "Cache" / "game-files.sha256", &files_read);
+  if (!files_hash) {
+    detail::SetExternalUICommon(false);
+    UICommon::Shutdown();
+    return static_cast<int>(NetplayExitCode::InvalidConfiguration);
+  }
+  metadata.assets_sha256 = *files_hash;
+  std::cerr << "netplay: game files checked in "
+            << std::chrono::duration_cast<std::chrono::milliseconds>(
+                   std::chrono::steady_clock::now() - files_check_started)
+                   .count()
+            << " ms (" << files_read << " read)\n";
   std::cerr << "netplay: validating compatibility\n";
   NetPlay::SetCompatibilityFingerprint(
-      CompatibilityFingerprint(runtime_config, *inspected.metadata));
+      CompatibilityFingerprint(runtime_config, metadata));
   std::cerr << "netplay: compatibility validated\n";
 
   SessionUI ui(game);

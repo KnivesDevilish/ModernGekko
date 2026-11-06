@@ -776,6 +776,17 @@ if(BUILD_TESTING)
     add_test(NAME moderngekko.netplay_address
              COMMAND moderngekko_netplay_address_test)
 
+    # The Netplay lobby's cached hash of the game files.
+    add_executable(moderngekko_game_files_hash_test
+        tests/game_files_hash_test.cpp
+        src/runtime/game.cpp)
+    target_include_directories(moderngekko_game_files_hash_test PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/include"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tools")
+    target_compile_features(moderngekko_game_files_hash_test PRIVATE cxx_std_23)
+    add_test(NAME moderngekko.game_files_hash
+             COMMAND moderngekko_game_files_hash_test)
+
     add_executable(moderngekko_pgo_support_test
         tests/pgo_support_test.cpp
         tools/pgo_support.cpp)

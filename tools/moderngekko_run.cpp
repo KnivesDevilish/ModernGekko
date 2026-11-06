@@ -282,6 +282,16 @@ int RunMain(int argc, char **argv) {
   else
     config.graphics.aspect_ratio = moderngekko::AspectRatio::Widescreen;
 
+#if defined(__linux__)
+  // The system's volume mixer lists the game under the name its audio
+  // library gives: Dolphin's ("Dolphin Emulator"). PulseAudio, and PipeWire's
+  // PulseAudio layer, take a replacement from the environment, so the game
+  // shows up under its window title instead. A value already set in the
+  // shell is kept.
+  if (config.window_title && !config.window_title->empty())
+    setenv("PULSE_PROP_OVERRIDE_application.name", config.window_title->c_str(), 0);
+#endif
+
   // CPU core: config.ini decides unless MODERNGEKKO_STATICRECOMP is already set,
   // so the shell can still force either core for testing. The runtime reads
   // the variable once, in Runtime::Create, so it must be set before that call

@@ -215,6 +215,7 @@ inline constexpr Translation SPANISH_TEXTS[] = {
     {"No controller in %s.", "No hay ningún mando en %s."},
     {"Connect %s.", "Conecta %s."},
     {"Stick", "Stick"},
+    {"Menu", "Menú"},
     {"D-Pad", "Cruceta"},
     {"Shake", "Agitar"},
     {"L trigger", "Gatillo L"},

@@ -110,6 +110,11 @@ int main() {
       !generated.contains("C-Stick/Up = `Right Y+`\n") ||
       !generated.contains("Triggers/L-Analog = `Shoulder L`\n") ||
       !generated.contains("Extra/C = `Trigger L`\n") ||
+      // Select and Menu, kept for mods: Back and Guide, and on the first
+      // controller Backspace and M as well.
+      !generated.contains("Extra/Select = Back | `") ||
+      !generated.contains(":M`\n") ||
+      !generated.contains("Extra/Select = Back\nExtra/Menu = Guide\n") ||
       !generated.contains("Rumble/Motor = `Motor L` | `Motor R`\n") ||
       !generated.contains("[GCPad2]\nDevice = SDL/1/Second Controller\n") ||
       // Only the first controller also answers to the keyboard, and so stays

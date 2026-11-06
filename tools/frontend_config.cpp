@@ -124,23 +124,27 @@ std::string_view ControllerSectionPrefix() {
 #ifdef MODERNGEKKO_GAMECUBE_CONTROLLERS
 // The first GameCube controller also answers to the keyboard: S, D, A for
 // A, B, X, W for Y, Q for Z, left Shift and E for L and R, Enter for Start and
-// the arrows for the control stick. Device and key names are the ones
+// the arrows for the control stick, plus Backspace and M for the Select and
+// Menu buttons kept for mods. Device and key names are the ones
 // Dolphin's keyboard backend uses on each platform; on Linux that is the X11
 // backend, which the runner uses unless started with --wayland.
 #if defined(_WIN32)
 constexpr std::string_view KEYBOARD_DEVICE = "DInput/0/Keyboard Mouse";
 constexpr std::string_view KEY_START = "RETURN";
+constexpr std::string_view KEY_BACKSPACE = "BACK";
 constexpr std::string_view KEY_LEFT_SHIFT = "LSHIFT";
 constexpr std::array<std::string_view, 4> KEY_ARROWS = {"UP", "DOWN", "LEFT", "RIGHT"};
 #elif defined(__APPLE__)
 constexpr std::string_view KEYBOARD_DEVICE = "Quartz/0/Keyboard & Mouse";
 constexpr std::string_view KEY_START = "Return";
+constexpr std::string_view KEY_BACKSPACE = "Backspace";
 constexpr std::string_view KEY_LEFT_SHIFT = "Left Shift";
 constexpr std::array<std::string_view, 4> KEY_ARROWS = {"Up Arrow", "Down Arrow", "Left Arrow",
                                                         "Right Arrow"};
 #else
 constexpr std::string_view KEYBOARD_DEVICE = "XInput2/0/Virtual core pointer";
 constexpr std::string_view KEY_START = "Return";
+constexpr std::string_view KEY_BACKSPACE = "BackSpace";
 constexpr std::string_view KEY_LEFT_SHIFT = "Shift_L";
 constexpr std::array<std::string_view, 4> KEY_ARROWS = {"Up", "Down", "Left", "Right"};
 #endif
@@ -598,10 +602,14 @@ bool GenerateControllerConfig(const fs::path &user_directory,
               "D-Pad/Left = `Pad W`\n"
               "D-Pad/Right = `Pad E`\n"
               "Rumble/Motor = `Motor L` | `Motor R`\n"
-              // Not a GameCube input, and Dolphin ignores it: the left trigger
-              // is kept as the extra C button of the SR-ZGS controller drawing,
-              // for mods. The launcher's tester shows it.
-              "Extra/C = `Trigger L`\n";
+              // Not GameCube inputs, and Dolphin ignores them: the left
+              // trigger is kept as the extra C button of the SR-ZGS controller
+              // drawing, and Back and Guide (Select and Home on most pads) as
+              // its − and triangle buttons, for mods. The launcher's tester
+              // shows them.
+              "Extra/C = `Trigger L`\n"
+           << "Extra/Select = Back" << key(KEY_BACKSPACE) << '\n'
+           << "Extra/Menu = Guide" << key("M") << '\n';
 #else
     output << "[Wiimote" << i + 1 << "]\n";
     if (i >= controllers.size())

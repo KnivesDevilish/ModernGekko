@@ -1169,7 +1169,7 @@ std::optional<SDL_Scancode> ParseDolphinKey(std::string_view name)
     if (c == '0')
       return SDL_SCANCODE_0;
   }
-  constexpr std::array<std::pair<std::string_view, SDL_Scancode>, 29> named_keys = {{
+  constexpr std::array<std::pair<std::string_view, SDL_Scancode>, 32> named_keys = {{
       {"Return", SDL_SCANCODE_RETURN},     {"RETURN", SDL_SCANCODE_RETURN},
       {"Up", SDL_SCANCODE_UP},             {"UP", SDL_SCANCODE_UP},
       {"Up Arrow", SDL_SCANCODE_UP},       {"Down", SDL_SCANCODE_DOWN},
@@ -1184,7 +1184,8 @@ std::optional<SDL_Scancode> ParseDolphinKey(std::string_view name)
       {"Space", SDL_SCANCODE_SPACE},       {"Tab", SDL_SCANCODE_TAB},
       {"TAB", SDL_SCANCODE_TAB},           {"Control_L", SDL_SCANCODE_LCTRL},
       {"LCONTROL", SDL_SCANCODE_LCTRL},    {"Escape", SDL_SCANCODE_ESCAPE},
-      {"ESCAPE", SDL_SCANCODE_ESCAPE},
+      {"ESCAPE", SDL_SCANCODE_ESCAPE},     {"BackSpace", SDL_SCANCODE_BACKSPACE},
+      {"BACK", SDL_SCANCODE_BACKSPACE},    {"Backspace", SDL_SCANCODE_BACKSPACE},
   }};
   for (const auto& [key_name, scancode] : named_keys)
   {
@@ -1308,6 +1309,8 @@ enum ProfileInput : std::size_t
   INPUT_R,
   INPUT_START,
   INPUT_C,  // the drawing's extra button, kept for mods; not a GameCube input
+  INPUT_SELECT,  // the drawing's − and triangle buttons, kept for mods the
+  INPUT_MENU,    // same way: the game itself has no Select or menu button
   INPUT_STICK_UP,
   INPUT_STICK_DOWN,
   INPUT_STICK_LEFT,
@@ -1329,6 +1332,8 @@ constexpr std::array<std::array<std::string_view, 3>, INPUT_COUNT> PROFILE_INPUT
     {"Triggers/R", "Triggers/R-Analog"},
     {"Buttons/Start"},
     {"Extra/C"},
+    {"Extra/Select"},
+    {"Extra/Menu"},
     {"Main Stick/Up"},
     {"Main Stick/Down"},
     {"Main Stick/Left"},
@@ -1344,11 +1349,12 @@ constexpr const char* PROFILE_LEGEND_TITLE = "GameCube";
 // What a keyboard key shows on the keyboard drawing: the button's name, or
 // an arrow (1 up, 2 down, 3 left, 4 right) for the stick and the D-pad.
 constexpr std::array<const char*, INPUT_COUNT> INPUT_KEY_LABELS = {
-    "A", "B", "X", "Y", "Z", "L", "R", "START", "C", "", "", "", "", "", "", "", ""};
-constexpr std::array<int, INPUT_COUNT> INPUT_KEY_ARROWS = {0, 0, 0, 0, 0, 0, 0, 0, 0,
+    "A", "B", "X", "Y", "Z", "L", "R", "START", "C", "SELECT", "MENU",
+    "",  "",  "",  "",  "",  "",  "",  ""};
+constexpr std::array<int, INPUT_COUNT> INPUT_KEY_ARROWS = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
                                                            1, 2, 3, 4, 1, 2, 3, 4};
 
-constexpr std::array<LegendRow, 10> LEGEND_ROWS = {{
+constexpr std::array<LegendRow, 12> LEGEND_ROWS = {{
     {"A", INPUT_A, INPUT_A},
     {"B", INPUT_B, INPUT_B},
     {"X", INPUT_X, INPUT_X},
@@ -1359,12 +1365,15 @@ constexpr std::array<LegendRow, 10> LEGEND_ROWS = {{
     {"Start", INPUT_START, INPUT_START},
     {MODERNGEKKO_UI_TEXT("Stick"), INPUT_STICK_UP, INPUT_DPAD_RIGHT},  // stick and D-pad
     {"C", INPUT_C, INPUT_C},
+    {"Select", INPUT_SELECT, INPUT_SELECT},
+    {MODERNGEKKO_UI_TEXT("Menu"), INPUT_MENU, INPUT_MENU},
 }};
 
 // The drawing's six face buttons are A, B, C and X, Y, Z, and its shoulders
-// are L and R. GameCube has no C: the profile keeps it apart (Extra/C) for
-// mods. The D-pad arms light for the stick as well as for the D-pad.
-constexpr std::array<ArtHotspot, 17> CONTROLLER_ART_HOTSPOTS = {{
+// are L and R. GameCube has no C, Select (−) or menu (the triangle) button:
+// the profile keeps them apart (Extra/...) for mods. The D-pad arms light for
+// the stick as well as for the D-pad.
+constexpr std::array<ArtHotspot, 19> CONTROLLER_ART_HOTSPOTS = {{
     {INPUT_A, 1, {{{646, 605}}}, 42},
     {INPUT_B, 1, {{{735, 553}}}, 42},
     {INPUT_X, 1, {{{599, 515}}}, 42},
@@ -1373,7 +1382,9 @@ constexpr std::array<ArtHotspot, 17> CONTROLLER_ART_HOTSPOTS = {{
     {INPUT_C, 1, {{{831, 518}}}, 42},
     {INPUT_R, 6, ART_RIGHT_SHOULDER, 0},
     {INPUT_L, 6, ART_LEFT_SHOULDER, 0},
-    {INPUT_START, 1, {{{595, 405}}}, 22},  // +
+    {INPUT_START, 1, {{{595, 405}}}, 22},   // +
+    {INPUT_SELECT, 1, {{{429, 405}}}, 22},  // −
+    {INPUT_MENU, 3, {{{512, 538}, {464, 643}, {560, 643}}}, 0},  // the triangle
     {INPUT_STICK_UP, 2, ART_DPAD_UP, 0},
     {INPUT_STICK_DOWN, 2, ART_DPAD_DOWN, 0},
     {INPUT_STICK_LEFT, 2, ART_DPAD_LEFT, 0},
@@ -1464,7 +1475,7 @@ struct KeyboardArtKey
   ImVec2 min;
   ImVec2 max;
 };
-constexpr std::array<KeyboardArtKey, 12> KEYBOARD_ART_KEYS = {{
+constexpr std::array<KeyboardArtKey, 14> KEYBOARD_ART_KEYS = {{
     {SDL_SCANCODE_Q, {226, 156}, {320, 232}},
     {SDL_SCANCODE_W, {330, 156}, {422, 232}},
     {SDL_SCANCODE_E, {432, 156}, {524, 232}},
@@ -1473,6 +1484,8 @@ constexpr std::array<KeyboardArtKey, 12> KEYBOARD_ART_KEYS = {{
     {SDL_SCANCODE_D, {455, 259}, {543, 334}},
     {SDL_SCANCODE_LSHIFT, {56, 360}, {278, 433}},
     {SDL_SCANCODE_RETURN, {1403, 260}, {1604, 332}},
+    {SDL_SCANCODE_BACKSPACE, {1422, 54}, {1594, 126}},
+    {SDL_SCANCODE_M, {928, 357}, {1000, 432}},
     {SDL_SCANCODE_UP, {1528, 361}, {1612, 431}},
     {SDL_SCANCODE_LEFT, {1428, 462}, {1512, 535}},
     {SDL_SCANCODE_DOWN, {1537, 462}, {1619, 535}},
@@ -2239,11 +2252,10 @@ int main(int argc, char** argv)
   // StateSaves is Dolphin's own state directory, so states written in-game land
   // here without any extra configuration and show up on the next launch.
   //
-  // Listed once at startup rather than every frame, so the dropdown does not
-  // hit the filesystem on each redraw. A state written while the launcher is
-  // open therefore appears on the next launch, which is the case that matters:
-  // states are written by the running game, not by the launcher.
-  const std::vector<fs::path> launcher_savestates =
+  // Listed at startup and again when the launcher comes back from the game,
+  // rather than every frame, so the dropdown does not hit the filesystem on
+  // each redraw. States are written by the running game, not by the launcher.
+  std::vector<fs::path> launcher_savestates =
       moderngekko::frontend::ListLauncherSavestates(user_directory / "StateSaves");
   // Loading is always explicit. StateSaves is shared by games, so selecting the
   // newest file automatically could try to resume a different title.
@@ -2439,6 +2451,188 @@ int main(int argc, char** argv)
   std::uint64_t summary_time_played = 0;
   int summary_installed_mods = 0;
   bool summary_stale = true;
+  int result = 0;
+  // Starts the game (PLAY, Host or Join) and waits for it. The launcher hides
+  // while the game runs and shows itself again when the game closes, with a
+  // message if it failed. Returns the launcher's exit code for that session.
+  const auto launch_game = [&](LaunchMode mode) -> int
+  {
+    int session_result = 0;
+    std::string launch_error;
+    if (!WriteDefaultGame(user_directory, release_directory, current_game,
+                          &launch_error))
+    {
+      SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, Tr("Launch failed"), launch_error.c_str(),
+                               window);
+      session_result = 1;
+    }
+    else
+    {
+      std::vector<std::string> argument_storage = {SiblingRunner(argv[0]).string(), "--game",
+                                                   current_game.string(), "--user-dir",
+                                                   user_directory.string()};
+      // Solo only: see the note by the dropdown.
+      if (mode == LaunchMode::Solo && selected_savestate >= 0 &&
+          static_cast<std::size_t>(selected_savestate) < launcher_savestates.size())
+      {
+        argument_storage.emplace_back("--load-state");
+        argument_storage.emplace_back(
+            moderngekko::frontend::PathText(
+                launcher_savestates[static_cast<std::size_t>(selected_savestate)]));
+      }
+      const bool invite_code = config.netplay_connection == "code";
+      if (mode == LaunchMode::Host)
+      {
+        argument_storage.emplace_back("--netplay-host");
+        if (invite_code)
+          argument_storage.emplace_back("--invite-code");
+      }
+      else if (mode == LaunchMode::Join && invite_code)
+      {
+        argument_storage.emplace_back("--netplay-join-code");
+        argument_storage.emplace_back(netplay_join_code);
+      }
+      else if (mode == LaunchMode::Join)
+      {
+        argument_storage.emplace_back("--netplay-join");
+        argument_storage.emplace_back(config.netplay_address);
+      }
+      if (mode == LaunchMode::Host || mode == LaunchMode::Join)
+      {
+        argument_storage.emplace_back("--netplay-port");
+        argument_storage.emplace_back(std::to_string(config.netplay_port));
+        argument_storage.emplace_back("--nickname");
+        argument_storage.emplace_back(config.netplay_nickname);
+        argument_storage.emplace_back("--buffer");
+        argument_storage.emplace_back(config.netplay_buffer);
+        for (const std::string& controller : config.controllers)
+        {
+          argument_storage.emplace_back("--controller");
+          argument_storage.emplace_back(controller);
+        }
+      }
+      if (use_wayland)
+        argument_storage.emplace_back("--wayland");
+#if defined(__linux__)
+      else
+        argument_storage.emplace_back("-X11");
+#endif
+      std::vector<const char*> arguments;
+      arguments.reserve(argument_storage.size() + 1);
+      for (const std::string& argument : argument_storage)
+        arguments.push_back(argument.c_str());
+      arguments.push_back(nullptr);
+      const std::filesystem::path log_path =
+          user_directory / "Logs" / MODERNGEKKO_LOG_FILENAME;
+      std::error_code log_error;
+      std::filesystem::create_directories(log_path.parent_path(), log_error);
+      SDL_IOStream* log_stream =
+          log_error ? nullptr : SDL_IOFromFile(log_path.string().c_str(), "w");
+      SDL_Process* process = nullptr;
+      std::string process_error;
+      if (log_stream)
+      {
+        const SDL_PropertiesID properties = SDL_CreateProperties();
+        if (properties)
+        {
+          SDL_SetPointerProperty(properties, SDL_PROP_PROCESS_CREATE_ARGS_POINTER,
+                                 arguments.data());
+          SDL_SetNumberProperty(properties, SDL_PROP_PROCESS_CREATE_STDOUT_NUMBER,
+                                SDL_PROCESS_STDIO_REDIRECT);
+          SDL_SetPointerProperty(properties, SDL_PROP_PROCESS_CREATE_STDOUT_POINTER, log_stream);
+          SDL_SetBooleanProperty(properties, SDL_PROP_PROCESS_CREATE_STDERR_TO_STDOUT_BOOLEAN,
+                                 true);
+          process = SDL_CreateProcessWithProperties(properties);
+          SDL_DestroyProperties(properties);
+        }
+        if (!process)
+          process_error = SDL_GetError();
+        SDL_CloseIO(log_stream);
+      }
+      else
+      {
+        process = SDL_CreateProcess(arguments.data(), false);
+        if (!process)
+          process_error = SDL_GetError();
+      }
+      if (!process)
+      {
+        launch_error = Format(Tr("Could not start %s: %s"), SiblingRunner(argv[0]).string().c_str(),
+                              process_error.c_str());
+        SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, Tr("Launch failed"), launch_error.c_str(),
+                                 window);
+        session_result = 1;
+      }
+      else
+      {
+        SDL_HideWindow(window);
+        int exit_code = 1;
+        const bool waited = SDL_WaitProcess(process, true, &exit_code);
+        SDL_DestroyProcess(process);
+        SDL_ShowWindow(window);
+        SDL_RaiseWindow(window);
+        if (!waited || exit_code != 0)
+        {
+          if (!waited)
+          {
+            launch_error = Format(Tr("The game process could not be monitored: %s"), SDL_GetError());
+          }
+          else if (mode == LaunchMode::Join)
+          {
+            switch (static_cast<moderngekko::frontend::NetplayExitCode>(exit_code))
+            {
+            case moderngekko::frontend::NetplayExitCode::VersionMismatch:
+              launch_error = Tr("The host is running an incompatible netplay build. Both "
+                                "players must use the same release.");
+              break;
+            case moderngekko::frontend::NetplayExitCode::CompatibilityMismatch:
+              launch_error = Tr("The extracted game or recomp module does not match the "
+                                "host. Both players need the same game revision and "
+                                "release.");
+              break;
+            case moderngekko::frontend::NetplayExitCode::RoomFull:
+              launch_error = Tr("All four controller slots are already occupied.");
+              break;
+            case moderngekko::frontend::NetplayExitCode::GameRunning:
+              launch_error = Tr("The host has already started the game.");
+              break;
+            case moderngekko::frontend::NetplayExitCode::ServerFull:
+              launch_error = Tr("The netplay server is full.");
+              break;
+            case moderngekko::frontend::NetplayExitCode::NicknameRejected:
+              launch_error = Tr("The nickname was rejected by the host.");
+              break;
+            case moderngekko::frontend::NetplayExitCode::InviteCodeFailed:
+              launch_error = Tr("No room answered to that invite code. Check that it is typed "
+                                "right and that the host's room is still open. If it keeps "
+                                "failing, the invite server may be down or your connection "
+                                "may not allow it: try Direct IP with Tailscale.");
+              break;
+            default:
+              launch_error = Tr("Could not reach the netplay host. Check the host name, UDP "
+                                "port, and firewall.");
+              break;
+            }
+          }
+          else if (mode == LaunchMode::Host)
+          {
+            launch_error = Tr("Could not create the netplay session. Check the UDP port "
+                              "and firewall settings.");
+          }
+          else
+          {
+            launch_error = Format(Tr("The game process exited with code %d."), exit_code);
+          }
+          if (!log_error)
+            launch_error += Format(Tr("\n\nDetails were written to:\n%s"), log_path.string().c_str());
+          SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, Tr("Session failed"), launch_error.c_str(),
+                                   window);
+          session_result = 1;
+        }
+      }
+    }
+    return session_result;
+  };
   while (!done)
   {
     bool controllers_changed = false;
@@ -3231,187 +3425,31 @@ int main(int argc, char** argv)
     SDL_RenderClear(renderer);
     ImGui_ImplSDLRenderer3_RenderDrawData(ImGui::GetDrawData(), renderer);
     SDL_RenderPresent(renderer);
+
+    // PLAY, Host or Join was clicked this frame: run the game, then carry on
+    // from the PLAY page when it closes.
+    if (launch_mode != LaunchMode::None)
+    {
+      if (extraction_thread.joinable())
+        extraction_thread.join();
+      result = launch_game(launch_mode);
+      launch_mode = LaunchMode::None;
+      done = false;
+      current_page = LauncherPage::Play;
+      // Time played and savestates changed while the game ran.
+      summary_stale = true;
+      launcher_savestates =
+          moderngekko::frontend::ListLauncherSavestates(user_directory / "StateSaves");
+      selected_savestate = -1;
+      // Pad and key events from the game session waited in the queue while
+      // the launcher was hidden; they are not meant for it.
+      SDL_FlushEvents(SDL_EVENT_FIRST, SDL_EVENT_LAST);
+      refresh_controllers();
+    }
   }
 
   if (extraction_thread.joinable())
     extraction_thread.join();
-
-  int result = 0;
-  if (launch_mode != LaunchMode::None)
-  {
-    std::string launch_error;
-    if (!WriteDefaultGame(user_directory, release_directory, current_game,
-                          &launch_error))
-    {
-      SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, Tr("Launch failed"), launch_error.c_str(),
-                               window);
-      result = 1;
-    }
-    else
-    {
-      std::vector<std::string> argument_storage = {SiblingRunner(argv[0]).string(), "--game",
-                                                   current_game.string(), "--user-dir",
-                                                   user_directory.string()};
-      // Solo only: see the note by the dropdown.
-      if (launch_mode == LaunchMode::Solo && selected_savestate >= 0 &&
-          static_cast<std::size_t>(selected_savestate) < launcher_savestates.size())
-      {
-        argument_storage.emplace_back("--load-state");
-        argument_storage.emplace_back(
-            moderngekko::frontend::PathText(
-                launcher_savestates[static_cast<std::size_t>(selected_savestate)]));
-      }
-      const bool invite_code = config.netplay_connection == "code";
-      if (launch_mode == LaunchMode::Host)
-      {
-        argument_storage.emplace_back("--netplay-host");
-        if (invite_code)
-          argument_storage.emplace_back("--invite-code");
-      }
-      else if (launch_mode == LaunchMode::Join && invite_code)
-      {
-        argument_storage.emplace_back("--netplay-join-code");
-        argument_storage.emplace_back(netplay_join_code);
-      }
-      else if (launch_mode == LaunchMode::Join)
-      {
-        argument_storage.emplace_back("--netplay-join");
-        argument_storage.emplace_back(config.netplay_address);
-      }
-      if (launch_mode == LaunchMode::Host || launch_mode == LaunchMode::Join)
-      {
-        argument_storage.emplace_back("--netplay-port");
-        argument_storage.emplace_back(std::to_string(config.netplay_port));
-        argument_storage.emplace_back("--nickname");
-        argument_storage.emplace_back(config.netplay_nickname);
-        argument_storage.emplace_back("--buffer");
-        argument_storage.emplace_back(config.netplay_buffer);
-        for (const std::string& controller : config.controllers)
-        {
-          argument_storage.emplace_back("--controller");
-          argument_storage.emplace_back(controller);
-        }
-      }
-      if (use_wayland)
-        argument_storage.emplace_back("--wayland");
-#if defined(__linux__)
-      else
-        argument_storage.emplace_back("-X11");
-#endif
-      std::vector<const char*> arguments;
-      arguments.reserve(argument_storage.size() + 1);
-      for (const std::string& argument : argument_storage)
-        arguments.push_back(argument.c_str());
-      arguments.push_back(nullptr);
-      const std::filesystem::path log_path =
-          user_directory / "Logs" / MODERNGEKKO_LOG_FILENAME;
-      std::error_code log_error;
-      std::filesystem::create_directories(log_path.parent_path(), log_error);
-      SDL_IOStream* log_stream =
-          log_error ? nullptr : SDL_IOFromFile(log_path.string().c_str(), "w");
-      SDL_Process* process = nullptr;
-      std::string process_error;
-      if (log_stream)
-      {
-        const SDL_PropertiesID properties = SDL_CreateProperties();
-        if (properties)
-        {
-          SDL_SetPointerProperty(properties, SDL_PROP_PROCESS_CREATE_ARGS_POINTER,
-                                 arguments.data());
-          SDL_SetNumberProperty(properties, SDL_PROP_PROCESS_CREATE_STDOUT_NUMBER,
-                                SDL_PROCESS_STDIO_REDIRECT);
-          SDL_SetPointerProperty(properties, SDL_PROP_PROCESS_CREATE_STDOUT_POINTER, log_stream);
-          SDL_SetBooleanProperty(properties, SDL_PROP_PROCESS_CREATE_STDERR_TO_STDOUT_BOOLEAN,
-                                 true);
-          process = SDL_CreateProcessWithProperties(properties);
-          SDL_DestroyProperties(properties);
-        }
-        if (!process)
-          process_error = SDL_GetError();
-        SDL_CloseIO(log_stream);
-      }
-      else
-      {
-        process = SDL_CreateProcess(arguments.data(), false);
-        if (!process)
-          process_error = SDL_GetError();
-      }
-      if (!process)
-      {
-        launch_error = Format(Tr("Could not start %s: %s"), SiblingRunner(argv[0]).string().c_str(),
-                              process_error.c_str());
-        SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, Tr("Launch failed"), launch_error.c_str(),
-                                 window);
-        result = 1;
-      }
-      else
-      {
-        SDL_HideWindow(window);
-        int exit_code = 1;
-        const bool waited = SDL_WaitProcess(process, true, &exit_code);
-        SDL_DestroyProcess(process);
-        if (!waited || exit_code != 0)
-        {
-          SDL_ShowWindow(window);
-          if (!waited)
-          {
-            launch_error = Format(Tr("The game process could not be monitored: %s"), SDL_GetError());
-          }
-          else if (launch_mode == LaunchMode::Join)
-          {
-            switch (static_cast<moderngekko::frontend::NetplayExitCode>(exit_code))
-            {
-            case moderngekko::frontend::NetplayExitCode::VersionMismatch:
-              launch_error = Tr("The host is running an incompatible netplay build. Both "
-                                "players must use the same release.");
-              break;
-            case moderngekko::frontend::NetplayExitCode::CompatibilityMismatch:
-              launch_error = Tr("The extracted game or recomp module does not match the "
-                                "host. Both players need the same game revision and "
-                                "release.");
-              break;
-            case moderngekko::frontend::NetplayExitCode::RoomFull:
-              launch_error = Tr("All four controller slots are already occupied.");
-              break;
-            case moderngekko::frontend::NetplayExitCode::GameRunning:
-              launch_error = Tr("The host has already started the game.");
-              break;
-            case moderngekko::frontend::NetplayExitCode::ServerFull:
-              launch_error = Tr("The netplay server is full.");
-              break;
-            case moderngekko::frontend::NetplayExitCode::NicknameRejected:
-              launch_error = Tr("The nickname was rejected by the host.");
-              break;
-            case moderngekko::frontend::NetplayExitCode::InviteCodeFailed:
-              launch_error = Tr("No room answered to that invite code. Check that it is typed "
-                                "right and that the host's room is still open. If it keeps "
-                                "failing, the invite server may be down or your connection "
-                                "may not allow it: try Direct IP with Tailscale.");
-              break;
-            default:
-              launch_error = Tr("Could not reach the netplay host. Check the host name, UDP "
-                                "port, and firewall.");
-              break;
-            }
-          }
-          else if (launch_mode == LaunchMode::Host)
-          {
-            launch_error = Tr("Could not create the netplay session. Check the UDP port "
-                              "and firewall settings.");
-          }
-          else
-          {
-            launch_error = Format(Tr("The game process exited with code %d."), exit_code);
-          }
-          if (!log_error)
-            launch_error += Format(Tr("\n\nDetails were written to:\n%s"), log_path.string().c_str());
-          SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, Tr("Session failed"), launch_error.c_str(),
-                                   window);
-          result = 1;
-        }
-      }
-    }
-  }
 
   ImGui_ImplSDLRenderer3_Shutdown();
   ImGui_ImplSDL3_Shutdown();
