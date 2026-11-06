@@ -271,15 +271,19 @@ inline bool DrawLobbyButton(const char* label, ImVec2 size, LobbyButtonLook look
   return clicked;
 }
 
-// The whole lobby window, filling the SDL window.
+// The whole lobby window, filling the SDL window. over_background: a
+// background picture is drawn under it (lobby-background.png), so the
+// window lets it show; the panels keep their colour.
 inline LobbyActions DrawLobby(const LobbyView& view, LobbyState& state, const LauncherImage& art,
-                              ImFont* bold, float scale)
+                              ImFont* bold, float scale, bool over_background = false)
 {
   LobbyActions actions;
   const ImGuiStyle& style = ImGui::GetStyle();
   const ImGuiViewport* viewport = ImGui::GetMainViewport();
   ImGui::SetNextWindowPos(viewport->WorkPos);
   ImGui::SetNextWindowSize(viewport->WorkSize);
+  if (over_background)
+    ImGui::SetNextWindowBgAlpha(0.0f);
   ImGui::Begin("Netplay", nullptr,
                ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove |
                    ImGuiWindowFlags_NoSavedSettings);

@@ -639,38 +639,6 @@ void DrawLauncherBanner(const LauncherBanner& banner)
   ImGui::Dummy(size);
 }
 
-// The launcher's background picture (Resources/launcher-background.png),
-// under the whole interface. It is drawn straight with SDL right after the
-// window is cleared, scaled to cover the window: a window narrower than the
-// picture crops its sides, a wider one its top, so the bottom of the picture
-// always shows.
-void RenderLauncherBackground(SDL_Renderer* renderer, const LauncherImage& background)
-{
-  float picture_width = 0.0f;
-  float picture_height = 0.0f;
-  int window_width = 0;
-  int window_height = 0;
-  if (!background.texture ||
-      !SDL_GetTextureSize(background.texture, &picture_width, &picture_height) ||
-      !SDL_GetCurrentRenderOutputSize(renderer, &window_width, &window_height) ||
-      picture_width <= 0.0f || picture_height <= 0.0f || window_width <= 0 || window_height <= 0)
-    return;
-  const float picture_ratio = picture_width / picture_height;
-  const float window_ratio = static_cast<float>(window_width) / static_cast<float>(window_height);
-  SDL_FRect source{0.0f, 0.0f, picture_width, picture_height};
-  if (window_ratio < picture_ratio)
-  {
-    source.w = picture_height * window_ratio;
-    source.x = (picture_width - source.w) * 0.5f;
-  }
-  else
-  {
-    source.h = picture_width / window_ratio;
-    source.y = picture_height - source.h;
-  }
-  SDL_RenderTexture(renderer, background.texture, &source, nullptr);
-}
-
 // The music volume above the language menu at the bottom of the sidebar, 0
 // (off) to 100. Returns true while the volume changes; finished is set once
 // the player lets go of the slider, which is when it is worth saving.
@@ -2177,8 +2145,6 @@ int main(int argc, char** argv)
   // A value already set in the environment wins (0 = don't overwrite).
   if (RunningInContainer())
     SDL_setenv_unsafe("SDL_JOYSTICK_DISABLE_UDEV", "1", 0);
-  // The name the system's volume mixer shows for the launcher's music.
-  SDL_SetAppMetadataProperty(SDL_PROP_APP_METADATA_NAME_STRING, MODERNGEKKO_FRONTEND_NAME);
   if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD))
     return 1;
   // Interface language: config.ini's choice, or the system's one on "auto".
@@ -2229,11 +2195,12 @@ int main(int argc, char** argv)
       renderer, release_directory, "launcher-controller.png", "launcher controller art");
   const LauncherImage keyboard_art = LoadLauncherImage(
       renderer, release_directory, "launcher-keyboard.png", "launcher keyboard art");
+  // The background's floor slides (RenderBackground in launcher_ui.hpp).
   const LauncherImage background = LoadLauncherImage(
-      renderer, release_directory, "launcher-background.png", "launcher background");
+      renderer, release_directory, "launcher-background.png", "launcher background", true);
   // Resources/launcher-music.mp3 loops while the launcher is open and waits
   // while the game runs. Without the file there is no music and no slider.
-  moderngekko::frontend::MusicPlayer music;
+  moderngekko::frontend::MusicPlayer music(MODERNGEKKO_FRONTEND_NAME);
   const bool has_music =
       music.Play(release_directory / "Resources" / "launcher-music.mp3", config.music_volume);
 
@@ -2759,8 +2726,8 @@ int main(int argc, char** argv)
     ImGui::SetNextWindowPos(viewport->WorkPos);
     ImGui::SetNextWindowSize(viewport->WorkSize);
     // With a background picture the window itself is see-through (the
-    // picture is drawn under it, see RenderLauncherBackground); the panels
-    // keep their own color, so text stays readable.
+    // picture is drawn under it, see RenderBackground); the panels keep
+    // their own color, so text stays readable.
     if (background.texture)
       ImGui::SetNextWindowBgAlpha(0.0f);
     ImGui::Begin(MODERNGEKKO_FRONTEND_NAME " Launcher", nullptr,
@@ -2915,7 +2882,7 @@ int main(int argc, char** argv)
             ImGui::Spacing();
           }
 
-          if (DrawPrimaryButton(Tr("PLAY"), fonts.bold, 52 * scale))
+          if (DrawPrimaryButton(Tr("PLAY"), fonts.bold, 42 * scale))
           {
             if (ensure_controller())
             {
@@ -3510,7 +3477,7 @@ int main(int argc, char** argv)
     SDL_SetRenderScale(renderer, io.DisplayFramebufferScale.x, io.DisplayFramebufferScale.y);
     SDL_SetRenderDrawColor(renderer, 8, 8, 9, 255);  // ImGuiCol_WindowBg of the theme
     SDL_RenderClear(renderer);
-    RenderLauncherBackground(renderer, background);
+    RenderBackground(renderer, background, static_cast<double>(SDL_GetTicksNS()) / 1e9);
     ImGui_ImplSDLRenderer3_RenderDrawData(ImGui::GetDrawData(), renderer);
     SDL_RenderPresent(renderer);
 

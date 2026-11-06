@@ -6,12 +6,14 @@
 // moderngekko_launcher.cpp so both windows draw with the same code.
 
 #include "launcher_cjk_font.inc"
+#include "moving_background.hpp"
 
 #include <SDL3/SDL.h>
 #include <imgui.h>
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstdint>
 #include <cstdlib>
 #include <filesystem>
@@ -240,9 +242,13 @@ struct LauncherImage
 {
   SDL_Texture* texture = nullptr;
   float aspect = 0.0f;  // height / width
+  // Backgrounds only: the floor that slides (moving_background.hpp).
+  ScrollingFloor floor;
 };
+// find_floor: for a background, also look for a floor that can slide.
 inline LauncherImage LoadLauncherImage(SDL_Renderer* renderer, const fs::path& release_directory,
-                                std::string_view file_name, std::string_view log_label)
+                                       std::string_view file_name, std::string_view log_label,
+                                       bool find_floor = false)
 {
   LauncherImage image;
   const fs::path path = release_directory / "Resources" / file_name;
@@ -265,22 +271,168 @@ inline LauncherImage LoadLauncherImage(SDL_Renderer* renderer, const fs::path& r
       std::cout << log_label << ": " << path.string() << '\n';
     }
   }
+  if (image.texture && find_floor)
+  {
+    // The search reads plain RGBA bytes, whatever the PNG's own layout.
+    if (SDL_Surface* pixels = SDL_ConvertSurface(surface, SDL_PIXELFORMAT_RGBA32))
+    {
+      if (SDL_LockSurface(pixels))
+      {
+        image.floor = FindScrollingFloor(static_cast<const std::uint8_t*>(pixels->pixels),
+                                         pixels->w, pixels->h, pixels->pitch);
+        SDL_UnlockSurface(pixels);
+      }
+      SDL_DestroySurface(pixels);
+    }
+    if (image.floor.found)
+    {
+      std::cout << log_label << ": the floor slides, rows " << image.floor.top << " to "
+                << image.floor.bottom << '\n';
+    }
+    else
+    {
+      std::cout << log_label << ": no repeating floor, the picture stays still\n";
+    }
+  }
   SDL_DestroySurface(surface);
   return image;
 }
 
+// Seconds the floor of a background takes to slide one cell to the left.
+inline constexpr double FLOOR_SECONDS_PER_CELL = 2.5;
 
-// The page's main action: full width, accent colour, dark bold label.
+// A background picture under a whole window (the launcher's, the Netplay
+// lobby's), drawn straight with SDL right after the window is cleared and
+// before the interface. It is scaled to cover the window: a window narrower
+// than the picture crops its sides, a wider one its top, so the bottom of
+// the picture always shows. When the picture has a floor (see
+// moving_background.hpp), the floor slides left as seconds go by: drawn in
+// bands a couple of pixels high, each shifted by its own share of a cell and
+// wrapped around where the picture ends.
+inline void RenderBackground(SDL_Renderer* renderer, const LauncherImage& background,
+                             double seconds)
+{
+  float picture_width = 0.0f;
+  float picture_height = 0.0f;
+  int window_width = 0;
+  int window_height = 0;
+  if (!background.texture ||
+      !SDL_GetTextureSize(background.texture, &picture_width, &picture_height) ||
+      !SDL_GetCurrentRenderOutputSize(renderer, &window_width, &window_height) ||
+      picture_width <= 0.0f || picture_height <= 0.0f || window_width <= 0 || window_height <= 0)
+    return;
+  const float picture_ratio = picture_width / picture_height;
+  const float window_ratio = static_cast<float>(window_width) / static_cast<float>(window_height);
+  SDL_FRect source{0.0f, 0.0f, picture_width, picture_height};
+  if (window_ratio < picture_ratio)
+  {
+    source.w = picture_height * window_ratio;
+    source.x = (picture_width - source.w) * 0.5f;
+  }
+  else
+  {
+    source.h = picture_width / window_ratio;
+    source.y = picture_height - source.h;
+  }
+  const ScrollingFloor& floor = background.floor;
+  if (!floor.found)
+  {
+    SDL_RenderTexture(renderer, background.texture, &source, nullptr);
+    return;
+  }
+
+  // Window pixels from here on, whatever scale the interface draws at.
+  float render_scale_x = 1.0f;
+  float render_scale_y = 1.0f;
+  SDL_GetRenderScale(renderer, &render_scale_x, &render_scale_y);
+  SDL_SetRenderScale(renderer, 1.0f, 1.0f);
+  const float width = static_cast<float>(window_width);
+  const float height = static_cast<float>(window_height);
+  const float zoom = height / source.h;  // window pixels per picture pixel
+  // The window rows that show the floor, on whole pixels so the bands meet
+  // without gaps or overlaps.
+  const float first =
+      std::clamp(std::floor((static_cast<float>(floor.top) - source.y) * zoom), 0.0f, height);
+  const float last = std::clamp(
+      std::ceil((static_cast<float>(floor.bottom) + 1.0f - source.y) * zoom), first, height);
+  // Above and below the floor: the picture as it is.
+  if (first > 0.0f)
+  {
+    const SDL_FRect above{source.x, source.y, source.w, first / zoom};
+    const SDL_FRect window_above{0.0f, 0.0f, width, first};
+    SDL_RenderTexture(renderer, background.texture, &above, &window_above);
+  }
+  if (last < height)
+  {
+    const SDL_FRect below{source.x, source.y + last / zoom, source.w, (height - last) / zoom};
+    const SDL_FRect window_below{0.0f, last, width, height - last};
+    SDL_RenderTexture(renderer, background.texture, &below, &window_below);
+  }
+  const double cells = seconds / FLOOR_SECONDS_PER_CELL;
+  const float progress = static_cast<float>(cells - std::floor(cells));  // 0 to 1
+  // Two window pixels, and at least one picture row (SDL's software
+  // renderer drops the fraction of a row, and would draw nothing).
+  const float band_height = std::max(2.0f, std::ceil(zoom));
+  for (float y = first; y < last; y += band_height)
+  {
+    const float band = std::min(band_height, last - y);
+    const float row = source.y + (y + band * 0.5f) / zoom;
+    const float period = static_cast<float>(floor.Period(row));
+    // The picture column at the window's left edge: further right as the
+    // floor goes left.
+    const float start = source.x + progress * period;
+    const float rows = band / zoom;
+    const float picture_row = source.y + y / zoom;
+    // Window columns until the picture's right edge; past it, the row goes
+    // on one repeat earlier in the picture, which looks just the same.
+    const float until_edge = (picture_width - start) * zoom;
+    if (until_edge >= width)
+    {
+      const SDL_FRect part{start, picture_row, source.w, rows};
+      const SDL_FRect window_part{0.0f, y, width, band};
+      SDL_RenderTexture(renderer, background.texture, &part, &window_part);
+      continue;
+    }
+    const float split = std::floor(until_edge);
+    if (split > 0.0f)
+    {
+      const SDL_FRect part{start, picture_row, split / zoom, rows};
+      const SDL_FRect window_part{0.0f, y, split, band};
+      SDL_RenderTexture(renderer, background.texture, &part, &window_part);
+    }
+    const SDL_FRect rest{start + split / zoom - period, picture_row, (width - split) / zoom, rows};
+    const SDL_FRect window_rest{split, y, width - split, band};
+    SDL_RenderTexture(renderer, background.texture, &rest, &window_rest);
+  }
+  SDL_SetRenderScale(renderer, render_scale_x, render_scale_y);
+}
+
+
+// The page's main action (PLAY): full width, a grey panel like the others
+// with a bold label in the accent colour. Its border lights up in the accent
+// while the pointer is on it.
 inline bool DrawPrimaryButton(const char* label, ImFont* bold, float height)
 {
-  ImGui::PushStyleColor(ImGuiCol_Button, LAUNCHER_ACCENT);
-  ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.80f, 1.0f, 0.40f, 1.0f));
-  ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.62f, 0.90f, 0.10f, 1.0f));
-  ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.04f, 0.05f, 0.02f, 1.0f));
-  ImGui::PushFont(bold, ImGui::GetStyle().FontSizeBase * 1.2f);
+  const ImGuiStyle& style = ImGui::GetStyle();
+  ImGui::PushStyleColor(ImGuiCol_Button, style.Colors[ImGuiCol_ChildBg]);
+  ImGui::PushStyleColor(ImGuiCol_ButtonHovered, style.Colors[ImGuiCol_FrameBgHovered]);
+  ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.14f, 0.19f, 0.06f, 1.0f));
+  ImGui::PushStyleColor(ImGuiCol_Text, LAUNCHER_ACCENT);
+  ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, style.ChildRounding);
+  ImGui::PushFont(bold, style.FontSizeBase * 1.15f);
   const bool clicked = ImGui::Button(label, ImVec2(-1.0f, height));
   ImGui::PopFont();
+  ImGui::PopStyleVar();
   ImGui::PopStyleColor(4);
+  ImVec4 border = style.Colors[ImGuiCol_Border];
+  if (ImGui::IsItemHovered() || ImGui::IsItemActive())
+  {
+    border = LAUNCHER_ACCENT;
+    border.w = 0.7f;
+  }
+  ImGui::GetWindowDrawList()->AddRect(ImGui::GetItemRectMin(), ImGui::GetItemRectMax(),
+                                      ImGui::GetColorU32(border), style.ChildRounding, 0,
+                                      std::max(1.0f, style.ChildBorderSize));
   return clicked;
 }
 

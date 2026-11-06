@@ -397,8 +397,6 @@ public:
     SDL_SetHint(SDL_HINT_VIDEO_DRIVER,
                 window_system == WindowSystem::Wayland ? "wayland" : "x11");
 #endif
-    SDL_SetAppMetadataProperty(SDL_PROP_APP_METADATA_NAME_STRING,
-                               LOBBY_APP_NAME);
     if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD))
       return false;
     const SDL_DisplayID display = SDL_GetPrimaryDisplay();
@@ -443,6 +441,10 @@ public:
     ImGui_ImplSDLRenderer3_Init(m_renderer);
     m_art = ui::LoadLauncherImage(m_renderer, release_directory,
                                   "lobby-art.png", "lobby art");
+    // Behind everything, with a floor that slides as in the launcher.
+    m_background = ui::LoadLauncherImage(m_renderer, release_directory,
+                                         "lobby-background.png",
+                                         "lobby background", true);
     // Resources/lobby-music.mp3 loops while the lobby is open; the game
     // has its own sound.
     m_music.Play(release_directory / "Resources" / "lobby-music.mp3",
@@ -456,6 +458,7 @@ public:
   float Scale() const { return m_scale; }
   ImFont *Bold() const { return m_fonts.bold; }
   const LauncherImage &Art() const { return m_art; }
+  bool HasBackground() const { return m_background.texture != nullptr; }
 
   void Close() {
     if (!m_open)
@@ -467,6 +470,9 @@ public:
     if (m_art.texture)
       SDL_DestroyTexture(m_art.texture);
     m_art = {};
+    if (m_background.texture)
+      SDL_DestroyTexture(m_background.texture);
+    m_background = {};
     m_fonts = {};
     SDL_DestroyRenderer(m_renderer);
     SDL_DestroyWindow(m_window);
@@ -497,6 +503,8 @@ public:
                        io.DisplayFramebufferScale.y);
     SDL_SetRenderDrawColor(m_renderer, 8, 8, 9, 255);
     SDL_RenderClear(m_renderer);
+    ui::RenderBackground(m_renderer, m_background,
+                         static_cast<double>(SDL_GetTicksNS()) / 1e9);
     ImGui_ImplSDLRenderer3_RenderDrawData(ImGui::GetDrawData(), m_renderer);
     SDL_RenderPresent(m_renderer);
   }
@@ -507,7 +515,8 @@ private:
   float m_scale = 1.0f;
   LauncherFonts m_fonts;
   LauncherImage m_art;
-  MusicPlayer m_music;
+  LauncherImage m_background;
+  MusicPlayer m_music{LOBBY_APP_NAME};
   bool m_open = false;
 };
 
@@ -676,8 +685,9 @@ bool RunLobbyWindow(RuntimeConfig &runtime_config,
     view.status = ui.Status();
     view.error = ui.Error();
 
-    const LobbyActions actions = DrawLobby(view, lobby_state, window.Art(),
-                                           window.Bold(), window.Scale());
+    const LobbyActions actions =
+        DrawLobby(view, lobby_state, window.Art(), window.Bold(),
+                  window.Scale(), window.HasBackground());
     if (actions.toggled_controller >= 0 &&
         static_cast<std::size_t>(actions.toggled_controller) < available.size())
       ToggleController(available[actions.toggled_controller], runtime_config,

@@ -70,6 +70,8 @@ set(MODERNGEKKO_LAUNCHER_MUSIC "" CACHE FILEPATH
     "Optional MP3 that loops while the launcher is open")
 set(MODERNGEKKO_LOBBY_MUSIC "" CACHE FILEPATH
     "Optional MP3 that loops while the Netplay lobby is open")
+set(MODERNGEKKO_LOBBY_BACKGROUND "" CACHE FILEPATH
+    "Optional picture behind the Netplay lobby")
 
 # Puts an optional image in Resources/ next to an executable, as <name>. It is
 # copied on every build of that executable, so a changed image is picked up,
@@ -87,6 +89,21 @@ function(moderngekko_add_resource target source name)
         COMMENT "Copying ${name} into Resources/"
         VERBATIM)
     add_dependencies(${target} ${_copy_target})
+endfunction()
+
+# The launcher's and the lobby's music (tools/launcher_music.cpp) play through
+# cubeb, Dolphin's own audio library: the SDL that Dolphin builds has no
+# audio. Without cubeb the music is left out.
+function(moderngekko_use_cubeb target)
+    if(TARGET cubeb::cubeb)
+        target_link_libraries(${target} PRIVATE cubeb::cubeb)
+    elseif(TARGET cubeb)
+        target_link_libraries(${target} PRIVATE cubeb)
+    else()
+        message(STATUS "${target}: no cubeb, so no music")
+        return()
+    endif()
+    target_compile_definitions(${target} PRIVATE MODERNGEKKO_HAS_CUBEB)
 endfunction()
 option(MODERNGEKKO_USER_DIRECTORY_IN_DOCUMENTS
        "Place the branded user directory in Documents" OFF)
@@ -552,8 +569,14 @@ if(MODERNGEKKO_ENABLE_DOLPHIN_RUNTIME)
     # The Netplay lobby (run by moderngekko-run) draws Resources/lobby-art.png
     # next to itself on its left; without it the lobby is text only.
     moderngekko_add_resource(moderngekko-run "${MODERNGEKKO_LOBBY_ART}" lobby-art.png)
-    # And plays Resources/lobby-music.mp3 (decoded by tools/third_party/dr_mp3.h).
+    # Resources/lobby-background.png fills the lobby behind its panels; a
+    # grid floor in it slides as in the launcher (tools/moving_background.hpp).
+    moderngekko_add_resource(moderngekko-run "${MODERNGEKKO_LOBBY_BACKGROUND}"
+                             lobby-background.png)
+    # And plays Resources/lobby-music.mp3 (decoded by tools/third_party/dr_mp3.h,
+    # played through cubeb).
     moderngekko_add_resource(moderngekko-run "${MODERNGEKKO_LOBBY_MUSIC}" lobby-music.mp3)
+    moderngekko_use_cubeb(moderngekko-run)
 
     add_executable(moderngekko-launcher
         tools/moderngekko_launcher.cpp
@@ -647,12 +670,14 @@ if(MODERNGEKKO_ENABLE_DOLPHIN_RUNTIME)
     # positions in the launcher matching that drawing.
     moderngekko_add_resource(moderngekko-launcher "${MODERNGEKKO_LAUNCHER_KEYBOARD_ART}"
                              launcher-keyboard.png)
-    # Resources/launcher-background.png fills the window behind the pages,
-    # and Resources/launcher-music.mp3 loops while the launcher is open.
+    # Resources/launcher-background.png fills the window behind the pages (a
+    # grid floor in it slides, see tools/moving_background.hpp), and
+    # Resources/launcher-music.mp3 loops while the launcher is open.
     moderngekko_add_resource(moderngekko-launcher "${MODERNGEKKO_LAUNCHER_BACKGROUND}"
                              launcher-background.png)
     moderngekko_add_resource(moderngekko-launcher "${MODERNGEKKO_LAUNCHER_MUSIC}"
                              launcher-music.mp3)
+    moderngekko_use_cubeb(moderngekko-launcher)
     # The launcher embeds a few Noto Sans CJK glyphs (tools/launcher_cjk_font.inc);
     # the font's license travels with every build of it.
     add_custom_command(TARGET moderngekko-launcher POST_BUILD
@@ -791,6 +816,15 @@ if(BUILD_TESTING)
     target_compile_features(moderngekko_netplay_address_test PRIVATE cxx_std_23)
     add_test(NAME moderngekko.netplay_address
              COMMAND moderngekko_netplay_address_test)
+
+    # Header-only: finding the floor of a background picture that slides.
+    add_executable(moderngekko_moving_background_test
+        tests/moving_background_test.cpp)
+    target_include_directories(moderngekko_moving_background_test PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/tools")
+    target_compile_features(moderngekko_moving_background_test PRIVATE cxx_std_23)
+    add_test(NAME moderngekko.moving_background
+             COMMAND moderngekko_moving_background_test)
 
     # The Netplay lobby's cached hash of the game files.
     add_executable(moderngekko_game_files_hash_test

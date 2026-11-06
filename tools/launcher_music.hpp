@@ -1,20 +1,22 @@
 #pragma once
 
 // Background music for the launcher and the Netplay lobby: an MP3 file that
-// loops, decoded a little at a time on SDL's audio thread (dr_mp3), so a
-// few minutes of music never sits whole in memory.
+// loops, decoded a little at a time (dr_mp3) as the audio device asks for
+// it, so a few minutes of music never sits whole in memory. Sound goes out
+// through cubeb, Dolphin's own audio library: the SDL that Dolphin builds has
+// no audio.
 
 #include <filesystem>
 #include <memory>
-
-struct SDL_AudioStream;
+#include <string>
 
 namespace moderngekko::frontend
 {
 class MusicPlayer
 {
 public:
-  MusicPlayer();
+  // name is how the system's volume mixer lists the music.
+  explicit MusicPlayer(std::string name);
   ~MusicPlayer();
   MusicPlayer(const MusicPlayer&) = delete;
   MusicPlayer& operator=(const MusicPlayer&) = delete;
@@ -31,10 +33,11 @@ public:
   void Stop();
 
   struct Decoder;
+  struct Output;
 
 private:
+  std::string m_name;
   std::unique_ptr<Decoder> m_decoder;
-  SDL_AudioStream* m_stream = nullptr;
-  bool m_audio_started = false;
+  std::unique_ptr<Output> m_output;
 };
 }  // namespace moderngekko::frontend
