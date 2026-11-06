@@ -288,6 +288,15 @@ ConfigResult LoadConfig(const fs::path &user_directory,
       config.language = NormalizeLanguage(raw_value);
       if (config.language.empty())
         return {.error = "language must be auto, en or es"};
+    } else if (key == "music_volume") {
+      int volume = -1;
+      const auto parsed = std::from_chars(
+          raw_value.data(), raw_value.data() + raw_value.size(), volume);
+      if (parsed.ec != std::errc{} ||
+          parsed.ptr != raw_value.data() + raw_value.size() || volume < 0 ||
+          volume > 100)
+        return {.error = "music_volume must be a number from 0 to 100"};
+      config.music_volume = volume;
     } else if (key == "nickname")
       config.netplay_nickname = raw_value;
     else if (key == "address")
@@ -413,6 +422,11 @@ bool SaveConfig(const fs::path &user_directory, const ConfigResult &config,
       *error = "language must be auto, en or es";
     return false;
   }
+  if (config.music_volume < 0 || config.music_volume > 100) {
+    if (error)
+      *error = "music_volume must be a number from 0 to 100";
+    return false;
+  }
   std::error_code ec;
   fs::create_directories(user_directory, ec);
   if (ec) {
@@ -431,6 +445,9 @@ bool SaveConfig(const fs::path &user_directory, const ConfigResult &config,
           "# auto (the system's language), en or es\n"
           "language="
        << language << '\n'
+       << "# Music in the launcher and the Netplay lobby: 0 (off) to 100\n"
+          "music_volume="
+       << config.music_volume << '\n'
        << "# This is Dolphin's internal render target, not the window size.\n"
           "[Video]\n"
           "resolution="

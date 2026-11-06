@@ -42,6 +42,8 @@ inline constexpr Translation SPANISH_TEXTS[] = {
     {"Game Files", "Archivos del juego"},
     {"Credits", "Créditos"},
     {"LANGUAGE", "IDIOMA"},
+    {"MUSIC", "MÚSICA"},
+    {"Off", "Apagada"},
     {"System (%s)", "Sistema (%s)"},
     {"Controller: %s", "Mando: %s"},
 

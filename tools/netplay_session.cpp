@@ -1,6 +1,7 @@
 #include "netplay_session.hpp"
 
 #include "game_files_hash.hpp"
+#include "launcher_music.hpp"
 #include "launcher_text.hpp"
 #include "launcher_ui.hpp"
 #include "netplay_address.hpp"
@@ -73,8 +74,11 @@ constexpr bool GAMECUBE_PORTS = false;
 #ifdef MODERNGEKKO_DEFAULT_WINDOW_TITLE
 constexpr const char *LOBBY_WINDOW_TITLE =
     MODERNGEKKO_DEFAULT_WINDOW_TITLE " - Netplay";
+// The name the system's volume mixer shows for the lobby's music.
+constexpr const char *LOBBY_APP_NAME = MODERNGEKKO_DEFAULT_WINDOW_TITLE;
 #else
 constexpr const char *LOBBY_WINDOW_TITLE = "ModernGekko - Netplay";
+constexpr const char *LOBBY_APP_NAME = "ModernGekko";
 #endif
 
 // Dolphin's traversal server ports (its main one, and the one it uses to
@@ -387,11 +391,14 @@ std::vector<LobbyAddress> HostAddresses(const NetPlay::NetPlayServer &server) {
 
 class LobbyWindow {
 public:
-  bool Open(WindowSystem window_system) {
+  // music_volume is config.ini's, 0 (off) to 100.
+  bool Open(WindowSystem window_system, int music_volume) {
 #if defined(__linux__)
     SDL_SetHint(SDL_HINT_VIDEO_DRIVER,
                 window_system == WindowSystem::Wayland ? "wayland" : "x11");
 #endif
+    SDL_SetAppMetadataProperty(SDL_PROP_APP_METADATA_NAME_STRING,
+                               LOBBY_APP_NAME);
     if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD))
       return false;
     const SDL_DisplayID display = SDL_GetPrimaryDisplay();
@@ -436,6 +443,10 @@ public:
     ImGui_ImplSDLRenderer3_Init(m_renderer);
     m_art = ui::LoadLauncherImage(m_renderer, release_directory,
                                   "lobby-art.png", "lobby art");
+    // Resources/lobby-music.mp3 loops while the lobby is open; the game
+    // has its own sound.
+    m_music.Play(release_directory / "Resources" / "lobby-music.mp3",
+                 music_volume);
     m_open = true;
     return true;
   }
@@ -449,6 +460,7 @@ public:
   void Close() {
     if (!m_open)
       return;
+    m_music.Stop();
     ImGui_ImplSDLRenderer3_Shutdown();
     ImGui_ImplSDL3_Shutdown();
     ImGui::DestroyContext();
@@ -495,6 +507,7 @@ private:
   float m_scale = 1.0f;
   LauncherFonts m_fonts;
   LauncherImage m_art;
+  MusicPlayer m_music;
   bool m_open = false;
 };
 
@@ -533,7 +546,8 @@ bool RunLobbyWindow(RuntimeConfig &runtime_config,
                     SessionUI &ui, NetPlay::NetPlayClient &client,
                     NetPlay::NetPlayServer *server) {
   LobbyWindow window;
-  if (!window.Open(runtime_config.window_system))
+  if (!window.Open(runtime_config.window_system,
+                   frontend_config.music_volume))
     return false;
 
   std::vector<ControllerOption> available = EnumerateControllers();

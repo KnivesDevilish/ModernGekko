@@ -272,6 +272,29 @@ int main() {
       return 28;
   }
 
+  // Music volume: 70 until changed, saved, kept by the short SaveConfig, and
+  // only 0 to 100.
+  {
+    const fs::path music = directory / "music";
+    auto music_config = moderngekko::frontend::LoadConfig(music, true);
+    if (music_config.music_volume != 70)
+      return 29;
+    music_config.music_volume = 0;
+    if (!moderngekko::frontend::SaveConfig(music, music_config, &error) ||
+        !moderngekko::frontend::SaveConfig(music, "1920x1080", true, controller, &error) ||
+        moderngekko::frontend::LoadConfig(music, false).music_volume != 0)
+      return 30;
+    music_config.music_volume = 101;
+    if (moderngekko::frontend::SaveConfig(music, music_config, &error))
+      return 31;
+    {
+      std::ofstream file(music / "config.ini", std::ios::trunc);
+      file << "[Launcher]\nmusic_volume=loud\n[Video]\nresolution=1920x1080\n";
+    }
+    if (moderngekko::frontend::LoadConfig(music, false))
+      return 32;
+  }
+
   fs::remove_all(directory);
   return 0;
 }

@@ -3,6 +3,7 @@
 #include "launcher_savestates.hpp"
 #include "launcher_summary.hpp"
 #include "launcher_text.hpp"
+#include "launcher_music.hpp"
 #include "launcher_ui.hpp"
 #include "moderngekko/game.hpp"
 #include "netplay_address.hpp"
@@ -636,6 +637,60 @@ void DrawLauncherBanner(const LauncherBanner& banner)
       position, ImVec2(position.x + size.x, position.y + size.y), ImVec2(0.0f, 0.0f),
       ImVec2(1.0f, 1.0f), IM_COL32_WHITE, ImGui::GetStyle().ChildRounding);
   ImGui::Dummy(size);
+}
+
+// The launcher's background picture (Resources/launcher-background.png),
+// under the whole interface. It is drawn straight with SDL right after the
+// window is cleared, scaled to cover the window: a window narrower than the
+// picture crops its sides, a wider one its top, so the bottom of the picture
+// always shows.
+void RenderLauncherBackground(SDL_Renderer* renderer, const LauncherImage& background)
+{
+  float picture_width = 0.0f;
+  float picture_height = 0.0f;
+  int window_width = 0;
+  int window_height = 0;
+  if (!background.texture ||
+      !SDL_GetTextureSize(background.texture, &picture_width, &picture_height) ||
+      !SDL_GetCurrentRenderOutputSize(renderer, &window_width, &window_height) ||
+      picture_width <= 0.0f || picture_height <= 0.0f || window_width <= 0 || window_height <= 0)
+    return;
+  const float picture_ratio = picture_width / picture_height;
+  const float window_ratio = static_cast<float>(window_width) / static_cast<float>(window_height);
+  SDL_FRect source{0.0f, 0.0f, picture_width, picture_height};
+  if (window_ratio < picture_ratio)
+  {
+    source.w = picture_height * window_ratio;
+    source.x = (picture_width - source.w) * 0.5f;
+  }
+  else
+  {
+    source.h = picture_width / window_ratio;
+    source.y = picture_height - source.h;
+  }
+  SDL_RenderTexture(renderer, background.texture, &source, nullptr);
+}
+
+// The music volume above the language menu at the bottom of the sidebar, 0
+// (off) to 100. Returns true while the volume changes; finished is set once
+// the player lets go of the slider, which is when it is worth saving.
+bool DrawMusicVolume(int& volume, bool* finished, float scale)
+{
+  const ImGuiStyle& style = ImGui::GetStyle();
+  const float language_height = ImGui::GetTextLineHeightWithSpacing() + ImGui::GetFrameHeight();
+  const float height = ImGui::GetTextLineHeightWithSpacing() + ImGui::GetFrameHeight() +
+                       style.ItemSpacing.y + 10.0f * scale;
+  ImGui::SetCursorPosY(std::max(ImGui::GetCursorPosY(),
+                                ImGui::GetWindowHeight() - language_height - height));
+  ImGui::Indent(12.0f * scale);
+  ImGui::TextDisabled("%s", Tr("MUSIC"));
+  ImGui::SetNextItemWidth(-1.0f);
+  const bool changed = ImGui::SliderInt("##music_volume", &volume, 0, 100,
+                                        volume == 0 ? Tr("Off") : "%d %%",
+                                        ImGuiSliderFlags_AlwaysClamp);
+  *finished = ImGui::IsItemDeactivatedAfterEdit();
+  ImGui::Unindent(12.0f * scale);
+  return changed;
 }
 
 // The system's first preferred language, such as "es" from es_VE.UTF-8, or
@@ -2122,6 +2177,8 @@ int main(int argc, char** argv)
   // A value already set in the environment wins (0 = don't overwrite).
   if (RunningInContainer())
     SDL_setenv_unsafe("SDL_JOYSTICK_DISABLE_UDEV", "1", 0);
+  // The name the system's volume mixer shows for the launcher's music.
+  SDL_SetAppMetadataProperty(SDL_PROP_APP_METADATA_NAME_STRING, MODERNGEKKO_FRONTEND_NAME);
   if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD))
     return 1;
   // Interface language: config.ini's choice, or the system's one on "auto".
@@ -2172,6 +2229,13 @@ int main(int argc, char** argv)
       renderer, release_directory, "launcher-controller.png", "launcher controller art");
   const LauncherImage keyboard_art = LoadLauncherImage(
       renderer, release_directory, "launcher-keyboard.png", "launcher keyboard art");
+  const LauncherImage background = LoadLauncherImage(
+      renderer, release_directory, "launcher-background.png", "launcher background");
+  // Resources/launcher-music.mp3 loops while the launcher is open and waits
+  // while the game runs. Without the file there is no music and no slider.
+  moderngekko::frontend::MusicPlayer music;
+  const bool has_music =
+      music.Play(release_directory / "Resources" / "launcher-music.mp3", config.music_volume);
 
   std::vector<fs::path> images = FindDiscImages();
   std::optional<fs::path> selected_image = images.empty() ? std::nullopt : std::optional(images[0]);
@@ -2694,6 +2758,11 @@ int main(int argc, char** argv)
     const ImGuiViewport* viewport = ImGui::GetMainViewport();
     ImGui::SetNextWindowPos(viewport->WorkPos);
     ImGui::SetNextWindowSize(viewport->WorkSize);
+    // With a background picture the window itself is see-through (the
+    // picture is drawn under it, see RenderLauncherBackground); the panels
+    // keep their own color, so text stays readable.
+    if (background.texture)
+      ImGui::SetNextWindowBgAlpha(0.0f);
     ImGui::Begin(MODERNGEKKO_FRONTEND_NAME " Launcher", nullptr,
                  ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove |
                      ImGuiWindowFlags_NoSavedSettings);
@@ -2749,6 +2818,24 @@ int main(int argc, char** argv)
     if (DrawNavigationItem(Tr("Credits"), current_page == LauncherPage::Credits, fonts.bold,
                            scale))
       current_page = LauncherPage::Credits;
+    if (has_music)
+    {
+      bool finished = false;
+      if (DrawMusicVolume(config.music_volume, &finished, scale))
+        music.SetVolume(config.music_volume);
+      if (finished)
+      {
+        config.resolution = resolutions[resolution_index].text;
+        config.show_fps_in_title = show_fps_in_title;
+        config.controller = selected_controller;
+        std::string error;
+        if (!moderngekko::frontend::SaveConfig(user_directory, config, &error))
+        {
+          std::lock_guard lock(dialog.mutex);
+          dialog.error = std::move(error);
+        }
+      }
+    }
     {
       const std::string previous = config.language;
       if (DrawLanguageMenu(config.language, system_language, scale))
@@ -3423,6 +3510,7 @@ int main(int argc, char** argv)
     SDL_SetRenderScale(renderer, io.DisplayFramebufferScale.x, io.DisplayFramebufferScale.y);
     SDL_SetRenderDrawColor(renderer, 8, 8, 9, 255);  // ImGuiCol_WindowBg of the theme
     SDL_RenderClear(renderer);
+    RenderLauncherBackground(renderer, background);
     ImGui_ImplSDLRenderer3_RenderDrawData(ImGui::GetDrawData(), renderer);
     SDL_RenderPresent(renderer);
 
@@ -3432,7 +3520,9 @@ int main(int argc, char** argv)
     {
       if (extraction_thread.joinable())
         extraction_thread.join();
+      music.Pause();
       result = launch_game(launch_mode);
+      music.Resume();
       launch_mode = LaunchMode::None;
       done = false;
       current_page = LauncherPage::Play;
@@ -3451,6 +3541,7 @@ int main(int argc, char** argv)
   if (extraction_thread.joinable())
     extraction_thread.join();
 
+  music.Stop();
   ImGui_ImplSDLRenderer3_Shutdown();
   ImGui_ImplSDL3_Shutdown();
   ImGui::DestroyContext();
@@ -3462,6 +3553,8 @@ int main(int argc, char** argv)
     SDL_DestroyTexture(keyboard_art.texture);
   if (banner.texture)
     SDL_DestroyTexture(banner.texture);
+  if (background.texture)
+    SDL_DestroyTexture(background.texture);
   SDL_DestroyRenderer(renderer);
   SDL_DestroyWindow(window);
   SDL_Quit();

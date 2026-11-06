@@ -64,6 +64,12 @@ set(MODERNGEKKO_LAUNCHER_KEYBOARD_ART "" CACHE FILEPATH
     "Optional PNG of the SR-ZGS keyboard drawing for the Controls page tester")
 set(MODERNGEKKO_LOBBY_ART "" CACHE FILEPATH
     "Optional portrait PNG shown on the left of the Netplay lobby")
+set(MODERNGEKKO_LAUNCHER_BACKGROUND "" CACHE FILEPATH
+    "Optional picture behind the launcher's pages")
+set(MODERNGEKKO_LAUNCHER_MUSIC "" CACHE FILEPATH
+    "Optional MP3 that loops while the launcher is open")
+set(MODERNGEKKO_LOBBY_MUSIC "" CACHE FILEPATH
+    "Optional MP3 that loops while the Netplay lobby is open")
 
 # Puts an optional image in Resources/ next to an executable, as <name>. It is
 # copied on every build of that executable, so a changed image is picked up,
@@ -445,6 +451,7 @@ if(MODERNGEKKO_ENABLE_DOLPHIN_RUNTIME)
         tools/netplay_session.cpp
         tools/frontend_config.cpp
         tools/dol_patch.cpp
+        tools/launcher_music.cpp
         vendor/dolphin/Externals/imgui/imgui/backends/imgui_impl_sdl3.cpp
         vendor/dolphin/Externals/imgui/imgui/backends/imgui_impl_sdlrenderer3.cpp)
     target_include_directories(moderngekko-run PRIVATE
@@ -545,11 +552,14 @@ if(MODERNGEKKO_ENABLE_DOLPHIN_RUNTIME)
     # The Netplay lobby (run by moderngekko-run) draws Resources/lobby-art.png
     # next to itself on its left; without it the lobby is text only.
     moderngekko_add_resource(moderngekko-run "${MODERNGEKKO_LOBBY_ART}" lobby-art.png)
+    # And plays Resources/lobby-music.mp3 (decoded by tools/third_party/dr_mp3.h).
+    moderngekko_add_resource(moderngekko-run "${MODERNGEKKO_LOBBY_MUSIC}" lobby-music.mp3)
 
     add_executable(moderngekko-launcher
         tools/moderngekko_launcher.cpp
         tools/frontend_config.cpp
         tools/dol_patch.cpp
+        tools/launcher_music.cpp
         vendor/dolphin/Externals/imgui/imgui/backends/imgui_impl_sdl3.cpp
         vendor/dolphin/Externals/imgui/imgui/backends/imgui_impl_sdlrenderer3.cpp)
     target_include_directories(moderngekko-launcher PRIVATE
@@ -637,6 +647,12 @@ if(MODERNGEKKO_ENABLE_DOLPHIN_RUNTIME)
     # positions in the launcher matching that drawing.
     moderngekko_add_resource(moderngekko-launcher "${MODERNGEKKO_LAUNCHER_KEYBOARD_ART}"
                              launcher-keyboard.png)
+    # Resources/launcher-background.png fills the window behind the pages,
+    # and Resources/launcher-music.mp3 loops while the launcher is open.
+    moderngekko_add_resource(moderngekko-launcher "${MODERNGEKKO_LAUNCHER_BACKGROUND}"
+                             launcher-background.png)
+    moderngekko_add_resource(moderngekko-launcher "${MODERNGEKKO_LAUNCHER_MUSIC}"
+                             launcher-music.mp3)
     # The launcher embeds a few Noto Sans CJK glyphs (tools/launcher_cjk_font.inc);
     # the font's license travels with every build of it.
     add_custom_command(TARGET moderngekko-launcher POST_BUILD
