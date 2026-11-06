@@ -338,7 +338,7 @@ std::optional<fs::path> PrepareDisc(const fs::path& image, const fs::path& user_
   std::unique_ptr<DiscIO::Volume> source = DiscIO::CreateVolume(image.string());
   if (!source)
   {
-    *error = "Dolphin rejected the selected disc image";
+    *error = Tr("Image rejected: the selected file is not a valid disc image.");
     return std::nullopt;
   }
   const std::string source_id = source->GetGameID(source->GetGamePartition());
@@ -416,12 +416,12 @@ bool ExtractDisc(const fs::path& image, const fs::path& user_directory,
     return fail(std::move(preparation_error));
   std::unique_ptr<DiscIO::Volume> volume = DiscIO::CreateVolume(prepared->string());
   if (!volume)
-    return fail(Tr("Dolphin rejected the prepared disc image"));
+    return fail(Tr("Image rejected: the prepared disc image could not be opened."));
 
   const DiscIO::Partition partition = volume->GetGamePartition();
   const DiscIO::FileSystem* filesystem = volume->GetFileSystem(partition);
   if (!filesystem || !filesystem->IsValid())
-    return fail(Tr("Dolphin could not read the game partition filesystem"));
+    return fail(Tr("The game's files could not be read from the disc image."));
 
   std::string disc_id = volume->GetGameID(partition);
   if (disc_id.size() != 6)
@@ -472,7 +472,7 @@ bool ExtractDisc(const fs::path& image, const fs::path& user_directory,
   if (!DiscIO::ExportSystemData(*volume, partition, staging.string()))
   {
     fs::remove_all(staging, ec);
-    return fail(Tr("Dolphin failed while extracting the disc system data"));
+    return fail(Tr("The disc's system data could not be extracted."));
   }
 
   state->total = std::max(1u, filesystem->GetRoot().GetTotalChildren());
@@ -3460,7 +3460,7 @@ int main(int argc, char** argv)
       ImGui::EndCombo();
     }
     ImGui::Spacing();
-    ImGui::TextUnformatted(Tr("Internal resolution (Dolphin EFB upscale)"));
+    ImGui::TextUnformatted(Tr("Internal resolution"));
     ImGui::SetNextItemWidth(-1.0f);
     if (ImGui::BeginCombo("##resolution", resolutions[resolution_index].text))
     {

@@ -90,6 +90,8 @@ std::string NormalizeLanguage(std::string value) {
     return "en";
   if (lower == "es" || lower == "spanish")
     return "es";
+  if (lower == "ja" || lower == "japanese")
+    return "ja";
   return {};
 }
 
@@ -287,7 +289,7 @@ ConfigResult LoadConfig(const fs::path &user_directory,
     } else if (key == "language") {
       config.language = NormalizeLanguage(raw_value);
       if (config.language.empty())
-        return {.error = "language must be auto, en or es"};
+        return {.error = "language must be auto, en, es or ja"};
     } else if (key == "music_volume") {
       int volume = -1;
       const auto parsed = std::from_chars(
@@ -369,7 +371,7 @@ ConfigResult LoadConfig(const fs::path &user_directory,
     }
   }
 
-  return {.error = "unsupported Dolphin internal resolution '" +
+  return {.error = "unsupported internal resolution '" +
                    config.resolution +
                    "'; use a listed display resolution or an exact 640x528 "
                    "multiple up to 12x"};
@@ -422,7 +424,7 @@ bool SaveConfig(const fs::path &user_directory, const ConfigResult &config,
   const std::string language = NormalizeLanguage(config.language);
   if (language.empty()) {
     if (error)
-      *error = "language must be auto, en or es";
+      *error = "language must be auto, en, es or ja";
     return false;
   }
   if (config.music_volume < 0 || config.music_volume > 100) {
@@ -445,7 +447,7 @@ bool SaveConfig(const fs::path &user_directory, const ConfigResult &config,
   }
   file << "# ModernGekko frontend settings\n"
           "[Launcher]\n"
-          "# auto (the system's language), en or es\n"
+          "# auto (the system's language), en, es or ja\n"
           "language="
        << language << '\n'
        << "# Music in the launcher and the Netplay lobby: 0 (off) to 100\n"
@@ -454,7 +456,7 @@ bool SaveConfig(const fs::path &user_directory, const ConfigResult &config,
        << "# Look on GitHub for a newer version when the launcher opens\n"
           "check_for_updates="
        << (config.check_for_updates ? "true" : "false") << '\n'
-       << "# This is Dolphin's internal render target, not the window size.\n"
+       << "# This is the game's internal render size, not the window size.\n"
           "[Video]\n"
           "resolution="
        << config.resolution << '\n'
