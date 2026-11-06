@@ -5,14 +5,20 @@
 // ("...") (ui_text.hpp). Tr() looks the English text up in the active
 // language's table and falls back to the English text itself.
 //
-// To change or add a translation, edit SPANISH_TEXTS below; the English side
-// must match the code exactly, escapes included. tests/launcher_text_test.cpp
-// fails when a text in the code has no translation, when a translation is no
-// longer used, or when the %s / %d placeholders of the two sides differ.
+// To change or add a translation, edit SPANISH_TEXTS and JAPANESE_TEXTS below;
+// the English side must match the code exactly, escapes included.
+// tests/launcher_text_test.cpp fails when a text in the code has no
+// translation in either language, when a translation is no longer used, or
+// when the %s / %d placeholders of the two sides differ.
+//
+// The Japanese texts need their characters in the embedded Japanese font:
+// after changing them, run tools/make_launcher_cjk_font.py (it reads them
+// from this file) to rebuild tools/launcher_cjk_font.inc.
 
 #include "ui_text.hpp"
 
 #include <atomic>
+#include <cstddef>
 #include <cstdarg>
 #include <cstdio>
 #include <string>
@@ -25,6 +31,7 @@ enum class Language
 {
   English,
   Spanish,
+  Japanese,
 };
 
 struct Translation
@@ -113,6 +120,7 @@ inline constexpr Translation SPANISH_TEXTS[] = {
      "Tu mando no está conectado; el teclado sigue funcionando.\nAbrir Controles"},
     {"Open Controls", "Abrir Controles"},
     {"Open Settings", "Abrir Ajustes"},
+    {"PATCH NOTES", "NOTAS DEL PARCHE"},
     {"%s \xC2\xB7 Fullscreen", "%s · Pantalla completa"},
     {"%s \xC2\xB7 Window", "%s · Ventana"},
     {"%s \xC2\xB7 Full", "%s · Completa"},
@@ -404,6 +412,350 @@ inline constexpr Translation SPANISH_TEXTS[] = {
 };
 // clang-format on
 
+// The same texts in Japanese, in the same order and groups.
+// clang-format off
+inline constexpr Translation JAPANESE_TEXTS[] = {
+    // Top bar, sidebar and footer
+    {"PLAY", "プレイ"},
+    {"Settings", "設定"},
+    {"Controls", "操作"},
+    {"Game Files", "ゲームファイル"},
+    {"Credits", "クレジット"},
+    {"LANGUAGE", "言語"},
+    {"MUSIC", "音楽"},
+    {"Off", "オフ"},
+    {"System (%s)", "システム（%s）"},
+    {"Controller: %s", "コントローラー：%s"},
+    // PLAY page
+    {"GAME READY \xC2\xB7 %s", "プレイ準備完了 · %s"},
+    {"Start from savestate", "ステートセーブから始める"},
+    {"Normal boot", "通常起動"},
+    {"Latest - %s", "最新 - %s"},
+    {"Savestates are available for solo play only.", "ステートセーブは一人プレイでのみ使えます。"},
+    {"Host Netplay", "ネットプレイを作成"},
+    {"Join Netplay", "ネットプレイに参加"},
+    {"Host a session", "セッションを作成"},
+    {"Join a session", "セッションに参加"},
+    {"INVITE CODE", "招待コード"},
+    {"DIRECT IP", "IP直接接続"},
+    {"When the room opens you get a code. Your friends type it in Join Netplay, and nobody sees "
+     "your IP.",
+     "ルームを開くとコードが発行されます。友達が「ネットプレイに参加」でそれを入力すれ"
+     "ば、あなたのIPは誰にも見えません。"},
+    {"Type the code the host gave you.", "ホストから受け取ったコードを入力してください。"},
+    {"Other players connect to this computer's address and UDP port. For the same network or "
+     "Tailscale.",
+     "ほかのプレイヤーはこのPCのアドレスとUDPポートに接続します。同じネットワーク"
+     "内かTailscale向けです。"},
+    {"Enter the address and UDP port of the player who hosts. For the same network or Tailscale.",
+     "ホストするプレイヤーのアドレスとUDPポートを入力してください。同じネットワーク"
+     "内かTailscale向けです。"},
+    {"Careful: an IP address identifies your connection. Don't show it on stream or share it in "
+     "public.",
+     "注意：IPアドレスからあなたの接続が特定できます。配信に映したり、公開の場で共有"
+     "したりしないでください。"},
+    {"Invite code", "招待コード"},
+    {"Invite codes", "招待コード"},
+    {"Dolphin's public server (stun.dolphin-emu.org)", "Dolphinの公開サーバー（stun.dolphin-emu.org）"},
+    {"An invite code has 8 characters (numbers and letters a-f).", "招待コードは8文字です（数字とa〜fの英字）。"},
+    {"Every player needs the same SR-ZGS release and game files. Everyone plays with the host's "
+     "CPU core.",
+     "全員が同じSR-ZGSのバージョンとゲームファイルを使う必要があります。CPUコ"
+     "アは全員ホストのものを使います。"},
+    {"Nickname", "ニックネーム"},
+    {"Host / IP", "ホスト / IP"},
+    {"UDP port", "UDPポート"},
+    {"Automatic input buffer", "入力バッファを自動調整"},
+    {"Buffer frames", "バッファ（フレーム）"},
+    {"Host", "作成"},
+    {"Join", "参加"},
+    {"Cancel", "キャンセル"},
+    {"GAME NOT INSTALLED", "ゲーム未インストール"},
+    {"No extracted game is configured yet.", "展開済みのゲームがまだ設定されていません。"},
+    {"Open Game Files to select and extract your game.", "「ゲームファイル」でゲームを選んで展開してください。"},
+    {"Go to Game Files", "ゲームファイルへ"},
+    // PLAY page summary cards
+    {"TIME PLAYED", "プレイ時間"},
+    {"CONTROLS", "操作"},
+    {"DISPLAY", "画面"},
+    {"MODS", "MOD"},
+    {"Not played yet", "未プレイ"},
+    {"Under a minute", "1分未満"},
+    {"Keyboard only", "キーボードのみ"},
+    {"Keyboard", "キーボード"},
+    {"Not detected", "未検出"},
+    {"Your controller isn't connected; the keyboard still works.\nOpen Controls",
+     "コントローラーが接続されていません。キーボードは使えます。\n「操作」を開く"},
+    {"Open Controls", "「操作」を開く"},
+    {"Open Settings", "「設定」を開く"},
+    {"PATCH NOTES", "パッチノート"},
+    {"%s \xC2\xB7 Fullscreen", "%s · フルスクリーン"},
+    {"%s \xC2\xB7 Window", "%s · ウィンドウ"},
+    {"%s \xC2\xB7 Full", "%s · 全画面"},
+    {"%s \xC2\xB7 Win", "%s · ウィンドウ"},
+    {"None", "なし"},
+    {"1 installed", "1個導入済み"},
+    {"%d installed", "%d個導入済み"},
+    {"Mods go in %s", "MODは %s に入れてください"},
+    // Settings page
+    {"Changes are saved right away and apply the next time you press PLAY.",
+     "変更はすぐに保存され、次に「プレイ」を押したときに反映されます。"},
+    {"CPU CORE", "CPUコア"},
+    {"JIT64 (recommended)", "JIT64（推奨）"},
+    {"StaticRecomp (experimental)", "StaticRecomp（実験的）"},
+    {"JIT64 is the validated full-speed mode. StaticRecomp runs the recompiled game code and is "
+     "still being optimized.",
+     "JIT64は動作確認済みのフルスピードモードです。StaticRecompは再コ"
+     "ンパイルしたゲームコードを実行するモードで、現在も最適化中です。"},
+    {"Netplay: everyone plays with the host's CPU core.", "ネットプレイ：全員がホストのCPUコアでプレイします。"},
+    {"MODERNGEKKO_STATICRECOMP=%s is set in the environment and overrides this setting.",
+     "環境変数 MODERNGEKKO_STATICRECOMP=%s が設定されてい"
+     "るため、この設定より優先されます。"},
+    {"GRAPHICS", "グラフィック"},
+    {"Graphics backend", "グラフィックバックエンド"},
+    {"Internal resolution (Dolphin EFB upscale)", "内部解像度（DolphinのEFB拡大）"},
+    {"Aspect ratio", "アスペクト比"},
+    {"16:9 (Widescreen)", "16:9（ワイド）"},
+    {"Stretch", "引き伸ばし"},
+    {"The game draws in widescreen. Best for most monitors and TVs.",
+     "ゲームをワイド画面で描画します。ほとんどのモニターやテレビに最適です。"},
+    {"The original 4:3 picture, with bars on the sides of a wide window.",
+     "オリジナルの4:3画面です。横長のウィンドウでは左右に帯が入ります。"},
+    {"The widescreen picture stretched to fill the window, whatever its shape. On a 16:9 screen "
+     "it looks the same as 16:9.",
+     "ワイド画面をウィンドウの形に合わせて引き伸ばします。16:9の画面では16:9と"
+     "同じ表示になります。"},
+    {"Netplay: the host's 16:9 or 4:3 choice applies to every player.",
+     "ネットプレイ：ホストが選んだ16:9か4:3が全員に適用されます。"},
+    {"Start in fullscreen", "フルスクリーンで起動"},
+    {"Show FPS in window title", "ウィンドウタイトルにFPSを表示"},
+    // Credits page
+    {"SR-ZGS is an independent fan project. It is not affiliated with or endorsed by SEGA.",
+     "SR-ZGSは非公式のファンプロジェクトです。セガとは関係がなく、セガの承認も受"
+     "けていません。"},
+    {"CREATED BY", "制作"},
+    {"With the SR-ZGS contributors and testers: research, development and testing.",
+     "SR-ZGSの協力者とテスターの皆さんとともに：調査、開発、テスト。"},
+    {"BUILT ON", "使用技術"},
+    {"Static recompilation framework", "静的再コンパイルのフレームワーク"},
+    {"Runtime for GameCube/Wii recomps, by Hyperway", "GameCube/Wii再コンパイル用ランタイム（Hyperway制作）"},
+    {"Recomp template", "再コンパイル用テンプレート"},
+    {"Literally God / MrPoloGit, who also added macOS support",
+     "Literally God / MrPoloGit（macOS対応も追加）"},
+    {"The Dolphin Team and its contributors", "Dolphinチームと協力者の皆さん"},
+    {"LICENSES", "ライセンス"},
+    {"GNU GPL v2 or later", "GNU GPL v2以降"},
+    {"zlib License", "zlibライセンス"},
+    {"MIT License", "MITライセンス"},
+    {"Sonic Riders: Zero Gravity and its characters are trademarks of SEGA. Play with your own "
+     "legally obtained copy of the game.",
+     "Sonic Riders: Zero Gravity（ソニックライダーズ シュー"
+     "ティングスターストーリー）とそのキャラクターはセガの商標です。正規に入手したご自"
+     "身のゲームでプレイしてください。"},
+    {"Opened in your browser and copied to the clipboard", "ブラウザで開き、クリップボードにコピーしました"},
+    // Check for updates: the Credits page's VERSION panel and the top bar
+    {"VERSION", "バージョン"},
+    {"Version %s", "バージョン %s"},
+    {"Check for updates", "アップデートを確認"},
+    {"Looking on GitHub...", "GitHubを確認中..."},
+    {"You have the latest version.", "最新バージョンです。"},
+    {"A new version is available: %s", "新しいバージョンがあります：%s"},
+    {"Open the download page", "ダウンロードページを開く"},
+    {"No version has been published on GitHub yet.", "GitHubにはまだバージョンが公開されていません。"},
+    {"Couldn't check. Check your internet connection.", "確認できませんでした。インターネット接続を確認してください。"},
+    {"Check for updates when the launcher opens", "ランチャー起動時にアップデートを確認"},
+    {"NEW VERSION \xC2\xB7 %s", "新バージョン · %s"},
+    // Controls page
+    {"Choose the controller to play with. The launcher writes its button mapping for you.",
+     "使うコントローラーを選んでください。ボタン設定はランチャーが自動で作成します。"},
+    {"CONTROLLER", "コントローラー"},
+    {"CONNECTED", "接続中"},
+    {"KEYBOARD ONLY", "キーボードのみ"},
+    {"NOT DETECTED", "未検出"},
+    {"No SDL gamepad detected", "SDLゲームパッドが見つかりません"},
+    {"Ready to generate controller profile", "コントローラーのプロファイルを作成できます"},
+    {"BUTTON MAPPING", "ボタン設定"},
+    {"Using %s from your user folder.", "ユーザーフォルダーの %s を使用しています。"},
+    {"%s is created the first time you play.", "%s は初回プレイ時に作成されます。"},
+    {"Replace with generated GameCube profile", "自動作成したゲームキューブ用プロファイルに置き換える"},
+    {"Replace with generated sideways profile", "自動作成した横持ち用プロファイルに置き換える"},
+    {"1 GameCube controller mapped", "ゲームキューブコントローラー1台を設定済み"},
+    {"1 sideways Wii Remote mapped", "横持ちWiiリモコン1台を設定済み"},
+    {"%s now uses %s with the same buttons", "%s は同じボタン配置のまま %s を使います"},
+    {"Keyboard only. A controller you connect is added to the same profile.",
+     "キーボードのみ。コントローラーを接続すると同じプロファイルに追加されます。"},
+    {"Using existing %s", "既存の %s を使用中"},
+    {"%s has no configured controller device", "%s にはコントローラーが設定されていません"},
+    {"Connect an SDL-compatible controller before playing", "プレイする前にSDL対応コントローラーを接続してください"},
+    // Controls page: button tester
+    {"Controller", "コントローラー"},
+    {"Key", "キー"},
+    {"Your controller", "コントローラー"},
+    {"edited by hand", "手動で編集"},
+    {"not set", "未設定"},
+    {"Press keys to test them.", "キーを押してテストできます。"},
+    {"Press buttons to test them.", "ボタンを押してテストできます。"},
+    {"No controller in %s.", "%s にコントローラーがありません。"},
+    {"Connect %s.", "%s を接続してください。"},
+    {"Stick", "スティック"},
+    {"Menu", "メニュー"},
+    {"D-Pad", "十字キー"},
+    {"Shake", "振る"},
+    {"L trigger", "Lトリガー"},
+    {"R trigger", "Rトリガー"},
+    {"Left stick left", "左スティック左"},
+    {"Left stick right", "左スティック右"},
+    {"Left stick up", "左スティック上"},
+    {"Left stick down", "左スティック下"},
+    {"Right stick left", "右スティック左"},
+    {"Right stick right", "右スティック右"},
+    {"Right stick up", "右スティック上"},
+    {"Right stick down", "右スティック下"},
+    {"Cross", "×ボタン"},
+    {"Circle", "○ボタン"},
+    {"Square", "□ボタン"},
+    {"Triangle", "△ボタン"},
+    {"South button", "下ボタン"},
+    {"East button", "右ボタン"},
+    {"West button", "左ボタン"},
+    {"North button", "上ボタン"},
+    {"Back", "バック"},
+    {"L stick press", "Lスティック押し込み"},
+    {"R stick press", "Rスティック押し込み"},
+    {"L shoulder", "Lショルダー"},
+    {"R shoulder", "Rショルダー"},
+    {"D-pad up", "十字キー上"},
+    {"D-pad down", "十字キー下"},
+    {"D-pad left", "十字キー左"},
+    {"D-pad right", "十字キー右"},
+    {"Arrow keys", "矢印キー"},
+    {"D-pad", "十字キー"},
+    {"Left stick", "左スティック"},
+    {"Right stick", "右スティック"},
+    // Game Files page and disc extraction
+    {"Use your own copy of the game as an ISO, WBFS or RVZ image. It is extracted once and "
+     "reused afterwards.",
+     "ご自身のゲームをISO、WBFS、RVZイメージで用意してください。展開は一度だ"
+     "けで、以降はそのまま使われます。"},
+    {"INSTALLED GAME", "インストール済みのゲーム"},
+    {"NOT INSTALLED", "未インストール"},
+    {"Select a disc image below and extract it.", "下でディスクイメージを選んで展開してください。"},
+    {"DISC IMAGE", "ディスクイメージ"},
+    {"No ISO, WBFS, or RVZ selected", "ISO、WBFS、RVZが選択されていません"},
+    {"Browse for ISO / WBFS / RVZ", "ISO / WBFS / RVZを選ぶ"},
+    {"Disc images", "ディスクイメージ"},
+    {"Extract Game", "ゲームを展開"},
+    {"Opening %s", "%s を開いています"},
+    {"Applying Tournament Edition 2.4.6.1", "Tournament Edition 2.4.6.1を適用中"},
+    {"can't start Tournament Edition patcher: %s", "Tournament Editionのパッチツールを起動できません：%s"},
+    {"Tournament Edition patching failed", "Tournament Editionのパッチに失敗しました"},
+    {"this disc is not the pinned patched release", "このディスクは指定のパッチ済みバージョンではありません"},
+    {"Dolphin rejected the prepared disc image", "準備したディスクイメージをDolphinが受け付けませんでした"},
+    {"Dolphin could not read the game partition filesystem", "Dolphinがゲームパーティションのファイルを読めませんでした"},
+    {"the selected image has an invalid disc ID", "選択したイメージのディスクIDが正しくありません"},
+    {"this frontend requires disc ID %s; selected %s", "このランチャーにはディスクID %s が必要です（選択したもの：%s）"},
+    {"existing extraction patching failed: %s", "既存の展開データへのパッチに失敗しました：%s"},
+    {"Using existing extraction", "既存の展開データを使用中"},
+    {"can't create extraction directory: %s", "展開先フォルダーを作成できません：%s"},
+    {"Extracting system data", "システムデータを展開中"},
+    {"Dolphin failed while extracting the disc system data", "ディスクのシステムデータの展開中にDolphinでエラーが起きました"},
+    {"Extracting game files", "ゲームファイルを展開中"},
+    {"Extracting %s", "%s を展開中"},
+    {"extracted DOL patching failed: %s", "展開したDOLへのパッチに失敗しました：%s"},
+    {"extracted game validation failed: %s", "展開したゲームの確認に失敗しました：%s"},
+    {"can't publish extracted game: %s", "展開したゲームを保存できません：%s"},
+    {"Extraction complete", "展開が完了しました"},
+    {"expected disc ID %s, found %s", "ディスクID %s が必要ですが、%s でした"},
+    {"main DOL does not match the pinned release", "メインDOLが指定のバージョンと一致しません"},
+    {"_Main.rel does not match the pinned release", "_Main.relが指定のバージョンと一致しません"},
+    {"game assets do not match the pinned release", "ゲームデータが指定のバージョンと一致しません"},
+    // Starting the game
+    {"Launch failed", "起動に失敗しました"},
+    {"Could not start %s: %s", "%s を起動できませんでした：%s"},
+    {"The game process could not be monitored: %s", "ゲームのプロセスを監視できませんでした：%s"},
+    {"The host is running an incompatible netplay build. Both players must use the same "
+     "release.",
+     "ホストのネットプレイ版と互換性がありません。両方のプレイヤーが同じバージョンを使"
+     "う必要があります。"},
+    {"The extracted game or recomp module does not match the host. Both players need the same "
+     "game revision and release.",
+     "展開したゲームまたは再コンパイルモジュールがホストと一致しません。両方のプレイヤ"
+     "ーに同じゲームのリビジョンとバージョンが必要です。"},
+    {"All four controller slots are already occupied.", "4つのコントローラー枠はすべて埋まっています。"},
+    {"The host has already started the game.", "ホストはすでにゲームを開始しています。"},
+    {"The netplay server is full.", "ネットプレイのサーバーが満員です。"},
+    {"The nickname was rejected by the host.", "ホストにニックネームを拒否されました。"},
+    {"No room answered to that invite code. Check that it is typed right and that the host's "
+     "room is still open. If it keeps failing, the invite server may be down or your connection "
+     "may not allow it: try Direct IP with Tailscale.",
+     "その招待コードに応答するルームがありませんでした。入力が正しいか、ホストのルーム"
+     "がまだ開いているか確認してください。それでも失敗する場合は、招待サーバーが停止し"
+     "ているか、お使いの接続が対応していない可能性があります。TailscaleでのI"
+     "P直接接続をお試しください。"},
+    {"Could not reach the netplay host. Check the host name, UDP port, and firewall.",
+     "ホストに接続できませんでした。ホスト名、UDPポート、ファイアウォールを確認して"
+     "ください。"},
+    {"Could not create the netplay session. Check the UDP port and firewall settings.",
+     "ネットプレイのセッションを作成できませんでした。UDPポートとファイアウォールの"
+     "設定を確認してください。"},
+    {"The game process exited with code %d.", "ゲームのプロセスがコード %d で終了しました。"},
+    {"\n\nDetails were written to:\n%s", "\n\n詳細の保存先：\n%s"},
+    {"Session failed", "セッションに失敗しました"},
+    // Netplay lobby, top to bottom
+    {"HOST", "ホスト"},
+    {"CPU core for every player: %s", "全員のCPUコア：%s"},
+    {"CPU core: the host's choice", "CPUコア：ホストの設定"},
+    {"Input buffer: %u frames%s", "入力バッファ：%u フレーム%s"},
+    {"INVITE YOUR FRIENDS", "友達を招待"},
+    {"Show", "表示"},
+    {"Hide", "隠す"},
+    {"At home", "自宅"},
+    {"Internet (Tailscale)", "インターネット（Tailscale）"},
+    {"Internet (public)", "インターネット（公開）"},
+    {"Copy", "コピー"},
+    {"Copied", "コピーしました"},
+    {"Your friends type this address in Join Netplay.", "友達は「ネットプレイに参加」でこのアドレスを入力します。"},
+    {"Your friends type it in Join Netplay, under Invite code. Anyone who sees it can join: keep "
+     "it off your stream.",
+     "友達は「ネットプレイに参加」の招待コード欄にこれを入力します。見た人は誰でも参加"
+     "できるので、配信には映さないでください。"},
+    {"Asking the invite server for a code...", "招待サーバーにコードを問い合わせ中..."},
+    {"The invite server did not answer. Check the internet connection, or close the room and "
+     "host with Direct IP.",
+     "招待サーバーから応答がありません。インターネット接続を確認するか、ルームを閉じて"
+     "IP直接接続で作成してください。"},
+    {"No network found. Connect this computer to your Wi-Fi or to Tailscale.",
+     "ネットワークが見つかりません。このPCをWi-FiかTailscaleに接続して"
+     "ください。"},
+    {"Waiting for the host to start the match.", "ホストが試合を始めるのを待っています。"},
+    {"PLAYERS  \xC2\xB7  %d / 4", "プレイヤー  ·  %d / 4"},
+    {"Free", "空き"},
+    {"(you)", "（あなた）"},
+    {"(host)", "（ホスト）"},
+    {"READY", "準備完了"},
+    {"NOT READY", "準備中"},
+    {"OTHER GAME", "別のゲーム"},
+    {"THIS COMPUTER", "このPC"},
+    {"Local sideways Wii Remotes", "このPCの横持ちWiiリモコン"},
+    {"No controller connected: you play with the keyboard.", "コントローラーが接続されていません：キーボードでプレイします。"},
+    {"No controller connected.", "コントローラーが接続されていません。"},
+    {"(the first one also answers to the keyboard)", "（1台目はキーボードでも操作できます）"},
+    {"I'M READY", "準備OK"},
+    {"READY  \xC2\xB7  CANCEL", "準備OK  ·  取り消す"},
+    {"START MATCH", "試合開始"},
+    {"Two controller slots and every machine ready are required", "コントローラー枠2つと全員の準備完了が必要です"},
+    {"Press I'M READY when your controller is set.", "コントローラーの準備ができたら「準備OK」を押してください。"},
+    // Netplay lobby events
+    {"Game: %s", "ゲーム：%s"},
+    {"%s joined", "%s が参加しました"},
+    {"%s left", "%s が退出しました"},
+    {"Desync at frame %u", "フレーム %u で同期ずれ"},
+    {"Desync at frame %u reported for %s", "フレーム %u で同期ずれ（%s で検出）"},
+    {"Connection to the netplay host was lost", "ホストとの接続が切れました"},
+    {"Game start was aborted", "ゲームの開始が中止されました"},
+};
+// clang-format on
+
 // Atomic because the disc extraction and netplay threads translate their
 // status messages too, while the menu can change the language.
 inline std::atomic<Language>& ActiveLanguage()
@@ -412,37 +764,76 @@ inline std::atomic<Language>& ActiveLanguage()
   return language;
 }
 
-// config.ini's "language" setting ("auto", "en" or "es") and the system's
-// language code (such as "es" from es_VE.UTF-8): "auto" follows the system
-// when it is Spanish, and English otherwise.
+// config.ini's "language" setting ("auto", "en", "es" or "ja") and the
+// system's language code (such as "es" from es_VE.UTF-8): "auto" follows the
+// system when it is Spanish or Japanese, and English otherwise.
 inline Language ResolveLanguage(std::string_view setting, std::string_view system_language)
 {
   if (setting == "en")
     return Language::English;
   if (setting == "es")
     return Language::Spanish;
-  return system_language.starts_with("es") ? Language::Spanish : Language::English;
+  if (setting == "ja")
+    return Language::Japanese;
+  if (system_language.starts_with("es"))
+    return Language::Spanish;
+  if (system_language.starts_with("ja"))
+    return Language::Japanese;
+  return Language::English;
+}
+
+// Each language's code, as config.ini writes it ("en", "es", "ja").
+inline const char* LanguageCode(Language language)
+{
+  switch (language)
+  {
+  case Language::Spanish:
+    return "es";
+  case Language::Japanese:
+    return "ja";
+  case Language::English:
+    break;
+  }
+  return "en";
 }
 
 // Each language's own name, as the language menu shows it.
 inline const char* LanguageName(Language language)
 {
-  return language == Language::Spanish ? "Espa\xC3\xB1ol" : "English";
+  switch (language)
+  {
+  case Language::Spanish:
+    return "Espa\xC3\xB1ol";
+  case Language::Japanese:
+    return "\xE6\x97\xA5\xE6\x9C\xAC\xE8\xAA\x9E";  // Nihongo
+  case Language::English:
+    break;
+  }
+  return "English";
 }
+
+namespace launcher_text_detail
+{
+template <std::size_t N>
+std::unordered_map<std::string_view, const char*> TranslationTable(const Translation (&texts)[N])
+{
+  std::unordered_map<std::string_view, const char*> table;
+  for (const Translation& entry : texts)
+    table.emplace(entry.english, entry.translated);
+  return table;
+}
+}  // namespace launcher_text_detail
 
 inline const char* Tr(const char* english)
 {
-  if (ActiveLanguage() == Language::English)
+  const Language language = ActiveLanguage();
+  if (language == Language::English)
     return english;
-  static const std::unordered_map<std::string_view, const char*> spanish = []
-  {
-    std::unordered_map<std::string_view, const char*> table;
-    for (const Translation& entry : SPANISH_TEXTS)
-      table.emplace(entry.english, entry.translated);
-    return table;
-  }();
-  const auto found = spanish.find(english);
-  return found != spanish.end() ? found->second : english;
+  static const auto spanish = launcher_text_detail::TranslationTable(SPANISH_TEXTS);
+  static const auto japanese = launcher_text_detail::TranslationTable(JAPANESE_TEXTS);
+  const auto& table = language == Language::Japanese ? japanese : spanish;
+  const auto found = table.find(english);
+  return found != table.end() ? found->second : english;
 }
 
 // For a text built at run time, such as FormatTimePlayed()'s: translated when

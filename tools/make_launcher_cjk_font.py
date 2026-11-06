@@ -1,17 +1,23 @@
 #!/usr/bin/env python3
-"""Builds tools/launcher_cjk_font.inc: the few Japanese characters the launcher
-draws, cut out of Noto Sans CJK JP (Regular and Bold) and embedded as byte
-arrays. The interface font has no CJK glyphs, so these are merged into it.
+"""Builds tools/launcher_cjk_font.inc: the Japanese characters the launcher
+draws (its Japanese interface texts and a few names), cut out of Noto Sans CJK
+JP (Regular and Bold) and embedded as byte arrays. The interface font has no
+CJK glyphs, so these are merged into it.
 
 Noto Sans CJK is under the SIL Open Font License 1.1, which allows bundling and
 subsetting. The subsets keep the font's whole name table, so the copyright and
 license notice travel inside them; tools/fonts/NotoSansCJK-OFL.txt has the
 license text.
 
-When the launcher needs more Japanese characters, add them to CHARACTERS and
-run, from the repository root (needs Python 3 and fonttools):
-    python3 tools/make_launcher_cjk_font.py [Regular.ttc Bold.ttc]
+The characters come from the JAPANESE_TEXTS table of tools/launcher_text.hpp,
+plus CHARACTERS below for Japanese drawn elsewhere, plus every --extra file:
+the game's patch notes (MODERNGEKKO_LAUNCHER_PATCH_NOTES), whose Japanese part
+needs its characters too. After changing any of them, run from the
+repository root (needs Python 3 and fonttools):
+    python3 tools/make_launcher_cjk_font.py [--extra FILE]... [Regular.ttc Bold.ttc]
 The default paths are those of Fedora/Bazzite and Debian/Ubuntu.
+tests/launcher_text_test.cpp fails when a Japanese text has a character the
+font lacks.
 """
 
 import io
@@ -21,9 +27,31 @@ import sys
 from fontTools import subset
 from fontTools.ttLib import TTCollection
 
-# Every non-Latin character the launcher draws. Keep this in sync with the
-# strings in moderngekko_launcher.cpp (search for "\xE5" style escapes).
-CHARACTERS = "奈依茲・悪魔的"
+# Japanese the launcher draws outside JAPANESE_TEXTS: the Credits page's name
+# (moderngekko_launcher.cpp) and the language menu's 日本語 (launcher_text.hpp),
+# both written there as "\xE5..." escapes.
+CHARACTERS = "奈依茲・悪魔的日本語"
+
+
+def japanese_text_characters(root):
+    """Every character past Latin-1 in launcher_text.hpp's JAPANESE_TEXTS."""
+    text = (root / "launcher_text.hpp").read_text(encoding="utf-8")
+    start = text.index("inline constexpr Translation JAPANESE_TEXTS[]")
+    end = text.index("\n};", start)
+    return {character for character in text[start:end] if ord(character) > 0xFF}
+
+
+def file_characters(path):
+    """Every character past Latin-1 in a UTF-8 text file."""
+    text = pathlib.Path(path).read_text(encoding="utf-8")
+    return {character for character in text if ord(character) > 0xFF}
+
+
+def characters(root, extra_files):
+    found = set(CHARACTERS) | japanese_text_characters(root)
+    for path in extra_files:
+        found |= file_characters(path)
+    return "".join(sorted(found))
 
 FAMILY = "Noto Sans CJK JP"
 CANDIDATES = {
@@ -57,7 +85,7 @@ def japanese_face(path, weight):
     sys.exit(f"{path} has no {FAMILY} {weight} face")
 
 
-def build_subset(path, weight):
+def build_subset(path, weight, text):
     font = japanese_face(path, weight)
     options = subset.Options()
     options.name_IDs = ["*"]  # keep copyright (0) and license (13, 14)
@@ -67,7 +95,7 @@ def build_subset(path, weight):
     options.desubroutinize = True
     options.notdef_outline = True
     subsetter = subset.Subsetter(options)
-    subsetter.populate(text=CHARACTERS)
+    subsetter.populate(text=text)
     subsetter.subset(font)
     # Keep the font's own date, so running this again gives the same bytes.
     font.recalcTimestamp = False
@@ -86,26 +114,40 @@ def as_array(name, data):
 
 
 def main():
-    given = sys.argv[1:3] + [None, None]
-    regular = build_subset(find_source("Regular", given[0]), "Regular")
-    bold = build_subset(find_source("Bold", given[1]), "Bold")
+    arguments = sys.argv[1:]
+    extra_files = []
+    while "--extra" in arguments:
+        at = arguments.index("--extra")
+        if at + 1 >= len(arguments):
+            sys.exit("--extra needs a file")
+        extra_files.append(arguments[at + 1])
+        del arguments[at:at + 2]
+    given = arguments[:2] + [None, None]
     root = pathlib.Path(__file__).resolve().parent
+    text = characters(root, extra_files)
+    regular = build_subset(find_source("Regular", given[0]), "Regular", text)
+    bold = build_subset(find_source("Bold", given[1]), "Bold", text)
     output = root / "launcher_cjk_font.inc"
     # The header stays plain ASCII, so compilers read it the same in any
-    # source encoding: the characters are listed by code point.
-    code_points = " ".join(f"U+{ord(character):04X}" for character in CHARACTERS)
+    # source encoding: the characters are listed by code point, 12 a line.
+    points = [f"U+{ord(character):04X}" for character in text]
+    code_points = "\n".join(
+        "//   " + " ".join(points[start:start + 12]) for start in range(0, len(points), 12)
+    )
     output.write_text(
         "// Generated by tools/make_launcher_cjk_font.py; do not edit by hand.\n"
         "#pragma once\n"
         f"// {FAMILY} (SIL Open Font License 1.1, see tools/fonts/NotoSansCJK-OFL.txt),\n"
-        f"// cut down to the launcher's Japanese characters: {code_points}\n"
+        f"// cut down to the launcher's {len(points)} Japanese characters:\n"
+        f"{code_points}\n"
         + as_array("LAUNCHER_CJK_REGULAR", regular)
         + "\n"
         + as_array("LAUNCHER_CJK_BOLD", bold)
         + "\n",
         encoding="utf-8",
     )
-    print(f"{output}: regular {len(regular)} bytes, bold {len(bold)} bytes")
+    print(f"{output}: {len(points)} characters, regular {len(regular)} bytes, "
+          f"bold {len(bold)} bytes")
 
 
 if __name__ == "__main__":

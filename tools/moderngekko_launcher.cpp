@@ -4,6 +4,7 @@
 #include "launcher_summary.hpp"
 #include "launcher_text.hpp"
 #include "launcher_music.hpp"
+#include "launcher_patch_notes.hpp"
 #include "launcher_ui.hpp"
 #include "launcher_update.hpp"
 #include "moderngekko/game.hpp"
@@ -688,10 +689,11 @@ bool DrawLanguageMenu(std::string& setting, std::string_view system_language, fl
   const std::string automatic = Format(
       Tr("System (%s)"),
       LanguageName(moderngekko::frontend::ResolveLanguage("auto", system_language)));
-  const std::array<std::pair<const char*, std::string>, 3> choices = {{
+  const std::array<std::pair<const char*, std::string>, 4> choices = {{
       {"auto", automatic},
       {"en", LanguageName(Language::English)},
       {"es", LanguageName(Language::Spanish)},
+      {"ja", LanguageName(Language::Japanese)},
   }};
   const auto current = std::ranges::find_if(
       choices, [&](const auto& choice) { return setting == choice.first; });
@@ -833,7 +835,7 @@ bool DrawSummaryTile(const SummaryTile& tile, float width, ImFont* bold, float s
   ImFont* font = ImGui::GetFont();
   const float value_size = ImGui::GetFontSize();
   const float heading_size = value_size * 0.78f;
-  const ImVec2 padding(12.0f * scale, 9.0f * scale);
+  const ImVec2 padding(10.0f * scale, 9.0f * scale);
   const ImVec2 size(width, SummaryTileHeight(scale));
   const ImVec2 min = ImGui::GetCursorScreenPos();
   const ImVec2 max(min.x + size.x, min.y + size.y);
@@ -856,15 +858,38 @@ bool DrawSummaryTile(const SummaryTile& tile, float width, ImFont* bold, float s
   draw_list->AddText(font, heading_size, ImVec2(min.x + padding.x, min.y + padding.y),
                      ImGui::GetColorU32(ImGuiCol_TextDisabled), tile.heading);
   const float text_width = size.x - padding.x * 2.0f;
-  const bool use_short =
-      !tile.short_value.empty() &&
-      bold->CalcTextSizeA(value_size, FLT_MAX, 0.0f, tile.value.c_str()).x > text_width;
-  const std::string shown =
-      FitTextToWidth(bold, value_size, use_short ? tile.short_value : tile.value, text_width);
+  // The value at full size, or a little smaller, then its short form the
+  // same way, and only then cut with "...": the compact window's cards stay
+  // whole for nearly every value.
+  std::string shown;
+  float shown_size = value_size;
+  const auto fit = [&](const std::string& text)
+  {
+    if (text.empty())
+      return false;
+    for (const float factor : {1.0f, 0.9f, 0.8f, 0.75f})
+    {
+      if (bold->CalcTextSizeA(value_size * factor, FLT_MAX, 0.0f, text.c_str()).x <= text_width)
+      {
+        shown = text;
+        shown_size = value_size * factor;
+        return true;
+      }
+    }
+    return false;
+  };
+  if (!fit(tile.value) && !fit(tile.short_value))
+  {
+    shown_size = value_size * 0.9f;
+    shown = FitTextToWidth(bold, shown_size,
+                           tile.short_value.empty() ? tile.value : tile.short_value, text_width);
+  }
   const ImVec4 value_color =
       tile.warning ? ImVec4(1.0f, 0.75f, 0.3f, 1.0f) : style.Colors[ImGuiCol_Text];
-  draw_list->AddText(bold, value_size,
-                     ImVec2(min.x + padding.x, min.y + padding.y + heading_size + 3.0f * scale),
+  // A smaller value sits a little lower, on about the same baseline.
+  draw_list->AddText(bold, shown_size,
+                     ImVec2(min.x + padding.x, min.y + padding.y + heading_size + 3.0f * scale +
+                                                   (value_size - shown_size) * 0.7f),
                      ImGui::GetColorU32(value_color), shown.c_str());
   if (hovered)
   {
@@ -1110,6 +1135,67 @@ bool DrawVersionSection(moderngekko::frontend::UpdateCheck& updates, bool& check
   return toggled;
 }
 #endif
+
+// Resources/patch-notes.txt, read once when the launcher opens; the PLAY
+// page shows the part in its language (see launcher_patch_notes.hpp). No
+// file, no panel.
+std::string ReadPatchNotes(const fs::path& path)
+{
+  std::ifstream file(path, std::ios::binary);
+  if (!file)
+    return {};
+  // Notes for players, not a book: the first 64 KB are plenty.
+  std::string text(64 * 1024, '\0');
+  file.read(text.data(), static_cast<std::streamsize>(text.size()));
+  text.resize(static_cast<std::size_t>(file.gcount()));
+  return text;
+}
+
+// The PLAY page's PATCH NOTES panel, at the given size: its heading stays put
+// and the notes scroll under it when they don't fit.
+void DrawPatchNotes(const std::vector<moderngekko::frontend::PatchNoteLine>& notes, ImFont* bold,
+                    ImVec2 size)
+{
+  using Kind = moderngekko::frontend::PatchNoteLine::Kind;
+  ImGui::BeginChild("##patch_notes", size, ImGuiChildFlags_Borders,
+                    ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
+  ImGui::TextDisabled("%s", Tr("PATCH NOTES"));
+  ImGui::BeginChild("##patch_notes_text");
+  ImGui::PushTextWrapPos(0.0f);
+  for (const moderngekko::frontend::PatchNoteLine& line : notes)
+  {
+    switch (line.kind)
+    {
+    case Kind::Heading:
+      ImGui::PushFont(bold, 0.0f);
+      ImGui::PushStyleColor(ImGuiCol_Text, LAUNCHER_ACCENT);
+      ImGui::TextUnformatted(line.text.c_str());
+      ImGui::PopStyleColor();
+      ImGui::PopFont();
+      break;
+    case Kind::Point:
+      // A hanging indent: the wrapped lines start under the text, not the dot.
+      ImGui::Bullet();
+      ImGui::SameLine();
+      ImGui::TextUnformatted(line.text.c_str());
+      break;
+    case Kind::Paragraph:
+      ImGui::TextUnformatted(line.text.c_str());
+      break;
+    case Kind::Gap:
+      ImGui::Spacing();
+      break;
+    }
+  }
+  ImGui::PopTextWrapPos();
+  ImGui::EndChild();
+  ImGui::EndChild();
+}
+
+// The launcher window's size before the display's scale. It can't be
+// resized: the pages are laid out for this size.
+constexpr int LAUNCHER_WIDTH = 720;
+constexpr int LAUNCHER_HEIGHT = 640;
 
 std::string_view TrimView(std::string_view text)
 {
@@ -2132,6 +2218,10 @@ void DrawControllerTester(ControllerTester& tester, const LauncherImage& control
                              ImGui::CalcTextSize(Tr("Keyboard")).x +
                              style.FramePadding.x * 4.0f + style.ItemSpacing.x;
     ImGui::SameLine();
+    // On a line of their own when the profile line leaves no room (a
+    // language with longer words).
+    if (ImGui::GetContentRegionAvail().x < tabs_width)
+      ImGui::NewLine();
     ImGui::SetCursorPosX(ImGui::GetCursorPosX() +
                          std::max(0.0f, ImGui::GetContentRegionAvail().x - tabs_width));
     if (DrawTesterTab(Tr("Controller"), !tester.show_keyboard))
@@ -2262,17 +2352,17 @@ int main(int argc, char** argv)
       moderngekko::frontend::ResolveLanguage(config.language, system_language);
 
   const float scale = SDL_GetDisplayContentScale(SDL_GetPrimaryDisplay());
-  SDL_Window* window = SDL_CreateWindow(MODERNGEKKO_FRONTEND_NAME, static_cast<int>(820 * scale),
-                                        static_cast<int>(700 * scale),
-                                        SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY);
+  // One compact size that can't be changed, so every page is laid out for
+  // it (LAUNCHER_WIDTH x LAUNCHER_HEIGHT, at the display's scale).
+  SDL_Window* window = SDL_CreateWindow(
+      MODERNGEKKO_FRONTEND_NAME, static_cast<int>(LAUNCHER_WIDTH * scale),
+      static_cast<int>(LAUNCHER_HEIGHT * scale), SDL_WINDOW_HIGH_PIXEL_DENSITY);
   if (!window)
   {
     SDL_Log("SDL_CreateWindow failed: %s", SDL_GetError());
     SDL_Quit();
     return 1;
   }
-  // Keeps the sidebar and the page readable when the window is resized.
-  SDL_SetWindowMinimumSize(window, static_cast<int>(680 * scale), static_cast<int>(560 * scale));
   SDL_Renderer* renderer = SDL_CreateRenderer(window, "vulkan");
   if (!renderer)
     renderer = SDL_CreateRenderer(window, nullptr);
@@ -2295,7 +2385,7 @@ int main(int argc, char** argv)
   ImGui::GetStyle().ScaleAllSizes(scale);
   ImGui::GetStyle().FontScaleDpi = scale;
   // ImGui sizes a font by its full line height. 18 px gives Noto Sans and Segoe
-  // UI a comfortable reading size while the Play page still fits in 700 px.
+  // UI a comfortable reading size while the Play page still fits the window.
   const LauncherFonts fonts = LoadInterfaceFont(release_directory, 18.0f);
   ImGui_ImplSDL3_InitForSDLRenderer(window, renderer);
   ImGui_ImplSDLRenderer3_Init(renderer);
@@ -2307,11 +2397,18 @@ int main(int argc, char** argv)
   // The background's floor slides (RenderBackground in launcher_ui.hpp).
   const LauncherImage background = LoadLauncherImage(
       renderer, release_directory, "launcher-background.png", "launcher background", true);
-  // Resources/launcher-music.mp3 loops while the launcher is open and waits
-  // while the game runs. Without the file there is no music and no slider.
+  // The PLAY page's PATCH NOTES (MODERNGEKKO_LAUNCHER_PATCH_NOTES), read in
+  // the interface's language again when it changes.
+  const std::string patch_notes_text =
+      ReadPatchNotes(release_directory / "Resources" / "patch-notes.txt");
+  std::vector<moderngekko::frontend::PatchNoteLine> patch_notes;
+  std::string patch_notes_language;
+  // Resources/launcher-music.mp3 loops while the launcher is open, stops
+  // while the game runs and starts over after. Without the file there is no
+  // music and no slider.
   moderngekko::frontend::MusicPlayer music(MODERNGEKKO_FRONTEND_NAME);
-  const bool has_music =
-      music.Play(release_directory / "Resources" / "launcher-music.mp3", config.music_volume);
+  const fs::path music_path = release_directory / "Resources" / "launcher-music.mp3";
+  const bool has_music = music.Play(music_path, config.music_volume);
 #if defined(MODERNGEKKO_FRONTEND_VERSION) && defined(MODERNGEKKO_UPDATE_REPOSITORY)
   // Check for updates (launcher_update.hpp): GitHub is asked when the
   // launcher opens, unless turned off on the Credits page, and with that
@@ -2970,13 +3067,78 @@ int main(int argc, char** argv)
 
         if (current_metadata)
         {
+          // Under the banner, two columns when the build has patch notes
+          // (and they get at least a few lines): on the left the game's
+          // state, PLAY, the Netplay links and the savestate choice; on the
+          // right the PATCH NOTES panel, from the top of the left column
+          // down to the summary cards. Without notes the left column takes
+          // the whole width.
+          const char* language_code =
+              moderngekko::frontend::LanguageCode(moderngekko::frontend::ActiveLanguage());
+          if (patch_notes_language != language_code)
+          {
+            patch_notes = moderngekko::frontend::ParsePatchNotes(patch_notes_text, language_code);
+            patch_notes_language = language_code;
+          }
+          const ImVec2 columns_top = ImGui::GetCursorPos();
+          const float row_width = ImGui::GetContentRegionAvail().x;
+          const float notes_width = std::floor(row_width * 0.5f);
+          // Down to the cards, which keep their usual gap above them.
+          const ImVec2 notes_size(
+              notes_width, ImGui::GetContentRegionAvail().y - SummaryTileHeight(scale) -
+                               ImGui::GetStyle().ItemSpacing.y * 3.0f);
+          const bool show_patch_notes =
+              !patch_notes.empty() && notes_size.y >= ImGui::GetTextLineHeightWithSpacing() * 3.0f;
+          const float column_width =
+              show_patch_notes ? row_width - notes_width - ImGui::GetStyle().ItemSpacing.x : -1.0f;
+
           const std::string ready = Format(Tr("GAME READY \xC2\xB7 %s"),
                                            current_metadata.metadata->disc_id.c_str());
           DrawStatusPill(ready.c_str(), LAUNCHER_ACCENT, scale, false);
           ImGui::Spacing();
           ImGui::Spacing();
+          if (DrawPrimaryButton(Tr("PLAY"), fonts.bold, 42 * scale, column_width))
+          {
+            if (ensure_controller())
+            {
+              launch_mode = LaunchMode::Solo;
+              done = true;
+            }
+          }
+
+          // Under PLAY, the Netplay links: side by side when they fit the
+          // column, one under the other when a language's names are too long.
+          ImGui::Spacing();
+          const float link_padding = ImGui::GetStyle().FramePadding.x * 2.0f;
+          const float links_width = ImGui::CalcTextSize(Tr("Host Netplay")).x +
+                                    ImGui::CalcTextSize(Tr("Join Netplay")).x +
+                                    ImGui::CalcTextSize("\xC2\xB7").x + link_padding * 2.0f;
+          const bool stacked_links = show_patch_notes && links_width > column_width;
+
+          // Netplay: two text buttons. Each opens a small window with the
+          // connection fields and the button that starts the session.
+          if (DrawLinkButton(Tr("Host Netplay")))
+          {
+            netplay_dialog_mode = LaunchMode::Host;
+            ImGui::OpenPopup("Netplay##session");
+          }
+          if (!stacked_links)
+          {
+            ImGui::SameLine(0.0f, 0.0f);
+            ImGui::TextUnformatted("\xC2\xB7");
+            ImGui::SameLine(0.0f, 0.0f);
+          }
+          if (DrawLinkButton(Tr("Join Netplay")))
+          {
+            netplay_dialog_mode = LaunchMode::Join;
+            ImGui::OpenPopup("Netplay##session");
+          }
+
+          // Under the links: which savestate the next PLAY starts from, when
+          // there are any.
           if (!launcher_savestates.empty())
           {
+            ImGui::Spacing();
             ImGui::TextUnformatted(Tr("Start from savestate"));
             const std::string savestate_preview =
                 selected_savestate >= 0 ?
@@ -2984,7 +3146,7 @@ int main(int argc, char** argv)
                         launcher_savestates[static_cast<std::size_t>(selected_savestate)],
                         selected_savestate == 0) :
                     std::string(Tr("Normal boot"));
-            ImGui::SetNextItemWidth(-1);
+            ImGui::SetNextItemWidth(column_width);
             if (ImGui::BeginCombo("##launch_savestate", savestate_preview.c_str()))
             {
               const bool normal_boot_selected = selected_savestate < 0;
@@ -3005,35 +3167,10 @@ int main(int argc, char** argv)
               ImGui::EndCombo();
             }
             // Netplay starts every player from the same boot, so a state chosen by
-            // one side would desync the session immediately.
-            ImGui::TextDisabled("%s", Tr("Savestates are available for solo play only."));
-            ImGui::Spacing();
-          }
-
-          if (DrawPrimaryButton(Tr("PLAY"), fonts.bold, 42 * scale))
-          {
-            if (ensure_controller())
-            {
-              launch_mode = LaunchMode::Solo;
-              done = true;
-            }
-          }
-
-          // Netplay: two quiet buttons under PLAY. Each opens a small window
-          // with the connection fields and the button that starts the session.
-          ImGui::Spacing();
-          if (DrawLinkButton(Tr("Host Netplay")))
-          {
-            netplay_dialog_mode = LaunchMode::Host;
-            ImGui::OpenPopup("Netplay##session");
-          }
-          ImGui::SameLine(0.0f, 0.0f);
-          ImGui::TextDisabled("\xC2\xB7");
-          ImGui::SameLine(0.0f, 0.0f);
-          if (DrawLinkButton(Tr("Join Netplay")))
-          {
-            netplay_dialog_mode = LaunchMode::Join;
-            ImGui::OpenPopup("Netplay##session");
+            // one side would desync the session immediately. The compact page
+            // says so under the pointer.
+            if (ImGui::IsItemHovered())
+              ImGui::SetTooltip("%s", Tr("Savestates are available for solo play only."));
           }
 
           ImGui::SetNextWindowPos(ImGui::GetMainViewport()->GetCenter(), ImGuiCond_Appearing,
@@ -3177,6 +3314,15 @@ int main(int argc, char** argv)
             if (ImGui::Button(Tr("Cancel"), ImVec2(button_width, 38 * scale)))
               ImGui::CloseCurrentPopup();
             ImGui::EndPopup();
+          }
+
+          if (show_patch_notes)
+          {
+            // The cards go under whichever column ends lower.
+            const float left_bottom = ImGui::GetCursorPosY();
+            ImGui::SetCursorPos(ImVec2(columns_top.x + row_width - notes_width, columns_top.y));
+            DrawPatchNotes(patch_notes, fonts.bold, notes_size);
+            ImGui::SetCursorPosY(std::max(ImGui::GetCursorPosY(), left_bottom));
           }
 
           // Summary cards along the bottom of the page: how long the game has
@@ -3635,9 +3781,12 @@ int main(int argc, char** argv)
     {
       if (extraction_thread.joinable())
         extraction_thread.join();
-      music.Pause();
+      // The music stops while the game (or the Netplay lobby, which has its
+      // own) runs, and starts over from the beginning back here.
+      music.Stop();
       result = launch_game(launch_mode);
-      music.Resume();
+      if (has_music)
+        music.Play(music_path, config.music_volume);
       launch_mode = LaunchMode::None;
       done = false;
       current_page = LauncherPage::Play;

@@ -408,10 +408,10 @@ inline void RenderBackground(SDL_Renderer* renderer, const LauncherImage& backgr
 }
 
 
-// The page's main action (PLAY): full width, a grey panel like the others
-// with a bold label in the accent colour. Its border lights up in the accent
-// while the pointer is on it.
-inline bool DrawPrimaryButton(const char* label, ImFont* bold, float height)
+// The page's main action (PLAY): a grey panel like the others with a bold
+// label in the accent colour, full width unless given one. Its border lights
+// up in the accent while the pointer is on it.
+inline bool DrawPrimaryButton(const char* label, ImFont* bold, float height, float width = -1.0f)
 {
   const ImGuiStyle& style = ImGui::GetStyle();
   ImGui::PushStyleColor(ImGuiCol_Button, style.Colors[ImGuiCol_ChildBg]);
@@ -420,7 +420,7 @@ inline bool DrawPrimaryButton(const char* label, ImFont* bold, float height)
   ImGui::PushStyleColor(ImGuiCol_Text, LAUNCHER_ACCENT);
   ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, style.ChildRounding);
   ImGui::PushFont(bold, style.FontSizeBase * 1.15f);
-  const bool clicked = ImGui::Button(label, ImVec2(-1.0f, height));
+  const bool clicked = ImGui::Button(label, ImVec2(width, height));
   ImGui::PopFont();
   ImGui::PopStyleVar();
   ImGui::PopStyleColor(4);
@@ -504,14 +504,15 @@ inline bool DrawChoiceButton(const char* label, bool selected, ImVec2 size, ImFo
   return clicked;
 }
 
-// A quiet text button, such as "Host Netplay" under PLAY.
+// A text button without a frame, such as "Host Netplay" under PLAY.
 inline bool DrawLinkButton(const char* label)
 {
   const ImGuiStyle& style = ImGui::GetStyle();
   ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
   ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(1.0f, 1.0f, 1.0f, 0.06f));
   ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(1.0f, 1.0f, 1.0f, 0.10f));
-  ImGui::PushStyleColor(ImGuiCol_Text, style.Colors[ImGuiCol_TextDisabled]);
+  // White, so the links stand out over the launcher's background picture.
+  ImGui::PushStyleColor(ImGuiCol_Text, style.Colors[ImGuiCol_Text]);
   const bool clicked = ImGui::Button(label);
   ImGui::PopStyleColor(4);
   return clicked;
