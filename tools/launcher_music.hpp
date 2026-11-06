@@ -28,8 +28,8 @@ public:
   // or unreadable or no audio device opens: music is optional.
   bool Play(const std::filesystem::path& path, int volume);
   void SetVolume(int volume);
-  // While the game runs, for the launcher: the music stops where it is and
-  // picks up from there.
+  // The music stops where it is and picks up from there. (The launcher
+  // starts its music over after the game instead: Stop, then Play.)
   void Pause();
   void Resume();
   void Stop();

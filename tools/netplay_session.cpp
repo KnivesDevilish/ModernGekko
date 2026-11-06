@@ -403,7 +403,8 @@ public:
     const float display_scale = SDL_GetDisplayContentScale(display);
     m_scale = display_scale > 0.0f ? display_scale : 1.0f;
     // The artwork's height sets the window's proportions; a small screen
-    // gets a smaller window, and the lobby scrolls if it must.
+    // gets a smaller window, and the lobby scrolls if it must. The size
+    // can't be changed after.
     int width = static_cast<int>(1000 * m_scale);
     int height = static_cast<int>(640 * m_scale);
     SDL_Rect usable{};
@@ -412,13 +413,10 @@ public:
       width = std::min(width, usable.w * 9 / 10);
       height = std::min(height, usable.h * 9 / 10);
     }
-    m_window = SDL_CreateWindow(
-        LOBBY_WINDOW_TITLE, width, height,
-        SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY);
+    m_window = SDL_CreateWindow(LOBBY_WINDOW_TITLE, width, height,
+                                SDL_WINDOW_HIGH_PIXEL_DENSITY);
     if (!m_window)
       return false;
-    SDL_SetWindowMinimumSize(m_window, static_cast<int>(760 * m_scale),
-                             static_cast<int>(560 * m_scale));
     m_renderer = SDL_CreateRenderer(m_window, "vulkan");
     if (!m_renderer)
       m_renderer = SDL_CreateRenderer(m_window, nullptr);

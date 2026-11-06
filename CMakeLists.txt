@@ -72,6 +72,8 @@ set(MODERNGEKKO_LOBBY_MUSIC "" CACHE FILEPATH
     "Optional MP3 that loops while the Netplay lobby is open")
 set(MODERNGEKKO_LOBBY_BACKGROUND "" CACHE FILEPATH
     "Optional picture behind the Netplay lobby")
+set(MODERNGEKKO_LAUNCHER_PATCH_NOTES "" CACHE FILEPATH
+    "Optional UTF-8 text shown in the PLAY page's PATCH NOTES panel")
 # With both set, the launcher shows its version and looks on GitHub for a
 # newer published release (tools/launcher_update.hpp).
 set(MODERNGEKKO_FRONTEND_VERSION "" CACHE STRING
@@ -711,8 +713,12 @@ if(MODERNGEKKO_ENABLE_DOLPHIN_RUNTIME)
     moderngekko_add_resource(moderngekko-launcher "${MODERNGEKKO_LAUNCHER_MUSIC}"
                              launcher-music.mp3)
     moderngekko_use_music_output(moderngekko-launcher)
-    # The launcher embeds a few Noto Sans CJK glyphs (tools/launcher_cjk_font.inc);
-    # the font's license travels with every build of it.
+    # Resources/patch-notes.txt fills the PLAY page's PATCH NOTES panel
+    # (format in tools/launcher_patch_notes.hpp).
+    moderngekko_add_resource(moderngekko-launcher "${MODERNGEKKO_LAUNCHER_PATCH_NOTES}"
+                             patch-notes.txt)
+    # The launcher embeds the Noto Sans CJK glyphs of its Japanese texts
+    # (tools/launcher_cjk_font.inc); the font's license travels with every build.
     add_custom_command(TARGET moderngekko-launcher POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E make_directory
                 "$<TARGET_FILE_DIR:moderngekko-launcher>/Resources/licenses"
@@ -869,6 +875,15 @@ if(BUILD_TESTING)
     target_compile_features(moderngekko_launcher_update_test PRIVATE cxx_std_23)
     add_test(NAME moderngekko.launcher_update
              COMMAND moderngekko_launcher_update_test)
+
+    # Header-only: the light format of the PATCH NOTES panel.
+    add_executable(moderngekko_launcher_patch_notes_test
+        tests/launcher_patch_notes_test.cpp)
+    target_include_directories(moderngekko_launcher_patch_notes_test PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/tools")
+    target_compile_features(moderngekko_launcher_patch_notes_test PRIVATE cxx_std_23)
+    add_test(NAME moderngekko.launcher_patch_notes
+             COMMAND moderngekko_launcher_patch_notes_test)
 
     # The Netplay lobby's cached hash of the game files.
     add_executable(moderngekko_game_files_hash_test

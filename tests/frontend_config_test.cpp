@@ -270,6 +270,17 @@ int main() {
     }
     if (moderngekko::frontend::LoadConfig(language, false).language != "en")
       return 28;
+    // Japanese, as "ja" or "Japanese".
+    language_config.language = "ja";
+    if (!moderngekko::frontend::SaveConfig(language, language_config, &error) ||
+        moderngekko::frontend::LoadConfig(language, false).language != "ja")
+      return 36;
+    {
+      std::ofstream file(language / "config.ini", std::ios::trunc);
+      file << "[Launcher]\nlanguage=Japanese\n[Video]\nresolution=1920x1080\n";
+    }
+    if (moderngekko::frontend::LoadConfig(language, false).language != "ja")
+      return 37;
   }
 
   // Music volume: 70 until changed, saved, kept by the short SaveConfig, and

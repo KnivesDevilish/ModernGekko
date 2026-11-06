@@ -42,7 +42,7 @@ struct ConfigResult {
   bool fullscreen = false;
   // "16:9", "4:3" or "stretch" (see SupportedAspectRatios).
   std::string aspect_ratio = "16:9";
-  // The launcher's language: "auto" (the system's), "en" or "es".
+  // The launcher's language: "auto" (the system's), "en", "es" or "ja".
   std::string language = "auto";
   // Volume of the launcher's and the Netplay lobby's music, 0 (off) to 100.
   int music_volume = 70;
