@@ -46,6 +46,9 @@ struct ConfigResult {
   std::string language = "auto";
   // Volume of the launcher's and the Netplay lobby's music, 0 (off) to 100.
   int music_volume = 70;
+  // Whether the launcher looks on GitHub for a newer version when it opens
+  // (only in builds that name a version and a repository).
+  bool check_for_updates = true;
   std::string netplay_nickname = "Player";
   std::string netplay_address = "127.0.0.1";
   std::uint16_t netplay_port = 2626;

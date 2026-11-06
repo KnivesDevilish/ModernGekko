@@ -72,6 +72,12 @@ set(MODERNGEKKO_LOBBY_MUSIC "" CACHE FILEPATH
     "Optional MP3 that loops while the Netplay lobby is open")
 set(MODERNGEKKO_LOBBY_BACKGROUND "" CACHE FILEPATH
     "Optional picture behind the Netplay lobby")
+# With both set, the launcher shows its version and looks on GitHub for a
+# newer published release (tools/launcher_update.hpp).
+set(MODERNGEKKO_FRONTEND_VERSION "" CACHE STRING
+    "Version of the game's launcher, such as 0.1.0")
+set(MODERNGEKKO_UPDATE_REPOSITORY "" CACHE STRING
+    "GitHub repository whose releases the launcher checks, such as Owner/Name")
 
 # Puts an optional image in Resources/ next to an executable, as <name>. It is
 # copied on every build of that executable, so a changed image is picked up,
@@ -91,20 +97,40 @@ function(moderngekko_add_resource target source name)
     add_dependencies(${target} ${_copy_target})
 endfunction()
 
-# The launcher's and the lobby's music (tools/launcher_music.cpp) play through
-# cubeb, Dolphin's own audio library: the SDL that Dolphin builds has no
-# audio. Without cubeb the music is left out.
-function(moderngekko_use_cubeb target)
+# The launcher's and the lobby's music (tools/launcher_music.cpp). The SDL
+# that Dolphin builds has no audio, so the music plays through cubeb,
+# Dolphin's own audio library, when Dolphin is built with it (Windows and
+# macOS, see ENABLE_CUBEB below), and otherwise on Linux straight to the sound
+# server through PulseAudio's simple API (libpulse-simple, which PipeWire
+# systems have too). With neither, the music is left out.
+function(moderngekko_use_music_output target)
     if(TARGET cubeb::cubeb)
         target_link_libraries(${target} PRIVATE cubeb::cubeb)
+        target_compile_definitions(${target} PRIVATE MODERNGEKKO_HAS_CUBEB)
+        message(STATUS "${target}: music through cubeb")
+        return()
     elseif(TARGET cubeb)
         target_link_libraries(${target} PRIVATE cubeb)
-    else()
-        message(STATUS "${target}: no cubeb, so no music")
+        target_compile_definitions(${target} PRIVATE MODERNGEKKO_HAS_CUBEB)
+        message(STATUS "${target}: music through cubeb")
         return()
     endif()
-    target_compile_definitions(${target} PRIVATE MODERNGEKKO_HAS_CUBEB)
+    if(UNIX AND NOT APPLE AND NOT TARGET PkgConfig::MODERNGEKKO_PULSE_SIMPLE)
+        find_package(PkgConfig QUIET)
+        if(PKG_CONFIG_FOUND)
+            pkg_check_modules(MODERNGEKKO_PULSE_SIMPLE QUIET IMPORTED_TARGET GLOBAL
+                              libpulse-simple)
+        endif()
+    endif()
+    if(TARGET PkgConfig::MODERNGEKKO_PULSE_SIMPLE)
+        target_link_libraries(${target} PRIVATE PkgConfig::MODERNGEKKO_PULSE_SIMPLE)
+        target_compile_definitions(${target} PRIVATE MODERNGEKKO_HAS_PULSE_SIMPLE)
+        message(STATUS "${target}: music through PulseAudio")
+    else()
+        message(STATUS "${target}: no cubeb and no libpulse-simple, so no music")
+    endif()
 endfunction()
+
 option(MODERNGEKKO_USER_DIRECTORY_IN_DOCUMENTS
        "Place the branded user directory in Documents" OFF)
 set(MODERNGEKKO_FRONTEND_SDK "" CACHE PATH
@@ -574,19 +600,21 @@ if(MODERNGEKKO_ENABLE_DOLPHIN_RUNTIME)
     moderngekko_add_resource(moderngekko-run "${MODERNGEKKO_LOBBY_BACKGROUND}"
                              lobby-background.png)
     # And plays Resources/lobby-music.mp3 (decoded by tools/third_party/dr_mp3.h,
-    # played through cubeb).
+    # see moderngekko_use_music_output for where the sound goes).
     moderngekko_add_resource(moderngekko-run "${MODERNGEKKO_LOBBY_MUSIC}" lobby-music.mp3)
-    moderngekko_use_cubeb(moderngekko-run)
+    moderngekko_use_music_output(moderngekko-run)
 
     add_executable(moderngekko-launcher
         tools/moderngekko_launcher.cpp
         tools/frontend_config.cpp
         tools/dol_patch.cpp
         tools/launcher_music.cpp
+        tools/launcher_update.cpp
         vendor/dolphin/Externals/imgui/imgui/backends/imgui_impl_sdl3.cpp
         vendor/dolphin/Externals/imgui/imgui/backends/imgui_impl_sdlrenderer3.cpp)
     target_include_directories(moderngekko-launcher PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/tools"
+        "${CMAKE_CURRENT_SOURCE_DIR}/vendor/picojson"
         "${CMAKE_CURRENT_SOURCE_DIR}/vendor/dolphin/Source/Core"
         "${CMAKE_CURRENT_SOURCE_DIR}/vendor/dolphin/Externals/imgui/imgui/backends")
     # The interface translations (tools/launcher_text.hpp) are written in
@@ -649,6 +677,11 @@ if(MODERNGEKKO_ENABLE_DOLPHIN_RUNTIME)
         target_compile_definitions(moderngekko-launcher PRIVATE
             MODERNGEKKO_DOL_PATCH_MANIFEST="patches/${_moderngekko_dol_patch_name}")
     endif()
+    if(MODERNGEKKO_FRONTEND_VERSION AND MODERNGEKKO_UPDATE_REPOSITORY)
+        target_compile_definitions(moderngekko-launcher PRIVATE
+            MODERNGEKKO_FRONTEND_VERSION="${MODERNGEKKO_FRONTEND_VERSION}"
+            MODERNGEKKO_UPDATE_REPOSITORY="${MODERNGEKKO_UPDATE_REPOSITORY}")
+    endif()
     if(MODERNGEKKO_DISC_PREPARER_OUTPUT_NAME)
         target_compile_definitions(moderngekko-launcher PRIVATE
             MODERNGEKKO_DISC_PREPARER_FILENAME="${MODERNGEKKO_DISC_PREPARER_OUTPUT_NAME}")
@@ -677,7 +710,7 @@ if(MODERNGEKKO_ENABLE_DOLPHIN_RUNTIME)
                              launcher-background.png)
     moderngekko_add_resource(moderngekko-launcher "${MODERNGEKKO_LAUNCHER_MUSIC}"
                              launcher-music.mp3)
-    moderngekko_use_cubeb(moderngekko-launcher)
+    moderngekko_use_music_output(moderngekko-launcher)
     # The launcher embeds a few Noto Sans CJK glyphs (tools/launcher_cjk_font.inc);
     # the font's license travels with every build of it.
     add_custom_command(TARGET moderngekko-launcher POST_BUILD
@@ -825,6 +858,17 @@ if(BUILD_TESTING)
     target_compile_features(moderngekko_moving_background_test PRIVATE cxx_std_23)
     add_test(NAME moderngekko.moving_background
              COMMAND moderngekko_moving_background_test)
+
+    # Header-only: the launcher's version rules and reading GitHub's answer
+    # about the latest release.
+    add_executable(moderngekko_launcher_update_test
+        tests/launcher_update_test.cpp)
+    target_include_directories(moderngekko_launcher_update_test PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/tools"
+        "${CMAKE_CURRENT_SOURCE_DIR}/vendor/picojson")
+    target_compile_features(moderngekko_launcher_update_test PRIVATE cxx_std_23)
+    add_test(NAME moderngekko.launcher_update
+             COMMAND moderngekko_launcher_update_test)
 
     # The Netplay lobby's cached hash of the game files.
     add_executable(moderngekko_game_files_hash_test

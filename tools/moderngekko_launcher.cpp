@@ -5,6 +5,7 @@
 #include "launcher_text.hpp"
 #include "launcher_music.hpp"
 #include "launcher_ui.hpp"
+#include "launcher_update.hpp"
 #include "moderngekko/game.hpp"
 #include "netplay_address.hpp"
 #include "netplay_session.hpp"
@@ -29,6 +30,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <iostream>
 #include <mutex>
 #include <optional>
@@ -948,8 +950,9 @@ void DrawCreditsRows(const char* id, std::span<const std::array<const char*, 2>>
 }
 
 // Who made SR-ZGS and what it is built on, credited as each project credits
-// itself (the READMEs of SR-ZGS and ModernGekko).
-void DrawCreditsPage(ImFont* bold)
+// itself (the READMEs of SR-ZGS and ModernGekko). version_section, when set,
+// draws the VERSION panel under CREATED BY (DrawVersionSection).
+void DrawCreditsPage(ImFont* bold, const std::function<void()>& version_section = {})
 {
   DrawPageHeader(Tr("Credits"),
                  Tr("SR-ZGS is an independent fan project. It is not affiliated with or endorsed "
@@ -969,6 +972,8 @@ void DrawCreditsPage(ImFont* bold)
                                "development and testing."));
   ImGui::PopTextWrapPos();
   EndSection();
+  if (version_section)
+    version_section();
 
   static constexpr std::array<std::array<const char*, 2>, 6> BUILT_ON = {{
       {"DolRecomp", MODERNGEKKO_UI_TEXT("Static recompilation framework")},
@@ -1001,6 +1006,110 @@ void DrawCreditsPage(ImFont* bold)
                                "of SEGA. Play with your own legally obtained copy of the game."));
   ImGui::PopTextWrapPos();
 }
+
+#if defined(MODERNGEKKO_FRONTEND_VERSION) && defined(MODERNGEKKO_UPDATE_REPOSITORY)
+// GitHub's page with the newest release. Opened in the browser and also
+// copied, like DrawWebLink's links, since a container such as Distrobox may
+// have no browser to open.
+const char* DownloadPage()
+{
+  static const std::string page = moderngekko::frontend::ReleasesPage(MODERNGEKKO_UPDATE_REPOSITORY);
+  return page.c_str();
+}
+
+// The top bar's notice of a newer version, next to "Launcher": a lime pill
+// that opens the download page.
+void DrawNewVersionNotice(const std::string& version, float scale)
+{
+  static double opened_at = -10.0;
+  const std::string text = Format(Tr("NEW VERSION \xC2\xB7 %s"), version.c_str());
+  const ImVec2 padding(10.0f * scale, 3.0f * scale);
+  const ImVec2 text_size = ImGui::CalcTextSize(text.c_str());
+  const ImVec2 pill(text_size.x + padding.x * 2.0f, text_size.y + padding.y * 2.0f);
+  // As high as the line, so the CPU core's pill after it stays level.
+  const ImVec2 position = ImGui::GetCursorScreenPos();
+  const float line_height = std::max(ImGui::GetFrameHeight(), pill.y);
+  if (ImGui::InvisibleButton("##new_version", ImVec2(pill.x, line_height)))
+  {
+    SDL_OpenURL(DownloadPage());
+    ImGui::SetClipboardText(DownloadPage());
+    opened_at = ImGui::GetTime();
+  }
+  const bool hovered = ImGui::IsItemHovered();
+  const ImVec2 top_left(position.x, position.y + (line_height - pill.y) * 0.5f);
+  const ImVec2 bottom_right(top_left.x + pill.x, top_left.y + pill.y);
+  ImVec4 background = LAUNCHER_ACCENT;
+  background.w = hovered ? 0.30f : 0.18f;
+  ImDrawList* draw_list = ImGui::GetWindowDrawList();
+  draw_list->AddRectFilled(top_left, bottom_right, ImGui::GetColorU32(background), pill.y * 0.5f);
+  draw_list->AddRect(top_left, bottom_right, ImGui::GetColorU32(LAUNCHER_ACCENT), pill.y * 0.5f);
+  draw_list->AddText(ImVec2(top_left.x + padding.x, top_left.y + padding.y),
+                     ImGui::GetColorU32(LAUNCHER_ACCENT), text.c_str());
+  if (hovered)
+  {
+    ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
+    ImGui::SetTooltip("%s", ImGui::GetTime() - opened_at < 2.5 ?
+                                Tr("Opened in your browser and copied to the clipboard") :
+                                Tr("Open the download page"));
+  }
+}
+
+// The Credits page's VERSION panel: this build's version, what GitHub says
+// about the newest one, the button that asks again, and whether to ask each
+// time the launcher opens. Returns true when that last choice changes
+// (config.ini's check_for_updates).
+bool DrawVersionSection(moderngekko::frontend::UpdateCheck& updates, bool& check_on_open,
+                        ImFont* bold)
+{
+  using State = moderngekko::frontend::UpdateCheck::State;
+  const moderngekko::frontend::UpdateCheck::Status status = updates.Get();
+  BeginSection("##credits_version", Tr("VERSION"));
+  ImGui::PushFont(bold, 0.0f);
+  ImGui::AlignTextToFramePadding();
+  ImGui::TextUnformatted(Format(Tr("Version %s"), updates.CurrentVersion().c_str()).c_str());
+  ImGui::PopFont();
+  // The button at the right end of the same line.
+  const char* label = Tr("Check for updates");
+  const float button_width =
+      ImGui::CalcTextSize(label).x + ImGui::GetStyle().FramePadding.x * 2.0f;
+  ImGui::SameLine();
+  const float right = ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x;
+  ImGui::SetCursorPosX(std::max(ImGui::GetCursorPosX(), right - button_width));
+  ImGui::BeginDisabled(status.state == State::Checking);
+  if (ImGui::Button(label))
+    updates.Start();
+  ImGui::EndDisabled();
+  ImGui::PushTextWrapPos(0.0f);
+  switch (status.state)
+  {
+  case State::Idle:
+    break;
+  case State::Checking:
+    ImGui::TextDisabled("%s", Tr("Looking on GitHub..."));
+    break;
+  case State::UpToDate:
+    ImGui::TextColored(LAUNCHER_ACCENT, "%s", Tr("You have the latest version."));
+    break;
+  case State::Available:
+    ImGui::TextColored(LAUNCHER_ACCENT, "%s",
+                       Format(Tr("A new version is available: %s"), status.latest.c_str()).c_str());
+    DrawWebLink(Tr("Open the download page"), DownloadPage());
+    break;
+  case State::NoReleases:
+    ImGui::TextDisabled("%s", Tr("No version has been published on GitHub yet."));
+    break;
+  case State::Failed:
+    ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.3f, 1.0f), "%s",
+                       Tr("Couldn't check. Check your internet connection."));
+    break;
+  }
+  ImGui::PopTextWrapPos();
+  const bool toggled = ImGui::Checkbox(Tr("Check for updates when the launcher opens"),
+                                       &check_on_open);
+  EndSection();
+  return toggled;
+}
+#endif
 
 std::string_view TrimView(std::string_view text)
 {
@@ -2203,6 +2312,15 @@ int main(int argc, char** argv)
   moderngekko::frontend::MusicPlayer music(MODERNGEKKO_FRONTEND_NAME);
   const bool has_music =
       music.Play(release_directory / "Resources" / "launcher-music.mp3", config.music_volume);
+#if defined(MODERNGEKKO_FRONTEND_VERSION) && defined(MODERNGEKKO_UPDATE_REPOSITORY)
+  // Check for updates (launcher_update.hpp): GitHub is asked when the
+  // launcher opens, unless turned off on the Credits page, and with that
+  // page's button.
+  moderngekko::frontend::UpdateCheck update_check(MODERNGEKKO_UPDATE_REPOSITORY,
+                                                  MODERNGEKKO_FRONTEND_VERSION);
+  if (config.check_for_updates)
+    update_check.Start();
+#endif
 
   std::vector<fs::path> images = FindDiscImages();
   std::optional<fs::path> selected_image = images.empty() ? std::nullopt : std::optional(images[0]);
@@ -2741,6 +2859,16 @@ int main(int argc, char** argv)
     ImGui::TextUnformatted("Launcher");
     ImGui::PopFont();
     ImGui::SameLine();
+#if defined(MODERNGEKKO_FRONTEND_VERSION) && defined(MODERNGEKKO_UPDATE_REPOSITORY)
+    {
+      const moderngekko::frontend::UpdateCheck::Status update = update_check.Get();
+      if (update.state == moderngekko::frontend::UpdateCheck::State::Available)
+      {
+        DrawNewVersionNotice(update.latest, scale);
+        ImGui::SameLine();
+      }
+    }
+#endif
     {
       const bool static_recomp = cpu_core_override.empty() ?
                                      config.cpu_core == "staticrecomp" :
@@ -3460,7 +3588,27 @@ int main(int argc, char** argv)
     EndSection();
     }
       if (current_page == LauncherPage::Credits)
+      {
+#if defined(MODERNGEKKO_FRONTEND_VERSION) && defined(MODERNGEKKO_UPDATE_REPOSITORY)
+        DrawCreditsPage(fonts.bold, [&] {
+          const bool previous = config.check_for_updates;
+          if (!DrawVersionSection(update_check, config.check_for_updates, fonts.bold))
+            return;
+          config.resolution = resolutions[resolution_index].text;
+          config.show_fps_in_title = show_fps_in_title;
+          config.controller = selected_controller;
+          std::string error;
+          if (!moderngekko::frontend::SaveConfig(user_directory, config, &error))
+          {
+            config.check_for_updates = previous;
+            std::lock_guard lock(dialog.mutex);
+            dialog.error = std::move(error);
+          }
+        });
+#else
         DrawCreditsPage(fonts.bold);
+#endif
+      }
     }
     ImGui::EndChild();
     {

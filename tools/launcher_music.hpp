@@ -1,10 +1,12 @@
 #pragma once
 
 // Background music for the launcher and the Netplay lobby: an MP3 file that
-// loops, decoded a little at a time (dr_mp3) as the audio device asks for
-// it, so a few minutes of music never sits whole in memory. Sound goes out
-// through cubeb, Dolphin's own audio library: the SDL that Dolphin builds has
-// no audio.
+// loops, decoded a little at a time (dr_mp3) as the sound goes out, so a few
+// minutes of music never sits whole in memory. The SDL that Dolphin builds
+// has no audio, so the sound goes out through cubeb, Dolphin's own audio
+// library, where the build has it (Windows, macOS), and on Linux, where
+// ModernGekko builds Dolphin without cubeb, straight to the sound server
+// (PulseAudio, or PipeWire in its place).
 
 #include <filesystem>
 #include <memory>

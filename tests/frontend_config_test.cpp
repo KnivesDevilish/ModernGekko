@@ -295,6 +295,26 @@ int main() {
       return 32;
   }
 
+  // Looking for updates: on until turned off, then kept off, also by the
+  // short SaveConfig; only true or false.
+  {
+    const fs::path updates = directory / "updates";
+    auto updates_config = moderngekko::frontend::LoadConfig(updates, true);
+    if (!updates_config.check_for_updates)
+      return 33;
+    updates_config.check_for_updates = false;
+    if (!moderngekko::frontend::SaveConfig(updates, updates_config, &error) ||
+        !moderngekko::frontend::SaveConfig(updates, "1920x1080", true, controller, &error) ||
+        moderngekko::frontend::LoadConfig(updates, false).check_for_updates)
+      return 34;
+    {
+      std::ofstream file(updates / "config.ini", std::ios::trunc);
+      file << "[Launcher]\ncheck_for_updates=sometimes\n[Video]\nresolution=1920x1080\n";
+    }
+    if (moderngekko::frontend::LoadConfig(updates, false))
+      return 35;
+  }
+
   fs::remove_all(directory);
   return 0;
 }

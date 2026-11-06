@@ -297,6 +297,9 @@ ConfigResult LoadConfig(const fs::path &user_directory,
           volume > 100)
         return {.error = "music_volume must be a number from 0 to 100"};
       config.music_volume = volume;
+    } else if (key == "check_for_updates") {
+      if (!ParseBoolean(value, &config.check_for_updates))
+        return {.error = "check_for_updates must be true or false"};
     } else if (key == "nickname")
       config.netplay_nickname = raw_value;
     else if (key == "address")
@@ -448,6 +451,9 @@ bool SaveConfig(const fs::path &user_directory, const ConfigResult &config,
        << "# Music in the launcher and the Netplay lobby: 0 (off) to 100\n"
           "music_volume="
        << config.music_volume << '\n'
+       << "# Look on GitHub for a newer version when the launcher opens\n"
+          "check_for_updates="
+       << (config.check_for_updates ? "true" : "false") << '\n'
        << "# This is Dolphin's internal render target, not the window size.\n"
           "[Video]\n"
           "resolution="

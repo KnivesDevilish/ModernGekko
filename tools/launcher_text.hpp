@@ -182,6 +182,21 @@ inline constexpr Translation SPANISH_TEXTS[] = {
     {"Opened in your browser and copied to the clipboard",
      "Abierto en tu navegador y copiado al portapapeles"},
 
+    // Check for updates: the Credits page's VERSION panel and the top bar
+    {"VERSION", "VERSIÓN"},
+    {"Version %s", "Versión %s"},
+    {"Check for updates", "Buscar actualizaciones"},
+    {"Looking on GitHub...", "Buscando en GitHub..."},
+    {"You have the latest version.", "Tienes la versión más reciente."},
+    {"A new version is available: %s", "Hay una versión nueva: %s"},
+    {"Open the download page", "Abrir la página de descarga"},
+    {"No version has been published on GitHub yet.",
+     "Todavía no hay versiones publicadas en GitHub."},
+    {"Couldn't check. Check your internet connection.",
+     "No se pudo comprobar. Revisa tu conexión a internet."},
+    {"Check for updates when the launcher opens", "Buscar actualizaciones al abrir el launcher"},
+    {"NEW VERSION \xC2\xB7 %s", "NUEVA VERSIÓN · %s"},
+
     // Controls page
     {"Choose the controller to play with. The launcher writes its button mapping for you.",
      "Elige el mando con el que vas a jugar. El launcher configura los botones por ti."},
