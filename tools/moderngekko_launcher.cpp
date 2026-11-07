@@ -4,6 +4,7 @@
 #include "launcher_savestates.hpp"
 #include "launcher_summary.hpp"
 #include "launcher_text.hpp"
+#include "button_glyphs.hpp"
 #include "launcher_music.hpp"
 #include "launcher_patch_notes.hpp"
 #include "launcher_gallery.hpp"
@@ -22,6 +23,9 @@
 #include <SDL3/SDL.h>
 #include <imgui.h>
 #include <imgui_impl_sdl3.h>
+// FocusItem() and the keys' held time, for moving through the launcher with a
+// gamepad.
+#include <imgui_internal.h>
 #include <imgui_impl_sdlrenderer3.h>
 
 #include <algorithm>
@@ -596,6 +600,86 @@ enum class LauncherPage
   Credits,
 };
 
+// The sidebar's pages in its order, which LB and RB also go through.
+constexpr std::array<std::pair<LauncherPage, const char*>, 7> LAUNCHER_PAGES = {{
+    {LauncherPage::Play, MODERNGEKKO_UI_TEXT("PLAY")},
+    {LauncherPage::Settings, MODERNGEKKO_UI_TEXT("Settings")},
+    {LauncherPage::Controls, MODERNGEKKO_UI_TEXT("Controls")},
+    {LauncherPage::GameFiles, MODERNGEKKO_UI_TEXT("Game Files")},
+    {LauncherPage::Mods, MODERNGEKKO_UI_TEXT("Mods & expansions")},
+    {LauncherPage::Screenshots, MODERNGEKKO_UI_TEXT("Screenshots")},
+    {LauncherPage::Credits, MODERNGEKKO_UI_TEXT("Credits")},
+}};
+
+// How a gamepad labels its buttons, for the footer's hints.
+PadStyle PadStyleOf(SDL_GamepadType type)
+{
+  switch (type)
+  {
+  case SDL_GAMEPAD_TYPE_PS3:
+  case SDL_GAMEPAD_TYPE_PS4:
+  case SDL_GAMEPAD_TYPE_PS5:
+    return PadStyle::PlayStation;
+  case SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_PRO:
+  case SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_JOYCON_LEFT:
+  case SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_JOYCON_RIGHT:
+  case SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_JOYCON_PAIR:
+    return PadStyle::Nintendo;
+  default:
+    return PadStyle::Xbox;
+  }
+}
+
+// One hint of the footer: a button (or two) and what it does.
+struct FooterHint
+{
+  PadButton button;
+  std::optional<PadButton> second;
+  const char* text;
+};
+
+// The footer's hints, right-aligned on the line at line_min (screen
+// coordinates) whose right end is `right`. Returns how wide they are; with
+// draw false, only measures them.
+float DrawFooterHints(std::span<const FooterHint> hints, PadStyle style, ImFont* bold,
+                      ImVec2 line_min, float right, bool draw)
+{
+  ImFont* font = ImGui::GetFont();
+  const float font_size = ImGui::GetFontSize();
+  const float glyph = std::floor(ImGui::GetTextLineHeight() * 0.95f);
+  const float gap = ImGui::GetStyle().ItemSpacing.x;
+  const auto glyph_width = [&](PadButton button) {
+    return PadButtonWidth(bold, glyph, style, button);
+  };
+  float width = 0.0f;
+  for (std::size_t i = 0; i < hints.size(); ++i)
+  {
+    width += glyph_width(hints[i].button);
+    if (hints[i].second)
+      width += 4.0f + glyph_width(*hints[i].second);
+    width += gap * 0.6f + ImGui::CalcTextSize(hints[i].text).x;
+    if (i + 1 < hints.size())
+      width += gap * 2.0f;
+  }
+  if (!draw)
+    return width;
+  ImDrawList* list = ImGui::GetWindowDrawList();
+  float x = right - width;
+  const float glyph_y = line_min.y + std::floor((ImGui::GetTextLineHeight() - glyph) * 0.5f);
+  for (std::size_t i = 0; i < hints.size(); ++i)
+  {
+    x += DrawPadButton(list, bold, ImVec2(x, glyph_y), glyph, style, hints[i].button);
+    if (hints[i].second)
+      x += 4.0f + DrawPadButton(list, bold, ImVec2(x + 4.0f, glyph_y), glyph, style,
+                                *hints[i].second);
+    x += gap * 0.6f;
+    list->AddText(font, font_size, ImVec2(x, line_min.y), ImGui::GetColorU32(ImGuiCol_TextDisabled),
+                  hints[i].text);
+    x += ImGui::CalcTextSize(hints[i].text).x + gap * 2.0f;
+  }
+  return width;
+}
+
 // One entry of the sidebar. The current page is drawn in bold with a lime bar
 // on its left edge, the others in the dimmed text colour.
 bool DrawNavigationItem(const char* label, bool selected, ImFont* bold, float scale)
@@ -668,7 +752,8 @@ bool DrawLanguageMenu(std::string& setting, std::string_view system_language, fl
   const float height = ImGui::GetTextLineHeightWithSpacing() + ImGui::GetFrameHeight();
   ImGui::SetCursorPosY(std::max(ImGui::GetCursorPosY(), ImGui::GetWindowHeight() - height));
   ImGui::Indent(12.0f * scale);
-  ImGui::TextDisabled("%s", Tr("LANGUAGE"));
+  // White, so it reads well over the background.
+  ImGui::TextColored(ImVec4(1.0f, 1.0f, 1.0f, 1.0f), "%s", Tr("LANGUAGE"));
   const std::string automatic = Format(
       Tr("System (%s)"),
       LanguageName(moderngekko::frontend::ResolveLanguage("auto", system_language)));
@@ -843,7 +928,9 @@ bool DrawSummaryTile(const SummaryTile& tile, float width, ImFont* bold, float s
   const ImVec2 size(width, SummaryTileHeight(scale));
   const ImVec2 min = ImGui::GetCursorScreenPos();
   const ImVec2 max(min.x + size.x, min.y + size.y);
-  const bool pressed = ImGui::InvisibleButton(tile.id, size);
+  // A gamepad or the keyboard can reach the cards that open a page.
+  const bool pressed = ImGui::InvisibleButton(
+      tile.id, size, tile.clickable ? ImGuiButtonFlags_EnableNav : ImGuiButtonFlags_None);
   const bool hovered = ImGui::IsItemHovered();
   const bool highlight = tile.clickable && hovered;
 
@@ -1070,7 +1157,8 @@ void DrawNewVersionNotice(const std::string& version, float scale)
   // As high as the line, so the CPU core's pill after it stays level.
   const ImVec2 position = ImGui::GetCursorScreenPos();
   const float line_height = std::max(ImGui::GetFrameHeight(), pill.y);
-  if (ImGui::InvisibleButton("##new_version", ImVec2(pill.x, line_height)))
+  if (ImGui::InvisibleButton("##new_version", ImVec2(pill.x, line_height),
+                             ImGuiButtonFlags_EnableNav))
   {
     SDL_OpenURL(DownloadPage());
     ImGui::SetClipboardText(DownloadPage());
@@ -1169,14 +1257,17 @@ std::string ReadPatchNotes(const fs::path& path)
 
 // The PLAY page's PATCH NOTES panel, at the given size: its heading stays put
 // and the notes scroll under it when they don't fit.
+// pad_scroll scrolls the notes (a gamepad's right stick).
 void DrawPatchNotes(const std::vector<moderngekko::frontend::PatchNoteLine>& notes, ImFont* bold,
-                    ImVec2 size)
+                    ImVec2 size, float pad_scroll)
 {
   using Kind = moderngekko::frontend::PatchNoteLine::Kind;
   ImGui::BeginChild("##patch_notes", size, ImGuiChildFlags_Borders,
                     ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
   ImGui::TextDisabled("%s", Tr("PATCH NOTES"));
   ImGui::BeginChild("##patch_notes_text");
+  if (pad_scroll != 0.0f)
+    ImGui::SetScrollY(ImGui::GetScrollY() + pad_scroll);
   ImGui::PushTextWrapPos(0.0f);
   for (const moderngekko::frontend::PatchNoteLine& line : notes)
   {
@@ -2267,12 +2358,12 @@ struct TesterHintLine
 // The tester under the profile line of the Controls page. It starts on that
 // line, with the Controller / Keyboard tabs at its right end when the profile
 // has both, then shows the matching drawing (or its list of inputs), with how
-// to use it on hint_line. The drawing is as tall as the room left above
-// page_bottom (the bottom of the page, in screen coordinates) allows, so the
-// page doesn't scroll.
+// to use it on hint_line while the page tests the controller (testing). The
+// drawing is as tall as the room left above page_bottom (the bottom of the
+// page, in screen coordinates) allows, so the page doesn't scroll.
 void DrawControllerTester(ControllerTester& tester, const LauncherImage& controller_art,
                           const LauncherImage& keyboard_art, ImFont* bold, float scale,
-                          float page_bottom, const TesterHintLine& hint_line)
+                          float page_bottom, const TesterHintLine& hint_line, bool testing)
 {
   const ImGuiStyle& style = ImGui::GetStyle();
   if (tester.has_pad_sources && tester.has_key_sources)
@@ -2306,6 +2397,8 @@ void DrawControllerTester(ControllerTester& tester, const LauncherImage& control
   // end of the heading's line ("..." cuts it if the line is too short).
   const auto draw_hint = [&](const std::string& text, ImVec4 color)
   {
+    if (!testing)
+      return;
     const float room = hint_line.right - hint_line.heading_end - style.ItemSpacing.x * 2.0f;
     const std::string shown = FitTextToWidth(ImGui::GetFont(), ImGui::GetFontSize(), text, room);
     const float width = ImGui::CalcTextSize(shown.c_str()).x;
@@ -2468,7 +2561,10 @@ int main(int argc, char** argv)
   IMGUI_CHECKVERSION();
   ImGui::CreateContext();
   ImGuiIO& io = ImGui::GetIO();
-  io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+  // The keyboard and any gamepad move through the launcher: the arrows, the
+  // D-pad or the left stick move, Enter or A chooses, and Escape or B goes back
+  // to the sidebar; LB and RB change the page (see the main loop).
+  io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard | ImGuiConfigFlags_NavEnableGamepad;
   io.IniFilename = nullptr;
   ImGui::StyleColorsDark();
   ApplyLauncherTheme(ImGui::GetStyle());
@@ -2478,6 +2574,7 @@ int main(int argc, char** argv)
   // UI a comfortable reading size while the Play page still fits the window.
   const LauncherFonts fonts = LoadInterfaceFont(release_directory, 18.0f);
   ImGui_ImplSDL3_InitForSDLRenderer(window, renderer);
+  ImGui_ImplSDL3_SetGamepadMode(ImGui_ImplSDL3_GamepadMode_AutoAll);
   ImGui_ImplSDLRenderer3_Init(renderer);
   const LauncherBanner banner = LoadLauncherBanner(renderer, release_directory);
   const LauncherImage controller_art = LoadLauncherImage(
@@ -2823,6 +2920,40 @@ int main(int argc, char** argv)
   bool done = false;
   LaunchMode launch_mode = LaunchMode::None;
   LauncherPage current_page = LauncherPage::Play;
+  // Moving through the launcher with a gamepad.
+  // The Controls page tests the controller: while it does, the gamepad's
+  // buttons and the keyboard's keys only light the tester up, and neither
+  // moves through the launcher. Opening the page starts the test; holding B,
+  // or Escape, stops it, and Test buttons starts it again.
+  bool controls_testing = true;
+  // The page was reached with LB or RB: passing through Controls that way
+  // doesn't start the test.
+  bool page_by_shoulder = false;
+  LauncherPage shown_page = current_page;
+  // Next frame, the sidebar's item for the page shown takes the focus (after
+  // B, LB or RB).
+  bool focus_sidebar = false;
+  // At the start and after the game, a gamepad moves nothing until all its
+  // buttons are let go: one still held from the game mustn't press PLAY.
+  bool pad_waits_for_release = true;
+  // The last thing used was a gamepad: the footer shows what its buttons do.
+  bool pad_in_use = false;
+  PadStyle pad_style = PadStyle::Xbox;
+  const auto read_pad_style = [&] {
+    int count = 0;
+    SDL_JoystickID* pads = SDL_GetGamepads(&count);
+    pad_style = pads && count > 0 ? PadStyleOf(SDL_GetGamepadTypeForID(pads[0])) : PadStyle::Xbox;
+    SDL_free(pads);
+  };
+  read_pad_style();
+  // Last frame's popups, active item and screenshot viewer: B closes them
+  // before it goes back to the sidebar.
+  bool popup_was_open = false;
+  bool item_was_active = false;
+  bool viewer_was_open = false;
+  // The focus was on the sidebar last frame: right goes into the page.
+  bool sidebar_was_focused = false;
+  bool enter_page = false;
   // Which session the Netplay window is about to start (Host or Join).
   LaunchMode netplay_dialog_mode = LaunchMode::Host;
   // PLAY page summary, read again whenever the page is opened: the time
@@ -3028,6 +3159,26 @@ int main(int argc, char** argv)
     }
     return session_result;
   };
+  // Shows a page the way its sidebar item does, with what opening it reads
+  // again.
+  const auto go_to_page = [&](LauncherPage page) {
+    switch (page)
+    {
+    case LauncherPage::Play:
+      summary_stale = true;
+      break;
+    case LauncherPage::Mods:
+      open_mods_page();
+      break;
+    case LauncherPage::Screenshots:
+      if (screenshot_gallery)
+        screenshot_gallery->Refresh();
+      break;
+    default:
+      break;
+    }
+    current_page = page;
+  };
   while (!done)
   {
     bool controllers_changed = false;
@@ -3044,15 +3195,32 @@ int main(int argc, char** argv)
       }
     }
     if (controllers_changed)
+    {
       refresh_controllers();
+      read_pad_style();
+    }
     UpdateControllerTester(controller_tester, current_page == LauncherPage::Controls,
                            controller_profile, controllers);
-    // On the Controls page the keyboard is being tested: its keys must not
-    // also move ImGui's focus or press the page's buttons.
-    if (current_page == LauncherPage::Controls)
+    // Opening the Controls page starts testing the controller, unless LB or
+    // RB only pass through it (Test buttons or Y start it then). While it
+    // tests, the keyboard's keys and the gamepad's buttons must not also move
+    // ImGui's focus or press the page's buttons.
+    if (current_page != shown_page)
+    {
+      if (current_page == LauncherPage::Controls)
+        controls_testing = !page_by_shoulder;
+      shown_page = current_page;
+    }
+    page_by_shoulder = false;
+    const bool testing_controls = current_page == LauncherPage::Controls && controls_testing;
+    if (testing_controls)
       io.ConfigFlags &= ~ImGuiConfigFlags_NavEnableKeyboard;
     else
       io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+    if (testing_controls || pad_waits_for_release)
+      io.ConfigFlags &= ~ImGuiConfigFlags_NavEnableGamepad;
+    else
+      io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;
 
     {
       std::lock_guard lock(dialog.mutex);
@@ -3081,11 +3249,112 @@ int main(int argc, char** argv)
     // before the widgets run, so an action that fails again this frame shows
     // its fresh message instead of an outdated one.
     if (ImGui::IsMouseClicked(ImGuiMouseButton_Left) || ImGui::IsKeyPressed(ImGuiKey_Enter) ||
-        ImGui::IsKeyPressed(ImGuiKey_KeypadEnter) || ImGui::IsKeyPressed(ImGuiKey_Space))
+        ImGui::IsKeyPressed(ImGuiKey_KeypadEnter) || ImGui::IsKeyPressed(ImGuiKey_Space) ||
+        ImGui::IsKeyPressed(ImGuiKey_GamepadFaceDown))
     {
       std::lock_guard lock(dialog.mutex);
       dialog.error.clear();
     }
+    // The gamepad: what was used last, the buttons still held after the
+    // game, and B, LB and RB.
+    const bool pad_moves = (io.ConfigFlags & ImGuiConfigFlags_NavEnableGamepad) != 0;
+    {
+      bool pad_pressed = false;
+      bool pad_down = false;
+      for (int key = ImGuiKey_GamepadStart; key <= ImGuiKey_GamepadRStickDown; ++key)
+      {
+        pad_pressed = pad_pressed || ImGui::IsKeyPressed(static_cast<ImGuiKey>(key), false);
+        pad_down = pad_down || ImGui::IsKeyDown(static_cast<ImGuiKey>(key));
+      }
+      bool key_pressed = false;
+      for (int key = ImGuiKey_NamedKey_BEGIN; key < ImGuiKey_GamepadStart && !key_pressed; ++key)
+        key_pressed = ImGui::IsKeyPressed(static_cast<ImGuiKey>(key), false);
+      if (pad_pressed)
+        pad_in_use = true;
+      else if (key_pressed || ImGui::IsAnyMouseDown() || io.MouseDelta.x != 0.0f ||
+               io.MouseDelta.y != 0.0f)
+        pad_in_use = false;
+      if (!pad_down)
+        pad_waits_for_release = false;
+    }
+    // Escape or B in a window of ours (Netplay, the complete save's
+    // question) is its Cancel. Not when it ends typing in a text box.
+    const bool popup_cancel =
+        !item_was_active && (ImGui::IsKeyPressed(ImGuiKey_Escape, false) ||
+                             (pad_moves && ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight, false)));
+    if (testing_controls)
+    {
+      // Holding B (any gamepad's) for a moment, or Escape, stops the test.
+      const ImGuiKeyData* back = ImGui::GetKeyData(ImGuiKey_GamepadFaceRight);
+      constexpr float HOLD_TO_STOP = 0.8f;
+      if (ImGui::IsKeyPressed(ImGuiKey_Escape, false) ||
+          (back->Down && back->DownDuration >= HOLD_TO_STOP &&
+           back->DownDurationPrev < HOLD_TO_STOP))
+      {
+        controls_testing = false;
+        focus_sidebar = true;
+        // B is still held: it moves nothing until it is let go.
+        pad_waits_for_release = true;
+      }
+    }
+    else if (!popup_was_open && !item_was_active && !viewer_was_open &&
+             !ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel))
+    {
+      // LB and RB: the page before or after this one in the sidebar.
+      const int step = pad_moves ? static_cast<int>(ImGui::IsKeyPressed(ImGuiKey_GamepadR1, false)) -
+                                       static_cast<int>(ImGui::IsKeyPressed(ImGuiKey_GamepadL1, false)) :
+                                   0;
+      if (step != 0)
+      {
+        const auto shown = std::ranges::find(LAUNCHER_PAGES, current_page,
+                                             &std::pair<LauncherPage, const char*>::first);
+        const auto index = std::distance(LAUNCHER_PAGES.begin(), shown) + step;
+        if (index >= 0 && index < static_cast<std::ptrdiff_t>(LAUNCHER_PAGES.size()))
+        {
+          go_to_page(LAUNCHER_PAGES[static_cast<std::size_t>(index)].first);
+          focus_sidebar = true;
+          page_by_shoulder = true;
+        }
+      }
+      // Y on the Controls page: test the buttons, as Test buttons does.
+      if (pad_moves && step == 0 && current_page == LauncherPage::Controls &&
+          controller_profile_exists && ImGui::IsKeyPressed(ImGuiKey_GamepadFaceUp, false))
+        controls_testing = true;
+      // B or Escape: back to the sidebar, on the page shown.
+      if (ImGui::IsKeyPressed(ImGuiKey_Escape, false) ||
+          (pad_moves && ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight, false)))
+        focus_sidebar = true;
+      // Right from the sidebar, or the first move with nothing focused yet:
+      // into the page, on its first control.
+      const bool right = ImGui::IsKeyPressed(ImGuiKey_RightArrow) ||
+                         (pad_moves && (ImGui::IsKeyPressed(ImGuiKey_GamepadDpadRight) ||
+                                        ImGui::IsKeyPressed(ImGuiKey_GamepadLStickRight)));
+      bool first_move = false;
+      if (GImGui->NavId == 0)
+      {
+        for (const ImGuiKey key :
+             {ImGuiKey_UpArrow, ImGuiKey_DownArrow, ImGuiKey_LeftArrow, ImGuiKey_RightArrow})
+          first_move = first_move || ImGui::IsKeyPressed(key, false);
+        if (pad_moves)
+          for (const ImGuiKey key :
+               {ImGuiKey_GamepadDpadUp, ImGuiKey_GamepadDpadDown, ImGuiKey_GamepadDpadLeft,
+                ImGuiKey_GamepadDpadRight, ImGuiKey_GamepadLStickUp, ImGuiKey_GamepadLStickDown,
+                ImGuiKey_GamepadLStickLeft, ImGuiKey_GamepadLStickRight})
+            first_move = first_move || ImGui::IsKeyPressed(key, false);
+      }
+      if ((sidebar_was_focused && right) || first_move)
+      {
+        ImGui::NavMoveRequestCancel();
+        enter_page = true;
+      }
+    }
+    // The right stick scrolls the page (or the patch notes): its texts have
+    // nothing for the D-pad to stop on.
+    const float pad_scroll =
+        pad_moves ? (ImGui::GetKeyData(ImGuiKey_GamepadRStickDown)->AnalogValue -
+                     ImGui::GetKeyData(ImGuiKey_GamepadRStickUp)->AnalogValue) *
+                        900.0f * scale * io.DeltaTime :
+                    0.0f;
     const ImGuiViewport* viewport = ImGui::GetMainViewport();
     ImGui::SetNextWindowPos(viewport->WorkPos);
     ImGui::SetNextWindowSize(viewport->WorkSize);
@@ -3140,35 +3409,30 @@ int main(int argc, char** argv)
     // The two columns show the window background; only panels inside a page
     // (such as GAME STATUS) use the theme's panel colour.
     ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
+    // The sidebar and the page each keep the D-pad to themselves: Dear
+    // ImGui's up and down would otherwise jump between them. Right goes into
+    // the page, B back to the sidebar (both above).
     ImGui::BeginChild("##navigation", ImVec2(170.0f * scale, body_height));
     ImGui::PopStyleColor();
-    if (DrawNavigationItem(Tr("PLAY"), current_page == LauncherPage::Play, fonts.bold, scale))
+    bool sidebar_focused = false;
+    for (const auto& [page, label] : LAUNCHER_PAGES)
     {
-      current_page = LauncherPage::Play;
-      summary_stale = true;
+      if (DrawNavigationItem(Tr(label), current_page == page, fonts.bold, scale))
+      {
+        go_to_page(page);
+        // Choosing Controls tests the controller, even when the page is
+        // already shown (reached with LB or RB).
+        if (page == LauncherPage::Controls)
+          controls_testing = true;
+      }
+      sidebar_focused = sidebar_focused || ImGui::IsItemFocused();
+      if (focus_sidebar && current_page == page)
+      {
+        ImGui::FocusItem();
+        ImGui::SetNavCursorVisible(true);
+        focus_sidebar = false;
+      }
     }
-    if (DrawNavigationItem(Tr("Settings"), current_page == LauncherPage::Settings, fonts.bold,
-                           scale))
-      current_page = LauncherPage::Settings;
-    if (DrawNavigationItem(Tr("Controls"), current_page == LauncherPage::Controls, fonts.bold,
-                           scale))
-      current_page = LauncherPage::Controls;
-    if (DrawNavigationItem(Tr("Game Files"), current_page == LauncherPage::GameFiles, fonts.bold,
-                           scale))
-      current_page = LauncherPage::GameFiles;
-    if (DrawNavigationItem(Tr("Mods & expansions"), current_page == LauncherPage::Mods, fonts.bold,
-                           scale))
-      open_mods_page();
-    if (DrawNavigationItem(Tr("Screenshots"), current_page == LauncherPage::Screenshots,
-                           fonts.bold, scale))
-    {
-      current_page = LauncherPage::Screenshots;
-      if (screenshot_gallery)
-        screenshot_gallery->Refresh();
-    }
-    if (DrawNavigationItem(Tr("Credits"), current_page == LauncherPage::Credits, fonts.bold,
-                           scale))
-      current_page = LauncherPage::Credits;
     {
       const std::string previous = config.language;
       if (DrawLanguageMenu(config.language, system_language, scale))
@@ -3190,11 +3454,24 @@ int main(int argc, char** argv)
         }
       }
     }
+    sidebar_focused = sidebar_focused || ImGui::IsItemFocused();
+    sidebar_was_focused = sidebar_focused;
     ImGui::EndChild();
     ImGui::SameLine();
     ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
     ImGui::BeginChild("##page", ImVec2(0.0f, body_height));
     ImGui::PopStyleColor();
+    if (enter_page)
+    {
+      // The focus goes to the page's first control (PLAY on the PLAY page).
+      ImGuiWindow* page_window = ImGui::GetCurrentWindow();
+      ImGui::FocusWindow(page_window);
+      ImGui::NavInitWindow(page_window, true);
+      ImGui::SetNavCursorVisible(true);
+      enter_page = false;
+    }
+    if (current_page != LauncherPage::Play && pad_scroll != 0.0f)
+      ImGui::SetScrollY(ImGui::GetScrollY() + pad_scroll);
     {
       if (current_page == LauncherPage::Play)
       {
@@ -3454,7 +3731,7 @@ int main(int argc, char** argv)
               ImGui::CloseCurrentPopup();
             }
             ImGui::SameLine();
-            if (ImGui::Button(Tr("Cancel"), ImVec2(button_width, 38 * scale)))
+            if (ImGui::Button(Tr("Cancel"), ImVec2(button_width, 38 * scale)) || popup_cancel)
               ImGui::CloseCurrentPopup();
             ImGui::EndPopup();
           }
@@ -3464,7 +3741,7 @@ int main(int argc, char** argv)
             // The cards go under whichever column ends lower.
             const float left_bottom = ImGui::GetCursorPosY();
             ImGui::SetCursorPos(ImVec2(columns_top.x + row_width - notes_width, columns_top.y));
-            DrawPatchNotes(patch_notes, fonts.bold, notes_size);
+            DrawPatchNotes(patch_notes, fonts.bold, notes_size, pad_scroll);
             ImGui::SetCursorPosY(std::max(ImGui::GetCursorPosY(), left_bottom));
           }
 
@@ -4093,10 +4370,22 @@ int main(int argc, char** argv)
     // The bottom of the page, which the tester's drawing grows down to.
     const float page_bottom = ImGui::GetCursorScreenPos().y + ImGui::GetContentRegionAvail().y;
     BeginSection("##controls_mapping", Tr("BUTTON MAPPING"));
-    // The heading's line, where the tester says how to use it.
+    // The heading's line, where the tester says how to use it while it tests
+    // the controller, and has Test buttons to start that again otherwise.
     const TesterHintLine hint_line{ImGui::GetItemRectMin().y, ImGui::GetItemRectMax().x,
                                    ImGui::GetCursorScreenPos().x +
                                        ImGui::GetContentRegionAvail().x};
+    if (!controls_testing && controller_profile_exists)
+    {
+      const ImVec2 cursor = ImGui::GetCursorScreenPos();
+      const char* test_label = Tr("Test buttons");
+      ImGui::SetCursorScreenPos(ImVec2(hint_line.right - ImGui::CalcTextSize(test_label).x -
+                                           ImGui::GetStyle().FramePadding.x * 2.0f,
+                                       hint_line.top));
+      if (ImGui::SmallButton(test_label))
+        controls_testing = true;
+      ImGui::SetCursorScreenPos(cursor);
+    }
     ImGui::PushTextWrapPos(0.0f);
     if (controller_profile_exists)
       ImGui::TextDisabled("%s", Format(Tr("Using %s from your user folder."),
@@ -4110,7 +4399,7 @@ int main(int argc, char** argv)
     // The tester starts on the line above, where it puts its tabs.
     if (controller_profile_exists)
       DrawControllerTester(controller_tester, controller_art, keyboard_art, fonts.bold, scale,
-                           page_bottom, hint_line);
+                           page_bottom, hint_line, controls_testing);
     EndSection();
     }
       if (current_page == LauncherPage::GameFiles)
@@ -4265,7 +4554,7 @@ int main(int argc, char** argv)
             ImGui::CloseCurrentPopup();
           }
           ImGui::SameLine();
-          if (ImGui::Button(Tr("Cancel")))
+          if (ImGui::Button(Tr("Cancel")) || popup_cancel)
             ImGui::CloseCurrentPopup();
           ImGui::EndPopup();
         }
@@ -4431,7 +4720,55 @@ int main(int argc, char** argv)
     }
     ImGui::Spacing();
     ImGui::Separator();
-    ImGui::TextWrapped("%s", Format(Tr("Controller: %s"), controller_status.Text().c_str()).c_str());
+    // The controller's state; on the right, while a gamepad is in use, what
+    // its buttons do here.
+    {
+      const std::string status = Format(Tr("Controller: %s"), controller_status.Text().c_str());
+      std::vector<FooterHint> hints;
+      if (pad_in_use && (io.BackendFlags & ImGuiBackendFlags_HasGamepad))
+      {
+        if (testing_controls)
+          hints = {{PadButton::East, std::nullopt, Tr("Hold to stop testing")}};
+        else if (current_page == LauncherPage::Controls && controller_profile_exists &&
+                 !popup_was_open)
+          hints = {{PadButton::North, std::nullopt, Tr("Test buttons")},
+                   {PadButton::South, std::nullopt, Tr("Accept")},
+                   {PadButton::East, std::nullopt, Tr("Go back")},
+                   {PadButton::LeftShoulder, PadButton::RightShoulder, Tr("Pages")}};
+        else if (viewer_was_open)
+          hints = {{PadButton::LeftShoulder, PadButton::RightShoulder, Tr("Newer / older")},
+                   {PadButton::East, std::nullopt, Tr("Go back")}};
+        else if (popup_was_open)
+          hints = {{PadButton::South, std::nullopt, Tr("Accept")},
+                   {PadButton::East, std::nullopt, Tr("Go back")}};
+        else
+          hints = {{PadButton::South, std::nullopt, Tr("Accept")},
+                   {PadButton::East, std::nullopt, Tr("Go back")},
+                   {PadButton::LeftShoulder, PadButton::RightShoulder, Tr("Pages")}};
+      }
+      if (hints.empty())
+      {
+        ImGui::TextWrapped("%s", status.c_str());
+      }
+      else
+      {
+        const ImVec2 line_min = ImGui::GetCursorScreenPos();
+        const float right = line_min.x + ImGui::GetContentRegionAvail().x;
+        const float hints_width =
+            DrawFooterHints(hints, pad_style, fonts.bold, line_min, right, false);
+        ImGui::TextUnformatted(FitTextToWidth(ImGui::GetFont(), ImGui::GetFontSize(), status,
+                                              ImGui::GetContentRegionAvail().x - hints_width -
+                                                  ImGui::GetStyle().ItemSpacing.x * 3.0f)
+                                   .c_str());
+        DrawFooterHints(hints, pad_style, fonts.bold, line_min, right, true);
+      }
+    }
+    // What B closes next frame, before it goes back to the sidebar.
+    popup_was_open =
+        ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel);
+    item_was_active = ImGui::IsAnyItemActive();
+    viewer_was_open = current_page == LauncherPage::Screenshots && screenshot_gallery &&
+                      screenshot_gallery->Viewing();
     ImGui::End();
 
     ImGui::Render();
@@ -4453,6 +4790,7 @@ int main(int argc, char** argv)
       music.Stop();
       result = launch_game(launch_mode);
       launch_mode = LaunchMode::None;
+      pad_waits_for_release = true;
       // Quit game in the in-game menu: the launcher closes, still hidden.
       if (quit_from_game)
         break;

@@ -14,6 +14,8 @@
 
 #include <SDL3/SDL.h>
 #include <imgui.h>
+// FocusItem(): back from a screenshot, the focus goes to its small picture.
+#include <imgui_internal.h>
 
 #include <algorithm>
 #include <cmath>
@@ -62,6 +64,10 @@ public:
   // The folder is looked at again on the next Draw, such as after the game,
   // which may have taken new ones.
   void Refresh() { m_listed_at = 0; }
+
+  // A screenshot is shown large (its keys are taken: LB and RB go through
+  // the screenshots, B back to them all).
+  bool Viewing() const { return m_viewing.has_value(); }
 
   // The whole page, each frame it is shown.
   void Draw(SDL_Renderer* renderer, ImFont* bold, float scale)
@@ -373,6 +379,11 @@ private:
       // aren't unless asked.
       const bool chosen = ImGui::InvisibleButton("##screenshot", ImVec2(cell_width, picture_height),
                                                  ImGuiButtonFlags_EnableNav);
+      if (!m_focus_after_viewing.empty() && file.path == m_focus_after_viewing)
+      {
+        ImGui::FocusItem();
+        m_focus_after_viewing.clear();
+      }
       const bool highlighted = ImGui::IsItemHovered() || ImGui::IsItemFocused();
       list->AddRectFilled(min, max, IM_COL32(12, 12, 14, 255), rounding);
       Picture& picture = m_thumbnails[file.path];
@@ -496,7 +507,10 @@ private:
         AskToDelete(file.path);
     }
     if (back)
+    {
+      m_focus_after_viewing = file.path;
       m_viewing.reset();
+    }
     else if (newer && index > 0)
       go(index - 1);
     else if (older && index + 1 < count)
@@ -572,13 +586,17 @@ private:
       }
     }
     ImGui::SameLine();
-    if (ImGui::Button(Tr("Cancel")))
+    // Escape or a gamepad's B is Cancel too.
+    if (ImGui::Button(Tr("Cancel")) || ImGui::IsKeyPressed(ImGuiKey_Escape, false) ||
+        ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight, false))
       ImGui::CloseCurrentPopup();
     ImGui::EndPopup();
   }
 
   std::filesystem::path m_folder;
   std::filesystem::path m_cache;
+  // The screenshot just left, whose small picture takes the focus.
+  std::filesystem::path m_focus_after_viewing;
   bool m_recursive = false;
   PictureSize m_large_box = LARGE_BOX;
   bool m_renderer_checked = false;

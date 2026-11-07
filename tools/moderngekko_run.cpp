@@ -619,6 +619,23 @@ int RunMain(int argc, char **argv) {
         module_path = user_module;
     }
   }
+  // StaticRecomp runs the recompiled module; without one it would interpret
+  // the game's code, far too slowly to play. A release has none (the module
+  // is made from the game's own code), so JIT64 plays instead.
+  {
+    const char *core = std::getenv("MODERNGEKKO_STATICRECOMP");
+    const bool static_recomp = !core || !*core || *core != '0';
+    if (static_recomp && module_path.empty()) {
+#if defined(_WIN32)
+      _putenv_s("MODERNGEKKO_STATICRECOMP", "0");
+#else
+      setenv("MODERNGEKKO_STATICRECOMP", "0", 1);
+#endif
+      std::cout << "cpu core: JIT64 instead of StaticRecomp: no g"
+                << inspected.metadata->disc_id << "_recomp" << LibrarySuffix()
+                << " beside the runner or in StaticRecompModules\n";
+    }
+  }
   if (!module_path.empty())
     config.module =
         moderngekko::ModuleSource::DynamicPath(std::move(module_path));

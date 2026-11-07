@@ -392,8 +392,11 @@ inline void BeginSection(const char* id, const char* heading)
   // several sections (Settings) needs less scrolling.
   const ImVec2 padding = ImGui::GetStyle().WindowPadding;
   ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(padding.x, padding.y * 0.75f));
+  // Flattened: a gamepad's D-pad (or the keyboard's arrows) goes from a
+  // control in one panel to one in the next without entering the panel first.
   ImGui::BeginChild(id, ImVec2(0.0f, 0.0f),
-                    ImGuiChildFlags_Borders | ImGuiChildFlags_AutoResizeY);
+                    ImGuiChildFlags_Borders | ImGuiChildFlags_AutoResizeY |
+                        ImGuiChildFlags_NavFlattened);
   ImGui::PopStyleVar();
   ImGui::TextDisabled("%s", heading);
 }

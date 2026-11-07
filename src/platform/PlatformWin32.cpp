@@ -4,8 +4,18 @@
 // This fork's copy of vendor/dolphin/Source/Core/DolphinNoGUI/PlatformWin32.cpp
 // (RecompCore cf8ceb8). The changes: the savestate key (F1) and the File
 // menu's Save State and Load State exist only when the build keeps savestates
-// (MODERNGEKKO_SAVESTATES, CMakeLists.txt), and resource.h is included by its
-// path under vendor/dolphin/Source/Core.
+// (MODERNGEKKO_SAVESTATES, CMakeLists.txt), and so does holding Space to run
+// the game faster; resource.h is included by its path under
+// vendor/dolphin/Source/Core. And the keys and the window work as in the X11
+// and Wayland copies: F9 takes the runtime's screenshot, at the resolution
+// chosen for screenshots (src/runtime/screenshot_keys.hpp); F10 (pause), as
+// the File menu's Pause, waits while one is taken; Alt+Enter and F11 switch
+// to fullscreen and back (Escape leaves it); Ctrl+Escape closes the game,
+// Escape alone no longer does. The window opens at the size chosen in the
+// launcher, or one that fits the primary monitor, in its middle
+// (src/runtime/window_size.hpp), and fullscreen when the launcher says so.
+// Whether it has the focus is known, so the game reads the controllers only
+// then, unless background input is on.
 
 // Without the CMake option (CMakeLists.txt always passes it), the window keeps
 // its savestate key and menu entries, as before.
@@ -27,6 +37,8 @@
 #include "Common/CommonPaths.h"
 #include "Common/FileUtil.h"
 #include "Common/StringUtil.h"
+#include "../runtime/screenshot_keys.hpp"
+#include "../runtime/window_size.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -55,11 +67,33 @@ constexpr UINT ID_FULLSCREEN = 41004;
 #if MODERNGEKKO_SAVESTATES
 constexpr UINT ID_LOAD_STATE_FIRST = 41100;
 constexpr UINT ID_LOAD_STATE_LAST = 41199;
-#endif
 
 // Hold-to-fast-forward target. 2x is fast enough to skip a cutscene without
 // outrunning what most hosts can actually emulate.
 constexpr float FAST_FORWARD_SPEED = 2.0f;
+#endif
+
+// The window's style, as CreateRenderWindow makes it.
+constexpr DWORD WINDOW_STYLE = WS_OVERLAPPEDWINDOW;
+constexpr DWORD WINDOW_EX_STYLE = WS_EX_CLIENTEDGE;
+
+// Bit 30 of a key message's lParam: the key was already down, so this is the
+// keyboard's auto-repeat.
+bool IsRepeat(LPARAM lParam)
+{
+  return (static_cast<ULONG_PTR>(lParam) & (1u << 30)) != 0;
+}
+
+// Pauses the game, or lets it run again. Not while a screenshot is taken: a
+// paused game may be running a few frames for it.
+void TogglePause()
+{
+  if (moderngekko::detail::ScreenshotBusy())
+    return;
+  auto& system = Core::System::GetInstance();
+  const bool paused = Core::GetState(system) == Core::State::Paused;
+  Core::SetState(system, paused ? Core::State::Running : Core::State::Paused);
+}
 
 class PlatformWin32 final : public Platform
 {
@@ -144,10 +178,36 @@ bool PlatformWin32::RegisterRenderWindowClass()
 
 bool PlatformWin32::CreateRenderWindow()
 {
-  m_hwnd = CreateWindowEx(WS_EX_CLIENTEDGE, WINDOW_CLASS_NAME, _T("Dolphin"), WS_OVERLAPPEDWINDOW,
-                          m_window_x < 0 ? CW_USEDEFAULT : m_window_x,
-                          m_window_y < 0 ? CW_USEDEFAULT : m_window_y, m_window_width,
-                          m_window_height, nullptr, nullptr, GetModuleHandle(nullptr), this);
+  // The size chosen in the launcher, or one that fits the screen, in the
+  // middle of the primary monitor's work area (the desktop without its
+  // taskbar). The size is the game's picture: the frame and the menu bar go
+  // around it, and the whole window is centred.
+  moderngekko::detail::ScreenArea screen;
+  MONITORINFO monitor{};
+  monitor.cbSize = sizeof(monitor);
+  if (GetMonitorInfo(MonitorFromPoint(POINT{0, 0}, MONITOR_DEFAULTTOPRIMARY), &monitor))
+  {
+    screen = {monitor.rcWork.left, monitor.rcWork.top, monitor.rcWork.right - monitor.rcWork.left,
+              monitor.rcWork.bottom - monitor.rcWork.top};
+  }
+  const moderngekko::detail::WindowPlace place =
+      moderngekko::detail::PlaceWindow(moderngekko::detail::RequestedWindowSize(), screen);
+  RECT outer{0, 0, place.width, place.height};
+  AdjustWindowRectEx(&outer, WINDOW_STYLE, TRUE, WINDOW_EX_STYLE);
+  m_window_width = outer.right - outer.left;
+  m_window_height = outer.bottom - outer.top;
+  m_window_x = CW_USEDEFAULT;
+  m_window_y = CW_USEDEFAULT;
+  if (screen.width > 0 && screen.height > 0)
+  {
+    m_window_x = screen.x + std::max(0, (screen.width - m_window_width) / 2);
+    m_window_y = screen.y + std::max(0, (screen.height - m_window_height) / 2);
+  }
+
+  // The title is the game's as soon as it starts (SetTitle).
+  m_hwnd = CreateWindowEx(WINDOW_EX_STYLE, WINDOW_CLASS_NAME, _T(""), WINDOW_STYLE, m_window_x,
+                          m_window_y, m_window_width, m_window_height, nullptr, nullptr,
+                          GetModuleHandle(nullptr), this);
   if (!m_hwnd)
   {
     MessageBox(nullptr, _T("CreateWindowEx failed."), _T("Error"), MB_ICONERROR | MB_OK);
@@ -177,7 +237,7 @@ bool PlatformWin32::CreateMenus()
 #endif
   // Checked state is refreshed from the core when the menu opens, so it cannot
   // drift out of step with an emulation that was paused some other way.
-  AppendMenuW(m_file_menu, MF_STRING, ID_PAUSE, L"&Pause");
+  AppendMenuW(m_file_menu, MF_STRING, ID_PAUSE, L"&Pause\tF10");
 
   AppendMenuW(m_view_menu, MF_STRING, ID_FULLSCREEN, L"&Fullscreen\tAlt+Enter");
   AppendMenuW(m_view_menu, MF_STRING, ID_MUTE, L"&Mute Audio");
@@ -280,6 +340,7 @@ void PlatformWin32::ToggleFullscreen()
                  monitor.rcMonitor.bottom - monitor.rcMonitor.top,
                  SWP_NOOWNERZORDER | SWP_FRAMECHANGED);
     m_fullscreen = true;
+    m_window_fullscreen = true;
     return;
   }
 
@@ -290,6 +351,7 @@ void PlatformWin32::ToggleFullscreen()
                m_windowed_rect.bottom - m_windowed_rect.top,
                SWP_NOOWNERZORDER | SWP_FRAMECHANGED | SWP_NOZORDER);
   m_fullscreen = false;
+  m_window_fullscreen = false;
 }
 
 bool PlatformWin32::Init()
@@ -297,9 +359,10 @@ bool PlatformWin32::Init()
   if (!RegisterRenderWindowClass() || !CreateRenderWindow() || !CreateMenus())
     return false;
 
-  // TODO: Enter fullscreen if enabled.
+  // Fullscreen from the start when the launcher says so.
   if (Config::Get(Config::MAIN_FULLSCREEN))
   {
+    ToggleFullscreen();
     ProcessEvents();
   }
 
@@ -397,17 +460,24 @@ LRESULT PlatformWin32::WndProc(const HWND hwnd, const UINT msg, const WPARAM wPa
 
   case WM_KEYDOWN:
 #if MODERNGEKKO_SAVESTATES
-    // Bit 30 of lParam is the previous key state: ignore auto-repeat, or holding
-    // F1 down would write a state every few milliseconds.
-    if (wParam == VK_F1 && (static_cast<ULONG_PTR>(lParam) & (1u << 30)) == 0)
+    // Ignore auto-repeat, or holding F1 down would write a state every few
+    // milliseconds.
+    if (wParam == VK_F1 && !IsRepeat(lParam))
     {
       platform->SaveStateToStatesDirectory();
       return 0;
     }
-#endif
     if (wParam == VK_SPACE)
     {
       Config::SetCurrent(Config::MAIN_EMULATION_SPEED, FAST_FORWARD_SPEED);
+      return 0;
+    }
+#endif
+    if (wParam == VK_F9)
+    {
+      // One screenshot per press, not one per auto-repeat.
+      if (!IsRepeat(lParam))
+        moderngekko::detail::TakeScreenshot();
       return 0;
     }
     else if (wParam == VK_F11)
@@ -415,17 +485,19 @@ LRESULT PlatformWin32::WndProc(const HWND hwnd, const UINT msg, const WPARAM wPa
       platform->ToggleFullscreen();
       return 0;
     }
+    else if (wParam == VK_ESCAPE && (GetKeyState(VK_CONTROL) & 0x8000) != 0)
+    {
+      platform->RequestShutdown();
+      return 0;
+    }
     else if (wParam == VK_ESCAPE && platform->m_fullscreen)
     {
       platform->ToggleFullscreen();
       return 0;
     }
-    else if (wParam == VK_ESCAPE)
-    {
-      platform->RequestShutdown();
-    }
     break;
 
+#if MODERNGEKKO_SAVESTATES
   case WM_KEYUP:
     if (wParam == VK_SPACE)
     {
@@ -433,17 +505,35 @@ LRESULT PlatformWin32::WndProc(const HWND hwnd, const UINT msg, const WPARAM wPa
       return 0;
     }
     break;
+#endif
+
+  case WM_SETFOCUS:
+    if (platform)
+      platform->m_window_focus = true;
+    break;
 
   case WM_KILLFOCUS:
+    if (platform)
+      platform->m_window_focus = false;
+#if MODERNGEKKO_SAVESTATES
     // Never leave emulation running fast because Space was released while
     // another window had focus and the key-up went elsewhere.
     Config::SetCurrent(Config::MAIN_EMULATION_SPEED, 1.0f);
+#endif
     break;
 
   case WM_SYSKEYDOWN:
     if (wParam == VK_RETURN && (GetKeyState(VK_MENU) & 0x8000) != 0)
     {
       platform->ToggleFullscreen();
+      return 0;
+    }
+    // F10 is a system key on Windows (it opens the menu bar): here it pauses,
+    // as on Linux.
+    if (wParam == VK_F10)
+    {
+      if (!IsRepeat(lParam))
+        TogglePause();
       return 0;
     }
     return DefWindowProc(hwnd, msg, wParam, lParam);
@@ -458,7 +548,6 @@ LRESULT PlatformWin32::WndProc(const HWND hwnd, const UINT msg, const WPARAM wPa
     if (!platform)
       break;
     const UINT command = LOWORD(wParam);
-    auto& system = Core::System::GetInstance();
 #if MODERNGEKKO_SAVESTATES
     if (command == ID_SAVE_STATE)
     {
@@ -467,8 +556,7 @@ LRESULT PlatformWin32::WndProc(const HWND hwnd, const UINT msg, const WPARAM wPa
 #endif
     if (command == ID_PAUSE)
     {
-      const bool paused = Core::GetState(system) == Core::State::Paused;
-      Core::SetState(system, paused ? Core::State::Running : Core::State::Paused);
+      TogglePause();
     }
     else if (command == ID_MUTE)
     {
@@ -483,7 +571,7 @@ LRESULT PlatformWin32::WndProc(const HWND hwnd, const UINT msg, const WPARAM wPa
     {
       const std::size_t index = command - ID_LOAD_STATE_FIRST;
       if (index < platform->m_load_state_paths.size())
-        State::LoadAs(system, platform->m_load_state_paths[index]);
+        State::LoadAs(Core::System::GetInstance(), platform->m_load_state_paths[index]);
     }
 #endif
     break;

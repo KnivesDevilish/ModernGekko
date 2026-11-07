@@ -531,6 +531,11 @@ inline constexpr Translation SPANISH_TEXTS[] = {
     {"PLANNED", "PLANEADO"},
     {"Story campaigns, characters, tracks and more, made by the community, without changing the original game files.", "Campañas de historia, personajes, pistas y más, creados por la comunidad, sin modificar los archivos originales del juego."},
     {"A long-term goal of the project.", "Una meta a largo plazo del proyecto."},
+    // Moving through the launcher with a gamepad
+    {"Pages", "Páginas"},
+    {"Newer / older", "Más reciente / más antigua"},
+    {"Hold to stop testing", "Mantén para dejar de probar"},
+    {"Test buttons", "Probar botones"},
 };
 // clang-format on
 
@@ -998,6 +1003,11 @@ inline constexpr Translation JAPANESE_TEXTS[] = {
     {"PLANNED", "予定"},
     {"Story campaigns, characters, tracks and more, made by the community, without changing the original game files.", "ストーリー、キャラクター、コースなど、コミュニティが作るコンテンツ。元のゲームファイルは変更しません。"},
     {"A long-term goal of the project.", "プロジェクトの長期的な目標です。"},
+    // Moving through the launcher with a gamepad
+    {"Pages", "ページ"},
+    {"Newer / older", "新しい / 古い"},
+    {"Hold to stop testing", "長押しでテスト終了"},
+    {"Test buttons", "ボタンをテスト"},
 };
 // clang-format on
 

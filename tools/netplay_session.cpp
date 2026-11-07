@@ -427,7 +427,9 @@ public:
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
     ImGuiIO &io = ImGui::GetIO();
-    io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+    // The keyboard and any gamepad move through the lobby, as in the
+    // launcher.
+    io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard | ImGuiConfigFlags_NavEnableGamepad;
     io.IniFilename = nullptr;
     // The launcher's look: its theme, its fonts and the lobby artwork.
     ImGui::StyleColorsDark();
@@ -437,6 +439,7 @@ public:
     const fs::path release_directory = ExecutableDirectory();
     m_fonts = ui::LoadInterfaceFont(release_directory, 18.0f);
     ImGui_ImplSDL3_InitForSDLRenderer(m_window, m_renderer);
+    ImGui_ImplSDL3_SetGamepadMode(ImGui_ImplSDL3_GamepadMode_AutoAll);
     ImGui_ImplSDLRenderer3_Init(m_renderer);
     m_art = ui::LoadLauncherImage(m_renderer, release_directory,
                                   "lobby-art.png", "lobby art");

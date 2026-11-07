@@ -312,7 +312,7 @@ inline LobbyActions DrawLobby(const LobbyView& view, LobbyState& state, const La
 
   // Right: the lobby.
   ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
-  ImGui::BeginChild("##lobby", ImVec2(0.0f, height));
+  ImGui::BeginChild("##lobby", ImVec2(0.0f, height), ImGuiChildFlags_NavFlattened);
   ImGui::PopStyleColor();
 
   ImGui::PushFont(bold, style.FontSizeBase * 1.35f);

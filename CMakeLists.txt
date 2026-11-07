@@ -887,6 +887,20 @@ if(WIN32)
             endif()
         endif()
     endforeach()
+    # The launcher and the runner are windowed programs: opened from the
+    # desktop, or the runner from the launcher, no console window comes with
+    # them. main() stays their entry point, and the runner's output still goes
+    # where it is sent (the launcher writes it to Logs/).
+    foreach(_moderngekko_window_program moderngekko-launcher moderngekko-run)
+        if(TARGET ${_moderngekko_window_program})
+            set_target_properties(${_moderngekko_window_program} PROPERTIES
+                WIN32_EXECUTABLE ON)
+            if(MSVC)
+                target_link_options(${_moderngekko_window_program} PRIVATE
+                    /ENTRY:mainCRTStartup)
+            endif()
+        endif()
+    endforeach()
 endif()
 
 if(BUILD_TESTING)
