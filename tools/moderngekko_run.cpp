@@ -621,11 +621,13 @@ int RunMain(int argc, char **argv) {
   }
   // StaticRecomp runs the recompiled module; without one it would interpret
   // the game's code, far too slowly to play. A release has none (the module
-  // is made from the game's own code), so JIT64 plays instead.
-  {
+  // is made from the game's own code), so JIT64 plays instead. JIT64 runs
+  // the game's own code and needs no module, but the runtime only starts
+  // without one when told so (allow_interpreter, as --allow-interpreter).
+  if (module_path.empty()) {
     const char *core = std::getenv("MODERNGEKKO_STATICRECOMP");
     const bool static_recomp = !core || !*core || *core != '0';
-    if (static_recomp && module_path.empty()) {
+    if (static_recomp) {
 #if defined(_WIN32)
       _putenv_s("MODERNGEKKO_STATICRECOMP", "0");
 #else
@@ -635,6 +637,7 @@ int RunMain(int argc, char **argv) {
                 << inspected.metadata->disc_id << "_recomp" << LibrarySuffix()
                 << " beside the runner or in StaticRecompModules\n";
     }
+    config.allow_interpreter = true;
   }
   if (!module_path.empty())
     config.module =
