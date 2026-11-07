@@ -11,6 +11,7 @@
 #include "moderngekko/game.hpp"
 #include "netplay_address.hpp"
 #include "netplay_session.hpp"
+#include "runner_exit_code.hpp"
 
 #include "DiscIO/DiscExtractor.h"
 #include "DiscIO/Filesystem.h"
@@ -726,6 +727,24 @@ std::string SavestateLabel(const fs::path& path, bool latest)
 {
   const std::string filename = moderngekko::frontend::PathText(path.filename());
   return latest ? Format(Tr("Latest - %s"), filename.c_str()) : filename;
+}
+
+// Without the CMake option (CMakeLists.txt always passes it), savestates stay.
+#ifndef MODERNGEKKO_SAVESTATES
+#define MODERNGEKKO_SAVESTATES 1
+#endif
+
+// The savestates the PLAY page offers to start from. A build without
+// savestates (MODERNGEKKO_SAVESTATES OFF) offers none, so the choice never
+// shows: its game window has no keys to make them.
+std::vector<fs::path> PlaySavestates(const fs::path& user_directory)
+{
+#if MODERNGEKKO_SAVESTATES
+  return moderngekko::frontend::ListLauncherSavestates(user_directory / "StateSaves");
+#else
+  (void)user_directory;
+  return {};
+#endif
 }
 
 // One card of the PLAY page summary: a small heading over one value. With a
@@ -2506,8 +2525,7 @@ int main(int argc, char** argv)
   // Listed at startup and again when the launcher comes back from the game,
   // rather than every frame, so the dropdown does not hit the filesystem on
   // each redraw. States are written by the running game, not by the launcher.
-  std::vector<fs::path> launcher_savestates =
-      moderngekko::frontend::ListLauncherSavestates(user_directory / "StateSaves");
+  std::vector<fs::path> launcher_savestates = PlaySavestates(user_directory);
   // Loading is always explicit. StateSaves is shared by games, so selecting the
   // newest file automatically could try to resume a different title.
   int selected_savestate = -1;
@@ -2703,6 +2721,9 @@ int main(int argc, char** argv)
   int summary_installed_mods = 0;
   bool summary_stale = true;
   int result = 0;
+  // Set when the player chose Quit game in the in-game menu: the launcher
+  // closes instead of coming back.
+  bool quit_from_game = false;
   // Starts the game (PLAY, Host or Join) and waits for it. The launcher hides
   // while the game runs and shows itself again when the game closes, with a
   // message if it failed. Returns the launcher's exit code for that session.
@@ -2820,6 +2841,11 @@ int main(int argc, char** argv)
         int exit_code = 1;
         const bool waited = SDL_WaitProcess(process, true, &exit_code);
         SDL_DestroyProcess(process);
+        if (waited && exit_code == moderngekko::frontend::RUNNER_EXIT_QUIT)
+        {
+          quit_from_game = true;
+          return 0;
+        }
         SDL_ShowWindow(window);
         SDL_RaiseWindow(window);
         if (!waited || exit_code != 0)
@@ -3867,15 +3893,17 @@ int main(int argc, char** argv)
       // own) runs, and starts over from the beginning back here.
       music.Stop();
       result = launch_game(launch_mode);
+      launch_mode = LaunchMode::None;
+      // Quit game in the in-game menu: the launcher closes, still hidden.
+      if (quit_from_game)
+        break;
       if (has_music)
         music.Play(music_path, config.music_volume);
-      launch_mode = LaunchMode::None;
       done = false;
       current_page = LauncherPage::Play;
       // Time played and savestates changed while the game ran.
       summary_stale = true;
-      launcher_savestates =
-          moderngekko::frontend::ListLauncherSavestates(user_directory / "StateSaves");
+      launcher_savestates = PlaySavestates(user_directory);
       selected_savestate = -1;
       // Pad and key events from the game session waited in the queue while
       // the launcher was hidden; they are not meant for it.

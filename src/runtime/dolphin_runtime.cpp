@@ -29,6 +29,7 @@
 #include "automation_protocol.hpp"
 #include "dolphin_runtime_internal.hpp"
 #include "game_border.hpp"
+#include "game_menu.hpp"
 #include "moderngekko/cpu_state.h"
 #include "moderngekko/mod_loader.hpp"
 #include "moderngekko/module_loader.hpp"
@@ -115,7 +116,10 @@ PowerPC::CPUCore SelectCPUCore() {
 std::vector<std::string> Host_GetPreferredLocales() { return {}; }
 void Host_PPCSymbolsChanged() {}
 void Host_PPCBreakpointsChanged() {}
-bool Host_UIBlocksControllerState() { return false; }
+// The in-game menu keeps the controllers' input from the game while it is open.
+bool Host_UIBlocksControllerState() {
+  return moderngekko::detail::GameMenuBlocksInput();
+}
 void Host_Message(HostMessageID id) {
   if (id == HostMessageID::WMUserStop && s_platform)
     s_platform->Stop();
@@ -521,6 +525,9 @@ struct Runtime::Impl {
   // frame by border_hook on the video thread.
   std::unique_ptr<detail::GameBorderOverlay> border;
   Common::EventHook border_hook;
+  // The menu opened over the game (config.menu), drawn by menu_hook.
+  std::unique_ptr<detail::GameMenu> menu;
+  Common::EventHook menu_hook;
 };
 
 namespace detail {
@@ -824,6 +831,20 @@ RuntimeRunResult Runtime::Run() {
           [border = m_impl->border.get()](const PresentInfo &) { border->AddToFrame(); });
     }
   }
+  if (!m_impl->config.headless) {
+    detail::GameMenuHooks hooks;
+    hooks.draw_others = [border = m_impl->border.get()] {
+      if (border)
+        border->AddToFrame();
+    };
+    // As closing the game window does.
+    hooks.stop_game = [platform = m_impl->platform.get()] { platform->Stop(); };
+    m_impl->menu = detail::GameMenu::Create(m_impl->config.menu, std::move(hooks));
+    if (m_impl->menu) {
+      m_impl->menu_hook = GetVideoEvents().before_present_event.Register(
+          [menu = m_impl->menu.get()](const PresentInfo &) { menu->AddToFrame(); });
+    }
+  }
   m_impl->present_hook =
       GetVideoEvents().after_present_event.Register([this](const PresentInfo &info) {
         m_impl->automation_state.frame_count.store(info.frame_count,
@@ -848,8 +869,13 @@ RuntimeRunResult Runtime::Run() {
     });
   }
   m_impl->platform->MainLoop();
-  // Unhooked before Dolphin stops: the video thread calls the hook until then.
+  // Unhooked before Dolphin stops: the video thread calls the hooks until then.
+  m_impl->menu_hook = {};
   m_impl->border_hook = {};
+  const detail::GameMenuChoice menu_choice =
+      m_impl->menu ? m_impl->menu->Choice() : detail::GameMenuChoice::None;
+  // Its thread reads the controllers, which go away with the runtime.
+  m_impl->menu.reset();
   title_thread.request_stop();
   if (title_thread.joinable())
     title_thread.join();
@@ -859,6 +885,8 @@ RuntimeRunResult Runtime::Run() {
   Core::Shutdown(Core::System::GetInstance());
   m_impl->booted = false;
   m_impl->running = false;
+  if (menu_choice == detail::GameMenuChoice::Quit)
+    return {RuntimeExitReason::Quit, {}};
   return {};
 }
 

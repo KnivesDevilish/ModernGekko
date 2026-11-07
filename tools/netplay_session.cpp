@@ -7,6 +7,7 @@
 #include "netplay_address.hpp"
 #include "netplay_compatibility.hpp"
 #include "netplay_lobby_ui.hpp"
+#include "runner_exit_code.hpp"
 
 #include "Common/MsgHandler.h"
 #include "Common/TraversalClient.h"
@@ -882,6 +883,11 @@ int RunNetplayLobby(RuntimeConfig runtime_config, ConfigResult frontend_config,
     ui.ClearReadyState();
     if (run_result.error)
       result = 1;
+    // Quit game in the in-game menu closes the lobby and the launcher too.
+    if (run_result.reason == RuntimeExitReason::Quit) {
+      result = RUNNER_EXIT_QUIT;
+      break;
+    }
     remain = !ui.ConnectionLost();
   }
 

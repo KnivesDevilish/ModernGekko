@@ -421,6 +421,22 @@ inline constexpr Translation SPANISH_TEXTS[] = {
     {"Desync at frame %u reported for %s", "Desincronización en el frame %u, detectada en %s"},
     {"Connection to the netplay host was lost", "Se perdió la conexión con el anfitrión"},
     {"Game start was aborted", "Se canceló el inicio de la partida"},
+    // In-game menu (src/runtime/game_menu_draw.hpp)
+    {"Paused", "Pausa"},
+    {"The match keeps going while this menu is open.", "La partida sigue mientras este menú está abierto."},
+    {"Continue", "Continuar"},
+    {"Back to the launcher", "Volver al launcher"},
+    {"Back to the lobby", "Volver al lobby"},
+    {"Quit game", "Salir del juego"},
+    {"Back to the launcher?", "¿Volver al launcher?"},
+    {"Back to the lobby?", "¿Volver al lobby?"},
+    {"Quit the game?", "¿Salir del juego?"},
+    {"Progress the game hasn't saved will be lost.", "Se perderá el progreso que el juego no haya guardado."},
+    {"The match ends for every player.", "La partida termina para todos los jugadores."},
+    {"No", "No"},
+    {"Yes", "Sí"},
+    {"Accept", "Aceptar"},
+    {"Go back", "Volver"},
 };
 // clang-format on
 
@@ -778,6 +794,22 @@ inline constexpr Translation JAPANESE_TEXTS[] = {
     {"Desync at frame %u reported for %s", "フレーム %u で同期ずれ（%s で検出）"},
     {"Connection to the netplay host was lost", "ホストとの接続が切れました"},
     {"Game start was aborted", "ゲームの開始が中止されました"},
+    // In-game menu (src/runtime/game_menu_draw.hpp)
+    {"Paused", "一時停止中"},
+    {"The match keeps going while this menu is open.", "このメニューを開いている間も試合は続きます。"},
+    {"Continue", "続ける"},
+    {"Back to the launcher", "ランチャーに戻る"},
+    {"Back to the lobby", "ロビーに戻る"},
+    {"Quit game", "ゲームを終了"},
+    {"Back to the launcher?", "ランチャーに戻りますか？"},
+    {"Back to the lobby?", "ロビーに戻りますか？"},
+    {"Quit the game?", "ゲームを終了しますか？"},
+    {"Progress the game hasn't saved will be lost.", "ゲームで保存していない進行状況は失われます。"},
+    {"The match ends for every player.", "全員の試合が終了します。"},
+    {"No", "いいえ"},
+    {"Yes", "はい"},
+    {"Accept", "決定"},
+    {"Go back", "戻る"},
 };
 // clang-format on
 

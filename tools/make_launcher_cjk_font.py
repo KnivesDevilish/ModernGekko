@@ -106,7 +106,8 @@ def build_subset(path, weight, text):
 
 
 def as_array(name, data):
-    lines = [f"constexpr unsigned char {name}[] = {{"]
+    # inline: one copy in a program whose several files include it.
+    lines = [f"inline constexpr unsigned char {name}[] = {{"]
     for start in range(0, len(data), 16):
         chunk = ", ".join(f"0x{byte:02x}" for byte in data[start:start + 16])
         lines.append(f"    {chunk},")

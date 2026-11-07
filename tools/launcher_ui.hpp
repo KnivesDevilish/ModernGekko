@@ -3,9 +3,11 @@
 // The look shared by the launcher and the Netplay lobby: the theme, the
 // interface font (with the embedded Japanese characters), status pills,
 // bordered panels, buttons and images from Resources/. Moved here from
-// moderngekko_launcher.cpp so both windows draw with the same code.
+// moderngekko_launcher.cpp so both windows draw with the same code. The accent
+// colour and the font files are in launcher_look.hpp, which the in-game menu
+// uses too.
 
-#include "launcher_cjk_font.inc"
+#include "launcher_look.hpp"
 #include "moving_background.hpp"
 
 #include <SDL3/SDL.h>
@@ -25,10 +27,6 @@
 namespace moderngekko::frontend::ui
 {
 namespace fs = std::filesystem;
-
-// SR-ZGS accent: a neon lime green. Shared by the theme and the few texts that
-// pick a colour explicitly (the Play header and the READY status).
-inline constexpr ImVec4 LAUNCHER_ACCENT(0.72f, 1.0f, 0.18f, 1.0f);
 
 // Launcher colours and shapes: near-black neutral background, soft grey panels
 // and the lime accent. Sizes are unscaled; the caller applies ScaleAllSizes()
@@ -105,94 +103,30 @@ inline void ApplyLauncherTheme(ImGuiStyle& style)
   colors[ImGuiCol_ResizeGripActive] = with_alpha(accent, 0.8f);
 }
 
-// stb_truetype (used by ImGui) reads TrueType outlines only, and a file it cannot
-// parse would trip an assert. Check the header before handing a file over.
-inline bool IsTrueTypeFont(const fs::path& path)
-{
-  std::ifstream file(path, std::ios::binary);
-  std::array<unsigned char, 4> tag{};
-  if (!file.read(reinterpret_cast<char*>(tag.data()), tag.size()))
-    return false;
-  constexpr std::array<unsigned char, 4> version_1 = {0x00, 0x01, 0x00, 0x00};
-  constexpr std::array<unsigned char, 4> apple_true = {'t', 'r', 'u', 'e'};
-  return tag == version_1 || tag == apple_true;
-}
-
 struct LauncherFonts
 {
   ImFont* regular = nullptr;
   ImFont* bold = nullptr;  // the regular font when no bold face of its family exists
 };
 
-// A clean sans-serif for the interface: the system's usual UI fonts first
-// (Windows, Fedora/Bazzite and its Distrobox mount, Debian/Ubuntu, Arch), then
-// the font Dolphin ships in Sys/, then ImGui's built-in bitmap font. The bold
-// face is taken from the same family as the regular one so the two match.
+// The interface font (InterfaceFontCandidates), at size, with the embedded
+// Japanese characters merged into each face; ImGui's built-in bitmap font when
+// there is none.
 inline LauncherFonts LoadInterfaceFont(const fs::path& release_directory, float size)
 {
-  struct Candidate
-  {
-    fs::path regular;
-    fs::path bold;
-  };
-  std::vector<Candidate> candidates;
-#if defined(_WIN32)
-  if (const char* windows = std::getenv("WINDIR"))
-  {
-    candidates.push_back({fs::path(windows) / "Fonts" / "segoeui.ttf",
-                          fs::path(windows) / "Fonts" / "segoeuib.ttf"});
-  }
-#endif
-  for (const char* directory : {"/usr/share/fonts/google-noto", "/usr/local/share/fonts/google-noto",
-                                "/usr/share/fonts/noto", "/usr/share/fonts/truetype/noto"})
-  {
-    candidates.push_back({fs::path(directory) / "NotoSans-Regular.ttf",
-                          fs::path(directory) / "NotoSans-Bold.ttf"});
-  }
-  for (const char* directory : {"/usr/share/fonts/liberation-sans-fonts",
-                                "/usr/local/share/fonts/liberation-sans-fonts",
-                                "/usr/share/fonts/truetype/liberation"})
-  {
-    candidates.push_back({fs::path(directory) / "LiberationSans-Regular.ttf",
-                          fs::path(directory) / "LiberationSans-Bold.ttf"});
-  }
-  for (const char* directory : {"/usr/share/fonts/TTF", "/usr/share/fonts/truetype/dejavu",
-                                "/usr/share/fonts/dejavu-sans-fonts"})
-  {
-    candidates.push_back(
-        {fs::path(directory) / "DejaVuSans.ttf", fs::path(directory) / "DejaVuSans-Bold.ttf"});
-  }
-  candidates.push_back({release_directory / "Sys" / "Resources" / "OSD_Font.ttf", {}});
-
-  const auto usable = [](const fs::path& path) {
-    std::error_code ec;
-    return !path.empty() && fs::is_regular_file(path, ec) && IsTrueTypeFont(path);
-  };
   ImGuiIO& io = ImGui::GetIO();
-  // The interface fonts have no Japanese characters (the Credits page uses a
-  // few), so a small embedded Noto Sans CJK JP is merged into each face.
-  const auto merge_japanese = [&](const unsigned char* data, std::size_t bytes)
+  for (const InterfaceFontFiles& candidate : InterfaceFontCandidates(release_directory))
   {
-    ImFontConfig config;
-    config.MergeMode = true;
-    config.FontDataOwnedByAtlas = false;
-    io.Fonts->AddFontFromMemoryTTF(const_cast<unsigned char*>(data), static_cast<int>(bytes),
-                                   size, &config);
-  };
-  for (const Candidate& candidate : candidates)
-  {
-    if (!usable(candidate.regular))
-      continue;
     LauncherFonts fonts;
     fonts.regular = io.Fonts->AddFontFromFileTTF(candidate.regular.string().c_str(), size);
     if (!fonts.regular)
       continue;
-    merge_japanese(LAUNCHER_CJK_REGULAR, sizeof(LAUNCHER_CJK_REGULAR));
+    MergeJapaneseFont(false, size);
     ImGui::GetStyle().FontSizeBase = size;
-    if (usable(candidate.bold))
+    if (!candidate.bold.empty())
       fonts.bold = io.Fonts->AddFontFromFileTTF(candidate.bold.string().c_str(), size);
     if (fonts.bold)
-      merge_japanese(LAUNCHER_CJK_BOLD, sizeof(LAUNCHER_CJK_BOLD));
+      MergeJapaneseFont(true, size);
     std::cout << "launcher font: " << candidate.regular.string() << '\n';
     if (fonts.bold)
       std::cout << "launcher bold font: " << candidate.bold.string() << '\n';
@@ -202,7 +136,7 @@ inline LauncherFonts LoadInterfaceFont(const fs::path& release_directory, float 
   }
   LauncherFonts fonts;
   fonts.regular = io.Fonts->AddFontDefault();
-  merge_japanese(LAUNCHER_CJK_REGULAR, sizeof(LAUNCHER_CJK_REGULAR));
+  MergeJapaneseFont(false, size);
   fonts.bold = fonts.regular;
   std::cout << "launcher font: ImGui default\n";
   return fonts;

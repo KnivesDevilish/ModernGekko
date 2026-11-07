@@ -2,12 +2,16 @@
 #include "frontend_config.hpp"
 #include "dol_patch.hpp"
 #include "game_borders.hpp"
+#include "launcher_text.hpp"
 #include "moderngekko/game.hpp"
 #include "moderngekko/runtime.hpp"
 #include "netplay_address.hpp"
 #include "netplay_session.hpp"
+#include "runner_exit_code.hpp"
 
 #include "Common/StringUtil.h"
+
+#include <SDL3/SDL.h>
 
 #include <charconv>
 #include <chrono>
@@ -44,6 +48,16 @@ namespace {
 volatile std::sig_atomic_t s_stop_requested = 0;
 
 void HandleStopSignal(int) { s_stop_requested = 1; }
+
+// The system's first preferred language, such as "es" (as in the launcher).
+std::string SystemLanguageCode() {
+  int count = 0;
+  SDL_Locale **locales = SDL_GetPreferredLocales(&count);
+  std::string language =
+      locales && count > 0 && locales[0]->language ? locales[0]->language : "";
+  SDL_free(locales);
+  return language;
+}
 
 void Usage() {
   std::cerr << "usage: " MODERNGEKKO_RUNNER_NAME
@@ -303,6 +317,25 @@ int RunMain(int argc, char **argv) {
     }
   }
 
+  // The menu over the game (M, or Guide on a pad), in the launcher's language:
+  // config.ini's, or the system's. It answers to the first controller.
+  moderngekko::frontend::ActiveLanguage() = moderngekko::frontend::ResolveLanguage(
+      frontend_config.language, SystemLanguageCode());
+  {
+    moderngekko::frontend::GameMenuKeys keys =
+        moderngekko::frontend::GameMenuProfileKeys();
+    config.menu.enabled = true;
+    config.menu.profile_file = std::move(keys.profile_file);
+    config.menu.profile_section = std::move(keys.profile_section);
+    config.menu.open_keys = std::move(keys.open);
+    config.menu.accept_keys = std::move(keys.accept);
+    config.menu.back_keys = std::move(keys.back);
+    config.menu.up_keys = std::move(keys.up);
+    config.menu.down_keys = std::move(keys.down);
+    config.menu.open_fallback = std::move(keys.open_fallback);
+    config.menu.release_directory = executable_directory;
+  }
+
 #if defined(__linux__)
   // The system's volume mixer lists the game under the name its audio
   // library gives: Dolphin's ("Dolphin Emulator"). PulseAudio, and PipeWire's
@@ -535,6 +568,8 @@ int RunMain(int argc, char **argv) {
     std::cerr << "runtime failed: " << result.error->message << '\n';
     return 1;
   }
+  if (result.reason == moderngekko::RuntimeExitReason::Quit)
+    return moderngekko::frontend::RUNNER_EXIT_QUIT;
   return 0;
 }
 

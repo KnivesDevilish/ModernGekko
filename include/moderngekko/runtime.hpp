@@ -67,6 +67,28 @@ struct AutomationSettings
   std::filesystem::path directory;
 };
 
+// The menu the player opens over the game with the first controller's menu
+// button (src/runtime/game_menu.hpp). It answers to that controller as the
+// player has it set up: the profile in the user's Config folder (profile_file,
+// such as GCPadNew.ini, and its profile_section, such as GCPad1) and, for each
+// of its actions, the profile keys whose inputs do it (such as "Buttons/A").
+// open_fallback is the menu button for a profile that has none of open_keys.
+struct GameMenuSettings
+{
+  bool enabled = false;
+  std::string profile_file;
+  std::string profile_section;
+  std::vector<std::string> open_keys;
+  std::vector<std::string> accept_keys;
+  std::vector<std::string> back_keys;
+  std::vector<std::string> up_keys;
+  std::vector<std::string> down_keys;
+  std::string open_fallback;
+  // The interface font is looked for after the system's fonts in
+  // <release_directory>/Sys/Resources (tools/launcher_look.hpp).
+  std::filesystem::path release_directory;
+};
+
 enum class WindowSystem
 {
   Default,
@@ -92,6 +114,7 @@ struct RuntimeConfig
   // Boot straight into a savestate instead of from the title screen.
   std::optional<std::filesystem::path> load_state_path;
   AutomationSettings automation;
+  GameMenuSettings menu;
   // Hash the whole files/ tree when Create() inspects the game. That hash only
   // ends up in GetGameMetadata().assets_sha256; when false it is left empty
   // and the boot skips tens of seconds of hashing on a multi-GB game.
@@ -120,6 +143,9 @@ enum class RuntimeExitReason
 {
   Stopped,
   BootFailed,
+  // The player chose Quit game in the in-game menu: a launcher waiting for
+  // the game closes too.
+  Quit,
 };
 
 struct RuntimeRunResult

@@ -33,6 +33,7 @@ constexpr const char* SOURCES[] = {
     "tools/launcher_ui.hpp",
     "tools/netplay_lobby_ui.hpp",
     "tools/netplay_session.cpp",
+    "src/runtime/game_menu_draw.hpp",
 };
 
 int HexValue(char c)

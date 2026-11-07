@@ -95,6 +95,22 @@ bool EnsureControllerConfig(const std::filesystem::path &user_directory,
                             std::string *message);
 bool EnsureControllerConfig(const std::filesystem::path &user_directory,
                             std::string_view controller, std::string *message);
+// What the in-game menu answers to: the first controller's profile, as
+// GenerateControllerConfig writes it (a file in the user's Config folder and
+// its section), and the profile keys of each of the menu's buttons. Goes into
+// the runtime's GameMenuSettings.
+struct GameMenuKeys {
+  std::string profile_file;
+  std::string profile_section;
+  std::vector<std::string> open;
+  std::vector<std::string> accept;
+  std::vector<std::string> back;
+  std::vector<std::string> up;
+  std::vector<std::string> down;
+  // The menu button of a profile written before it had one.
+  std::string open_fallback;
+};
+GameMenuKeys GameMenuProfileKeys();
 #ifdef MODERNGEKKO_GAMECUBE_CONTROLLERS
 // Dolphin's name for the keyboard on this platform. Without a gamepad the
 // profile is written for this device: the first GameCube controller reads

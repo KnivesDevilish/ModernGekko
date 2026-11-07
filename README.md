@@ -15,6 +15,7 @@ The changes live in the `knives/srzgs-launcher` branch, which starts from the or
 - A Netplay lobby with invite codes or direct IP, GameCube ports for every seat, and the host's CPU core for every player.
 - Music for the launcher and the lobby (cubeb, or PulseAudio on Linux), background pictures and an optional check for new releases on GitHub.
 - 4:3 borders: pictures in the bars beside a 4:3 game on a wide screen, chosen in the launcher's Settings (one of them, none, or a random one each time the game opens) and drawn by the runtime on Dolphin's on-screen UI layer. A grid in them can slide, as in the launcher's background.
+- An in-game menu, opened with M or a pad's Guide button (the first controller's profile): Continue, Back to the launcher and Quit game, the last two after a question. In solo play it pauses the game; in Netplay the match goes on behind it. Quit game closes the launcher too.
 - Small runtime changes: the runtime's on-screen messages are hidden, the game files are not hashed twice when the runner boots a game, and the launcher starts faster.
 
 New CMake options. All of them are optional: when one is left empty, the launcher works without that picture, music, panel or version check.
@@ -30,7 +31,9 @@ New CMake options. All of them are optional: when one is left empty, the launche
 | `MODERNGEKKO_FRONTEND_VERSION`, `MODERNGEKKO_UPDATE_REPOSITORY` | Version shown by the launcher and the GitHub repository whose releases it checks |
 | `MODERNGEKKO_GAME_BORDERS` | Folder with the 4:3 borders' pictures and their `borders.txt` (format in `tools/game_borders.hpp`) |
 
-SR-ZGS passes all of them from `tools/build_tools.sh`.
+`MODERNGEKKO_SAVESTATES` (ON by default) can take savestates away from the player: with it OFF, the game window has no savestate keys (the fork's copies of Dolphin's game windows are in `src/platform/`) and the PLAY page doesn't offer to start from a savestate. The runner's `--load-state` and the automation keep them for testing.
+
+SR-ZGS passes all of them from `tools/build_tools.sh`, and `MODERNGEKKO_SAVESTATES=OFF`.
 
 This fork is distributed under the same license as the original, the GNU GPL v3 (see `LICENSE`). As the license asks of modified versions: this is a modified version of ModernGekko, changed by KnivesDevilish starting on November 3, 2026; the commit history of `knives/srzgs-launcher` lists every change. The rest of this README is the original one.
 

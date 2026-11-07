@@ -153,6 +153,29 @@ int main() {
   }
 #endif
 
+  // The in-game menu reads the first controller of this profile: every key it
+  // names is in that controller's section, and it has a menu button.
+  {
+    const moderngekko::frontend::GameMenuKeys menu =
+        moderngekko::frontend::GameMenuProfileKeys();
+    const std::string header = "[" + menu.profile_section + "]\n";
+    const std::size_t start = generated.find(header);
+    if (menu.profile_file != CONTROLLER_CONFIG_NAME || start == std::string::npos ||
+        menu.open.empty() || menu.accept.empty() || menu.back.empty() || menu.up.empty() ||
+        menu.down.empty() || menu.open_fallback.empty())
+      return 43;
+    const std::size_t end = generated.find("\n[", start);
+    const std::string section =
+        "\n" + generated.substr(start, end == std::string::npos ? std::string::npos
+                                                                : end + 1 - start);
+    for (const auto *keys : {&menu.open, &menu.accept, &menu.back, &menu.up, &menu.down}) {
+      for (const std::string &key : *keys) {
+        if (!section.contains("\n" + key + " = "))
+          return 44;
+      }
+    }
+  }
+
 #ifdef MODERNGEKKO_GAMECUBE_CONTROLLERS
   const std::string custom =
       "[GCPad1]\nDevice = SDL/9/Custom Controller\nButtons/A = Custom\n";

@@ -752,6 +752,34 @@ bool EnsureControllerConfig(const fs::path &user_directory,
   return EnsureControllerConfig(
       user_directory, std::span<const std::string>(&value, 1), message);
 }
+GameMenuKeys GameMenuProfileKeys() {
+  GameMenuKeys keys;
+#ifdef MODERNGEKKO_GAMECUBE_CONTROLLERS
+  // Extra/Menu is Guide, and M on the keyboard; A accepts, B goes back, and
+  // the D-pad or the control stick moves (the arrows on the keyboard).
+  keys.profile_file = "GCPadNew.ini";
+  keys.profile_section = "GCPad1";
+  keys.open = {"Extra/Menu"};
+  keys.accept = {"Buttons/A"};
+  keys.back = {"Buttons/B"};
+  keys.up = {"D-Pad/Up", "Main Stick/Up"};
+  keys.down = {"D-Pad/Down", "Main Stick/Down"};
+  keys.open_fallback = "Guide | `" + std::string(KEYBOARD_DEVICE) + ":M`";
+#else
+  // HOME is Guide. The sideways Wii Remote's 2 and 1 sit where a pad's south
+  // and west buttons are, and its D-pad also follows the left stick.
+  keys.profile_file = "WiimoteNew.ini";
+  keys.profile_section = "Wiimote1";
+  keys.open = {"Buttons/Home"};
+  keys.accept = {"Buttons/2", "Buttons/A"};
+  keys.back = {"Buttons/1", "Buttons/B"};
+  keys.up = {"D-Pad/Up"};
+  keys.down = {"D-Pad/Down"};
+  keys.open_fallback = "Guide";
+#endif
+  return keys;
+}
+
 #ifdef MODERNGEKKO_GAMECUBE_CONTROLLERS
 std::string_view KeyboardDevice() { return KEYBOARD_DEVICE; }
 #endif

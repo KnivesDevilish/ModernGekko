@@ -46,6 +46,12 @@ option(MODERNGEKKO_PORTABLE_DEFAULT_GAME
        "Read and write default-game.txt beside branded executables" OFF)
 option(MODERNGEKKO_GAMECUBE_CONTROLLERS
        "Generate GameCube controller profiles instead of Wii Remote profiles" OFF)
+# OFF takes savestates out for the player: the game window's savestate keys
+# (F1-F8, Shift+F1-F8, F11, F12; F1 and the File menu on Windows, in
+# src/platform/) and the PLAY page's "Start from savestate" choice. The
+# runner's --load-state and the automation's savestates stay, for testing.
+option(MODERNGEKKO_SAVESTATES
+       "Savestate keys in the game window and the launcher's savestate choice" ON)
 set(MODERNGEKKO_LOG_FILENAME "ModernGekko.log" CACHE STRING
     "Runner log filename")
 set(MODERNGEKKO_DISC_PREPARER_OUTPUT_NAME "" CACHE STRING
@@ -341,10 +347,19 @@ if(MODERNGEKKO_ENABLE_DOLPHIN_RUNTIME)
     target_sources(moderngekko PRIVATE
         src/runtime/dolphin_runtime.cpp
         src/runtime/game_border.cpp
+        src/runtime/game_menu.cpp
         tools/automation_protocol.cpp
         vendor/dolphin/Source/Core/DolphinNoGUI/Platform.cpp
         vendor/dolphin/Source/Core/DolphinNoGUI/PlatformHeadless.cpp
     )
+    # The game windows of Windows, X11 and Wayland are this fork's copies
+    # (src/platform/), which keep the savestate keys only with this ON.
+    target_compile_definitions(moderngekko PRIVATE
+        MODERNGEKKO_SAVESTATES=$<BOOL:${MODERNGEKKO_SAVESTATES}>)
+    if(APPLE AND NOT MODERNGEKKO_SAVESTATES)
+        message(WARNING "MODERNGEKKO_SAVESTATES is OFF, but the macOS game window "
+                        "(vendor/dolphin's PlatformMacos.mm) keeps its savestate menu")
+    endif()
     if(NOT ANDROID)
         target_sources(moderngekko PRIVATE
             vendor/dolphin/Source/Core/InputCommon/ControllerInterface/Touch/InputOverrider.cpp)
@@ -352,7 +367,7 @@ if(MODERNGEKKO_ENABLE_DOLPHIN_RUNTIME)
     target_include_directories(moderngekko PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/tools")
     if(WIN32)
         target_sources(moderngekko PRIVATE
-            vendor/dolphin/Source/Core/DolphinNoGUI/PlatformWin32.cpp)
+            src/platform/PlatformWin32.cpp)
         target_link_libraries(moderngekko PRIVATE dwmapi)
     endif()
     if(APPLE)
@@ -385,7 +400,7 @@ if(MODERNGEKKO_ENABLE_DOLPHIN_RUNTIME)
     target_link_libraries(moderngekko PRIVATE core uicommon imgui)
     if(TARGET PkgConfig::X11)
         target_sources(moderngekko PRIVATE
-            vendor/dolphin/Source/Core/DolphinNoGUI/PlatformX11.cpp)
+            src/platform/PlatformX11.cpp)
         target_link_libraries(moderngekko PRIVATE PkgConfig::X11)
         if(TARGET PkgConfig::XRANDR)
             target_link_libraries(moderngekko PRIVATE PkgConfig::XRANDR)
@@ -457,7 +472,7 @@ if(MODERNGEKKO_ENABLE_DOLPHIN_RUNTIME)
             DEPENDS "${MODERNGEKKO_IDLE_INHIBIT_XML}"
             VERBATIM)
         target_sources(moderngekko PRIVATE
-            vendor/dolphin/Source/Core/DolphinNoGUI/PlatformWayland.cpp
+            src/platform/PlatformWayland.cpp
             "${_moderngekko_xdg_code}"
             "${_moderngekko_decoration_code}"
             "${_moderngekko_idle_inhibit_code}")
@@ -674,7 +689,9 @@ if(MODERNGEKKO_ENABLE_DOLPHIN_RUNTIME)
         MODERNGEKKO_FRONTEND_NAME="${MODERNGEKKO_FRONTEND_NAME}"
         MODERNGEKKO_RUNNER_FILENAME="${MODERNGEKKO_RUNNER_OUTPUT_NAME}"
         MODERNGEKKO_USER_DIRECTORY_NAME="${MODERNGEKKO_USER_DIRECTORY_NAME}"
-        MODERNGEKKO_LOG_FILENAME="${MODERNGEKKO_LOG_FILENAME}")
+        MODERNGEKKO_LOG_FILENAME="${MODERNGEKKO_LOG_FILENAME}"
+        # The PLAY page's "Start from savestate" choice.
+        MODERNGEKKO_SAVESTATES=$<BOOL:${MODERNGEKKO_SAVESTATES}>)
     if(MODERNGEKKO_REQUIRED_DISC_ID)
         target_compile_definitions(moderngekko-launcher PRIVATE
             MODERNGEKKO_REQUIRED_DISC_ID="${MODERNGEKKO_REQUIRED_DISC_ID}")
@@ -921,6 +938,15 @@ if(BUILD_TESTING)
     target_compile_features(moderngekko_game_borders_test PRIVATE cxx_std_23)
     add_test(NAME moderngekko.game_borders
              COMMAND moderngekko_game_borders_test)
+
+    # Header-only: the in-game menu's pages and how its buttons move.
+    add_executable(moderngekko_game_menu_state_test
+        tests/game_menu_state_test.cpp)
+    target_include_directories(moderngekko_game_menu_state_test PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/src")
+    target_compile_features(moderngekko_game_menu_state_test PRIVATE cxx_std_23)
+    add_test(NAME moderngekko.game_menu_state
+             COMMAND moderngekko_game_menu_state_test)
 
     # The Netplay lobby's cached hash of the game files.
     add_executable(moderngekko_game_files_hash_test
