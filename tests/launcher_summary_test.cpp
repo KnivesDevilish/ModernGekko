@@ -6,6 +6,7 @@
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <vector>
 
 namespace fs = std::filesystem;
 
@@ -84,6 +85,14 @@ int main()
   // The same folder twice (for example when both paths lead to one place).
   if (CountInstalledMods({user_mods, user_mods / ".." / "Mods"}) != 1)
     return 7;
+  // The Mods & expansions page lists them by name, in the order of their
+  // paths: the release's folder before the user's here.
+  {
+    const std::vector<fs::path> mods = ListInstalledMods({executable_mods, user_mods});
+    if (mods.size() != 2 || ModPackageName(mods[0]) != "speed" ||
+        ModPackageName(mods[1]) != "story")
+      return 8;
+  }
 
   std::error_code ec;
   fs::remove_all(root, ec);

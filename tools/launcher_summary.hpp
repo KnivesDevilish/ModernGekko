@@ -101,8 +101,9 @@ inline std::string FormatTimePlayed(std::uint64_t milliseconds)
 // Mod packages the runtime will try to load from these folders, by the same
 // rules as ModManager::LoadDirectories: "<name>.mgm" folders that hold the
 // platform's mod library, and "<name>.mgm.so" (.dll, .dylib) files. A folder
-// listed twice, or the same package reached through both, counts once.
-inline int CountInstalledMods(const std::vector<fs::path>& directories)
+// listed twice, or the same package reached through both, is listed once.
+// Sorted by path.
+inline std::vector<fs::path> ListInstalledMods(const std::vector<fs::path>& directories)
 {
   const std::string_view suffix = summary_detail::ModLibrarySuffix();
   const std::string packaged_suffix = ".mgm" + std::string(suffix);
@@ -130,6 +131,24 @@ inline int CountInstalledMods(const std::vector<fs::path>& directories)
   }
   std::sort(packages.begin(), packages.end());
   packages.erase(std::unique(packages.begin(), packages.end()), packages.end());
-  return static_cast<int>(packages.size());
+  return packages;
+}
+
+inline int CountInstalledMods(const std::vector<fs::path>& directories)
+{
+  return static_cast<int>(ListInstalledMods(directories).size());
+}
+
+// A package's name as the Mods & expansions page shows it: "speed" for
+// speed.mgm and for speed.mgm.so (.dll, .dylib).
+inline std::string ModPackageName(const fs::path& package)
+{
+  std::string name = package.filename().string();
+  const std::string packaged_suffix = ".mgm" + std::string(summary_detail::ModLibrarySuffix());
+  if (name.ends_with(packaged_suffix))
+    name.resize(name.size() - packaged_suffix.size());
+  else if (name.ends_with(".mgm"))
+    name.resize(name.size() - 4);
+  return name;
 }
 }  // namespace moderngekko::frontend

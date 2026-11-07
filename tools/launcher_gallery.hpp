@@ -330,15 +330,7 @@ private:
     DrawPageHeader(Tr("Screenshots"),
                    Tr("Taken with F9 or the in-game menu. Choose one to see it large."), bold);
     if (ImGui::Button(Tr("Open folder")))
-    {
-      std::error_code ec;
-      std::filesystem::create_directories(m_folder, ec);
-      std::string url = "file://";
-      const std::string folder = m_folder.generic_string();
-      if (!folder.starts_with('/'))
-        url += '/';
-      SDL_OpenURL((url + folder).c_str());
-    }
+      OpenFolder(m_folder);
     if (!m_files.empty())
     {
       ImGui::SameLine();

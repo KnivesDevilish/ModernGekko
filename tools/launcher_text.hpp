@@ -519,6 +519,18 @@ inline constexpr Translation SPANISH_TEXTS[] = {
     {"Scanlines and darker corners, like an old TV.", "Líneas de escaneo y esquinas más oscuras, como un televisor antiguo."},
     {"Outline", "Contorno"},
     {"Dark lines along the edges, like a cartoon. They go round everything on screen, not only the characters.", "Líneas oscuras en los bordes, como en un dibujo animado. Rodean todo lo que hay en pantalla, no solo a los personajes."},
+    // Mods & expansions page
+    {"Mods & expansions", "Mods y expansiones"},
+    {"Open Mods & expansions", "Abrir Mods y expansiones"},
+    {"Mods change the game or add to it when it starts, without touching your copy of it.", "Los mods cambian el juego o le añaden cosas al iniciarlo, sin tocar tu copia."},
+    {"INSTALLED MODS", "MODS INSTALADOS"},
+    {"No mods installed yet.", "Todavía no hay mods instalados."},
+    {"Mod packages (.mgm) go in this folder and load when the game starts:", "Los paquetes de mods (.mgm) van en esta carpeta y se cargan al iniciar el juego:"},
+    {"Mod support is experimental: SR-ZGS doesn't have mods of its own yet.", "El soporte de mods es experimental: SR-ZGS todavía no tiene mods propios."},
+    {"EXPANSIONS", "EXPANSIONES"},
+    {"PLANNED", "PLANEADO"},
+    {"Story campaigns, characters, tracks and more, made by the community, without changing the original game files.", "Campañas de historia, personajes, pistas y más, creados por la comunidad, sin modificar los archivos originales del juego."},
+    {"A long-term goal of the project.", "Una meta a largo plazo del proyecto."},
 };
 // clang-format on
 
@@ -974,6 +986,18 @@ inline constexpr Translation JAPANESE_TEXTS[] = {
     {"Scanlines and darker corners, like an old TV.", "古いテレビのような走査線と暗い四隅。"},
     {"Outline", "輪郭線"},
     {"Dark lines along the edges, like a cartoon. They go round everything on screen, not only the characters.", "アニメのように輪郭に暗い線を引きます。キャラクターだけでなく、画面のすべてに線が付きます。"},
+    // Mods & expansions page
+    {"Mods & expansions", "MODと拡張"},
+    {"Open Mods & expansions", "「MODと拡張」を開く"},
+    {"Mods change the game or add to it when it starts, without touching your copy of it.", "MODはゲームの起動時に内容を変えたり追加したりします。あなたのゲームのコピーは変更しません。"},
+    {"INSTALLED MODS", "導入済みのMOD"},
+    {"No mods installed yet.", "MODはまだ導入されていません。"},
+    {"Mod packages (.mgm) go in this folder and load when the game starts:", ".mgm形式のMODパッケージをこのフォルダーに入れると、ゲームの起動時に読み込まれます："},
+    {"Mod support is experimental: SR-ZGS doesn't have mods of its own yet.", "MODへの対応は実験的です。SR-ZGS用のMODはまだありません。"},
+    {"EXPANSIONS", "拡張コンテンツ"},
+    {"PLANNED", "予定"},
+    {"Story campaigns, characters, tracks and more, made by the community, without changing the original game files.", "ストーリー、キャラクター、コースなど、コミュニティが作るコンテンツ。元のゲームファイルは変更しません。"},
+    {"A long-term goal of the project.", "プロジェクトの長期的な目標です。"},
 };
 // clang-format on
 

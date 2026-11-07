@@ -8,7 +8,8 @@ This is a modified fork of [ExpansionPak/ModernGekko](https://github.com/Expansi
 
 The changes live in the `knives/srzgs-launcher` branch, which starts from the original `master` (commit `a2e4e2b`, September 2026). They add:
 
-- A redesigned launcher: PLAY, Settings, Controls, Game Files, Screenshots and Credits pages, a sidebar with the language (the music volume is in Settings → Audio), a PATCH NOTES panel and a summary of the time played, the controller and the display settings.
+- A redesigned launcher in a 960x540 window: PLAY, Settings, Controls, Game Files, Mods & expansions, Screenshots and Credits pages, a sidebar with the language (the music volume is in Settings → Audio), a PATCH NOTES panel and a summary of the time played, the controller, the display settings and the installed mods. Most pages put their panels in two columns (`BeginPageColumns` in `tools/launcher_ui.hpp`) so they fit the window without scrolling.
+- A Mods & expansions page: the code mod packages the runner will load (see [Code mods](#code-mods)), the folder they go in, and a panel about planned expansions with an optional picture (`MODERNGEKKO_LAUNCHER_MODS_ART`).
 - Launcher languages: English, Spanish and Japanese (with an embedded subset of Noto Sans CJK JP).
 - A CPU core selector (JIT64 by default, StaticRecomp experimental) and an aspect ratio setting.
 - GameCube controller profiles with keyboard keys and three extra buttons, a controller tester, a keyboard-only profile when there is no gamepad, and following a gamepad whose name changes.
@@ -30,6 +31,7 @@ New CMake options. All of them are optional: when one is left empty, the launche
 | `MODERNGEKKO_LAUNCHER_BANNER` | PNG at the top of the PLAY page |
 | `MODERNGEKKO_LAUNCHER_BACKGROUND` | Picture behind the launcher's pages |
 | `MODERNGEKKO_LAUNCHER_CONTROLLER_ART`, `MODERNGEKKO_LAUNCHER_KEYBOARD_ART` | Drawings for the Controls page tester |
+| `MODERNGEKKO_LAUNCHER_MODS_ART` | Picture of the EXPANSIONS panel on the Mods & expansions page |
 | `MODERNGEKKO_LAUNCHER_MUSIC`, `MODERNGEKKO_LOBBY_MUSIC` | MP3 looped in the launcher and in the Netplay lobby |
 | `MODERNGEKKO_LOBBY_ART`, `MODERNGEKKO_LOBBY_BACKGROUND` | Portrait and background picture of the Netplay lobby |
 | `MODERNGEKKO_LAUNCHER_PATCH_NOTES` | UTF-8 text for the PATCH NOTES panel, with optional `[en]`, `[es]` and `[ja]` sections |

@@ -591,6 +591,7 @@ enum class LauncherPage
   Settings,
   Controls,
   GameFiles,
+  Mods,
   Screenshots,
   Credits,
 };
@@ -634,10 +635,9 @@ LauncherBanner LoadLauncherBanner(SDL_Renderer* renderer, const fs::path& releas
   return LoadLauncherImage(renderer, release_directory, "launcher-banner.png", "launcher banner");
 }
 
-// Draws the banner across the full content width with the panels' rounding.
-void DrawLauncherBanner(const LauncherBanner& banner)
+// Draws the banner at the cursor, `width` wide, with the panels' rounding.
+void DrawLauncherBanner(const LauncherBanner& banner, float width)
 {
-  const float width = ImGui::GetContentRegionAvail().x;
   const ImVec2 size(width, width * banner.aspect);
   const ImVec2 position = ImGui::GetCursorScreenPos();
   ImGui::GetWindowDrawList()->AddImageRounded(
@@ -798,7 +798,10 @@ std::array<SummaryTile, 4> BuildPlaySummaryTiles(const PlaySummary& summary)
               summary.installed_mods == 0   ? std::string(Tr("None"))
               : summary.installed_mods == 1 ? std::string(Tr("1 installed"))
                                             : Format(Tr("%d installed"), summary.installed_mods),
-              false, Format(Tr("Mods go in %s"), summary.mods_folder.c_str()), false};
+              false,
+              Format(Tr("Mods go in %s"), summary.mods_folder.c_str()) + "\n" +
+                  Tr("Open Mods & expansions"),
+              true};
   return tiles;
 }
 
@@ -976,14 +979,16 @@ void DrawCreditsRows(const char* id, std::span<const std::array<const char*, 2>>
 }
 
 // Who made SR-ZGS and what it is built on, credited as each project credits
-// itself (the READMEs of SR-ZGS and ModernGekko). version_section, when set,
-// draws the VERSION panel under CREATED BY (DrawVersionSection).
+// itself (the READMEs of SR-ZGS and ModernGekko): the author and the version
+// side by side, then the projects and their licenses. version_section, when
+// set, draws the VERSION panel beside CREATED BY (DrawVersionSection).
 void DrawCreditsPage(ImFont* bold, const std::function<void()>& version_section = {})
 {
   DrawPageHeader(Tr("Credits"),
                  Tr("SR-ZGS is an independent fan project. It is not affiliated with or endorsed "
                     "by SEGA."),
                  bold);
+  const bool top_columns = version_section && BeginPageColumns("##credits_top");
   BeginSection("##credits_author", Tr("CREATED BY"));
   // Naizu Akumateki, written in Japanese.
   ImGui::PushFont(bold, ImGui::GetStyle().FontSizeBase * 1.35f);
@@ -998,8 +1003,12 @@ void DrawCreditsPage(ImFont* bold, const std::function<void()>& version_section 
                                "development and testing."));
   ImGui::PopTextWrapPos();
   EndSection();
+  if (top_columns)
+    NextPageColumn();
   if (version_section)
     version_section();
+  if (top_columns)
+    EndPageColumns();
 
   static constexpr std::array<std::array<const char*, 2>, 6> BUILT_ON = {{
       {"DolRecomp", MODERNGEKKO_UI_TEXT("Static recompilation framework")},
@@ -1012,6 +1021,8 @@ void DrawCreditsPage(ImFont* bold, const std::function<void()>& version_section 
       {MODERNGEKKO_UI_TEXT("Invite codes"),
        MODERNGEKKO_UI_TEXT("Dolphin's public server (stun.dolphin-emu.org)")},
   }};
+  // The projects get the wider column: their names come with a line each.
+  const bool bottom_columns = BeginPageColumns("##credits_bottom", 0.6f);
   BeginSection("##credits_built_on", Tr("BUILT ON"));
   DrawCreditsRows("##credits_built_on_rows", BUILT_ON, bold);
   EndSection();
@@ -1023,9 +1034,13 @@ void DrawCreditsPage(ImFont* bold, const std::function<void()>& version_section 
       {"Dear ImGui", MODERNGEKKO_UI_TEXT("MIT License")},
       {"Noto Sans CJK", "SIL Open Font License 1.1"},
   }};
+  if (bottom_columns)
+    NextPageColumn();
   BeginSection("##credits_licenses", Tr("LICENSES"));
   DrawCreditsRows("##credits_license_rows", LICENSES, bold);
   EndSection();
+  if (bottom_columns)
+    EndPageColumns();
 
   ImGui::PushTextWrapPos(0.0f);
   ImGui::TextDisabled("%s", Tr("Sonic Riders: Zero Gravity and its characters are trademarks "
@@ -1195,8 +1210,8 @@ void DrawPatchNotes(const std::vector<moderngekko::frontend::PatchNoteLine>& not
 
 // The launcher window's size before the display's scale. It can't be
 // resized: the pages are laid out for this size.
-constexpr int LAUNCHER_WIDTH = 720;
-constexpr int LAUNCHER_HEIGHT = 640;
+constexpr int LAUNCHER_WIDTH = 960;
+constexpr int LAUNCHER_HEIGHT = 540;
 
 std::string_view TrimView(std::string_view text)
 {
@@ -2042,15 +2057,13 @@ void DrawControllerArt(const ControllerTester& tester, const LauncherImage& art,
   ImGui::Dummy(size);
 }
 
-// The keyboard drawing, centred. Every key the profile uses is outlined and
-// labelled with what it presses, and lights up while held.
-void DrawKeyboardArt(const ControllerTester& tester, const LauncherImage& art, ImFont* bold,
-                     float scale)
+// The keyboard drawing, `width` wide and centred. Every key the profile uses
+// is outlined and labelled with what it presses, and lights up while held.
+void DrawKeyboardArt(const ControllerTester& tester, const LauncherImage& art, float width,
+                     ImFont* bold, float scale)
 {
-  // A little narrower than the panel, so that with its hint line it is no
-  // taller than the controller drawing's list and the page doesn't scroll.
   const float available = ImGui::GetContentRegionAvail().x;
-  const float width = std::floor(available * 0.9f);
+  width = std::floor(std::min(width, available));
   ImGui::SetCursorPosX(ImGui::GetCursorPosX() + std::floor((available - width) * 0.5f));
   const float zoom = width / KEYBOARD_ART_SIZE.x;
   const ImVec2 size(width, KEYBOARD_ART_SIZE.y * zoom);
@@ -2122,51 +2135,87 @@ void DrawKeyboardArt(const ControllerTester& tester, const LauncherImage& art, I
   ImGui::Dummy(size);
 }
 
-// The rows beside the controller drawing (or alone, without one): each
-// button of the emulated controller and the pad inputs or keys behind it.
-void DrawInputLegend(const ControllerTester& tester, bool keys, ImFont* bold)
+// What one row of the list says: the pad inputs or keys behind that button
+// of the emulated controller, or why there are none.
+std::string LegendRowText(const ControllerTester& tester, const LegendRow& row, bool keys)
 {
-  const ImGuiStyle& style = ImGui::GetStyle();
-  ImGui::BeginGroup();
+  bool custom = false;
+  std::vector<std::string> names;
+  for (std::size_t input = row.first; input <= row.last; ++input)
+  {
+    custom = custom || tester.bindings[input].custom;
+    for (const InputSource& source : tester.bindings[input].sources)
+    {
+      if (source.IsKey() != keys)
+        continue;
+      std::string name = row.first == row.last ? SourceName(tester.gamepad, source) :
+                                                 SourceGroup(tester.gamepad, source);
+      if (std::ranges::find(names, name) == names.end())
+        names.push_back(std::move(name));
+    }
+  }
+  if (custom)
+    return Tr("edited by hand");
+  std::string text;
+  for (const std::string& name : names)
+    text += (text.empty() ? "" : ", ") + name;
+  return text.empty() ? std::string(Tr("not set")) : text;
+}
+
+// The width of the list's first column: the emulated controller's buttons.
+float LegendLabelWidth(ImFont* bold)
+{
   ImGui::PushFont(bold, 0.0f);
   float label_width = 0.0f;
   for (const LegendRow& row : LEGEND_ROWS)
     label_width = std::max(label_width, ImGui::CalcTextSize(Tr(row.label)).x);
   ImGui::PopFont();
   label_width = std::max(label_width, ImGui::CalcTextSize(PROFILE_LEGEND_TITLE).x);
-  label_width += style.ItemSpacing.x * 2.0f;
+  return label_width + ImGui::GetStyle().ItemSpacing.x * 2.0f;
+}
+
+// How wide rows first to first + count - 1 of the list are without wrapping.
+float LegendNaturalWidth(const ControllerTester& tester, bool keys, ImFont* bold,
+                         std::size_t first, std::size_t count)
+{
+  float text_width = ImGui::CalcTextSize(keys ? Tr("Key") : Tr("Your controller")).x;
+  const std::size_t begin = std::min(first, LEGEND_ROWS.size());
+  const std::size_t end = std::min(LEGEND_ROWS.size(), begin + count);
+  for (std::size_t row_index = begin; row_index < end; ++row_index)
+    text_width = std::max(text_width,
+                          ImGui::CalcTextSize(LegendRowText(tester, LEGEND_ROWS[row_index], keys)
+                                                  .c_str())
+                              .x);
+  return LegendLabelWidth(bold) + text_width;
+}
+
+// The rows beside the controller drawing (or alone, without one): each
+// button of the emulated controller and the pad inputs or keys behind it.
+// Rows first to first + count - 1 of LEGEND_ROWS, so the list can be split in
+// two columns; the names wrap at `width` (0: at the panel's edge).
+void DrawInputLegend(const ControllerTester& tester, bool keys, ImFont* bold,
+                     std::size_t first = 0, std::size_t count = LEGEND_ROWS.size(),
+                     float width = 0.0f)
+{
+  const ImGuiStyle& style = ImGui::GetStyle();
+  const float wrap_x = width > 0.0f ? ImGui::GetCursorPosX() + width : 0.0f;
+  ImGui::BeginGroup();
+  const float label_width = LegendLabelWidth(bold);
   // Rows sit close together so the list is about as tall as the artwork.
   ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(style.ItemSpacing.x, 0.0f));
   // Inside a group, SameLine() offsets count from the group's left edge.
   ImGui::TextDisabled("%s", PROFILE_LEGEND_TITLE);
   ImGui::SameLine(label_width);
   ImGui::TextDisabled("%s", keys ? Tr("Key") : Tr("Your controller"));
-  for (const LegendRow& row : LEGEND_ROWS)
+  const std::size_t begin = std::min(first, LEGEND_ROWS.size());
+  const std::size_t end = std::min(LEGEND_ROWS.size(), begin + count);
+  for (std::size_t row_index = begin; row_index < end; ++row_index)
   {
+    const LegendRow& row = LEGEND_ROWS[row_index];
     bool down = false;
-    bool custom = false;
-    std::vector<std::string> names;
     for (std::size_t input = row.first; input <= row.last; ++input)
-    {
       down = down || IsInputDown(tester, input);
-      custom = custom || tester.bindings[input].custom;
-      for (const InputSource& source : tester.bindings[input].sources)
-      {
-        if (source.IsKey() != keys)
-          continue;
-        std::string name = row.first == row.last ? SourceName(tester.gamepad, source) :
-                                                   SourceGroup(tester.gamepad, source);
-        if (std::ranges::find(names, name) == names.end())
-          names.push_back(std::move(name));
-      }
-    }
-    std::string text;
-    for (const std::string& name : names)
-      text += (text.empty() ? "" : ", ") + name;
-    if (custom)
-      text = Tr("edited by hand");
-    else if (text.empty())
-      text = Tr("not set");
+    const std::string text = LegendRowText(tester, row, keys);
     ImGui::PushFont(bold, 0.0f);
     if (down)
       ImGui::TextColored(LAUNCHER_ACCENT, "%s", Tr(row.label));
@@ -2174,7 +2223,7 @@ void DrawInputLegend(const ControllerTester& tester, bool keys, ImFont* bold)
       ImGui::TextUnformatted(Tr(row.label));
     ImGui::PopFont();
     ImGui::SameLine(label_width);
-    ImGui::PushTextWrapPos(0.0f);
+    ImGui::PushTextWrapPos(wrap_x);
     if (down)
       ImGui::TextWrapped("%s", text.c_str());
     else
@@ -2206,11 +2255,24 @@ bool DrawTesterTab(const char* label, bool selected)
   return clicked;
 }
 
+// Where the Controls page's tester writes its hint: at the right end of the
+// BUTTON MAPPING heading's line, in screen coordinates.
+struct TesterHintLine
+{
+  float top = 0.0f;
+  float heading_end = 0.0f;  // where the heading's text ends
+  float right = 0.0f;        // where the line ends
+};
+
 // The tester under the profile line of the Controls page. It starts on that
 // line, with the Controller / Keyboard tabs at its right end when the profile
-// has both, then shows the matching drawing (or its list of inputs).
+// has both, then shows the matching drawing (or its list of inputs), with how
+// to use it on hint_line. The drawing is as tall as the room left above
+// page_bottom (the bottom of the page, in screen coordinates) allows, so the
+// page doesn't scroll.
 void DrawControllerTester(ControllerTester& tester, const LauncherImage& controller_art,
-                          const LauncherImage& keyboard_art, ImFont* bold, float scale)
+                          const LauncherImage& keyboard_art, ImFont* bold, float scale,
+                          float page_bottom, const TesterHintLine& hint_line)
 {
   const ImGuiStyle& style = ImGui::GetStyle();
   if (tester.has_pad_sources && tester.has_key_sources)
@@ -2232,68 +2294,95 @@ void DrawControllerTester(ControllerTester& tester, const LauncherImage& control
       tester.show_keyboard = true;
   }
   ImGui::Spacing();
+  // The height down to the bottom of the page, less the gap under the
+  // drawing, the panel's padding and the gap after the panel. Never smaller
+  // than a drawing that can still be read.
+  const float art_height =
+      std::max(110.0f * scale, page_bottom - ImGui::GetCursorScreenPos().y -
+                                   style.WindowPadding.y * 0.75f - style.ItemSpacing.y * 2.0f);
+  const float available = ImGui::GetContentRegionAvail().x;
+
+  // How to use the tester, or why it can't light anything up, at the right
+  // end of the heading's line ("..." cuts it if the line is too short).
+  const auto draw_hint = [&](const std::string& text, ImVec4 color)
+  {
+    const float room = hint_line.right - hint_line.heading_end - style.ItemSpacing.x * 2.0f;
+    const std::string shown = FitTextToWidth(ImGui::GetFont(), ImGui::GetFontSize(), text, room);
+    const float width = ImGui::CalcTextSize(shown.c_str()).x;
+    ImGui::GetWindowDrawList()->AddText(ImVec2(hint_line.right - width, hint_line.top),
+                                        ImGui::GetColorU32(color), shown.c_str());
+  };
 
   if (tester.show_keyboard)
   {
+    draw_hint(Tr("Press keys to test them."), LAUNCHER_ACCENT);
     if (keyboard_art.texture)
     {
-      DrawKeyboardArt(tester, keyboard_art, bold, scale);
-      ImGui::TextColored(LAUNCHER_ACCENT, "%s", Tr("Press keys to test them."));
+      DrawKeyboardArt(tester, keyboard_art,
+                      std::min(available * 0.9f, art_height * KEYBOARD_ART_SIZE.x /
+                                                      KEYBOARD_ART_SIZE.y),
+                      bold, scale);
     }
     else
     {
       DrawInputLegend(tester, true, bold);
-      ImGui::TextColored(LAUNCHER_ACCENT, "%s", Tr("Press keys to test them."));
       EndInputLegend();
     }
     return;
   }
 
-  // How to use the tester, or why it can't light anything up.
-  const auto draw_hint = [&]
+  if (tester.gamepad)
   {
-    if (tester.gamepad)
-    {
-      ImGui::TextColored(LAUNCHER_ACCENT, "%s", Tr("Press buttons to test them."));
-    }
-    else if (tester.device.empty())
-    {
-      ImGui::TextDisabled("%s", Format(Tr("No controller in %s."),
-                                       std::string(CONTROLLER_PROFILE_NAME).c_str())
-                                    .c_str());
-    }
-    else
-    {
-      // "SDL/0/PS3 Controller" -> "PS3 Controller"
-      const std::size_t name_start = tester.device.find('/', tester.device.find('/') + 1);
-      const std::string name =
-          name_start == std::string::npos ? tester.device : tester.device.substr(name_start + 1);
-      ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.3f, 1.0f), "%s",
-                         Format(Tr("Connect %s."), name.c_str()).c_str());
-    }
-  };
+    draw_hint(Tr("Press buttons to test them."), LAUNCHER_ACCENT);
+  }
+  else if (tester.device.empty())
+  {
+    draw_hint(Format(Tr("No controller in %s."), std::string(CONTROLLER_PROFILE_NAME).c_str()),
+              style.Colors[ImGuiCol_TextDisabled]);
+  }
+  else
+  {
+    // "SDL/0/PS3 Controller" -> "PS3 Controller"
+    const std::size_t name_start = tester.device.find('/', tester.device.find('/') + 1);
+    const std::string name =
+        name_start == std::string::npos ? tester.device : tester.device.substr(name_start + 1);
+    draw_hint(Format(Tr("Connect %s."), name.c_str()), ImVec4(1.0f, 0.75f, 0.3f, 1.0f));
+  }
   if (!controller_art.texture)
   {
     DrawInputLegend(tester, false, bold);
-    ImGui::PushTextWrapPos(0.0f);
-    draw_hint();
-    ImGui::PopTextWrapPos();
     EndInputLegend();
     return;
   }
-  // The drawing with the hint under it, and the list beside them. The drawing
-  // is sized so that both columns stay as tall as the list.
-  const float width = std::floor(ImGui::GetContentRegionAvail().x * 0.5f);
-  ImGui::BeginGroup();
-  ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(style.ItemSpacing.x, 0.0f));
+  // The drawing and the list beside it, in two columns when they fit, which
+  // are shorter than the drawing; in one otherwise.
+  const float art_aspect = (CONTROLLER_ART_MAX.x - CONTROLLER_ART_MIN.x) /
+                           (CONTROLLER_ART_MAX.y - CONTROLLER_ART_MIN.y);
+  const float gap = style.ItemSpacing.x * 2.0f;
+  const float width = std::floor(std::min(available * 0.42f, art_height * art_aspect));
   DrawControllerArt(tester, controller_art, width, scale);
-  ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + width);
-  draw_hint();
-  ImGui::PopTextWrapPos();
-  ImGui::PopStyleVar();
-  ImGui::EndGroup();
-  ImGui::SameLine(0.0f, style.ItemSpacing.x * 2.0f);
-  DrawInputLegend(tester, false, bold);
+  ImGui::SameLine(0.0f, gap);
+  const float list_width = available - width - gap;
+  if (list_width < 2.0f * 180.0f * scale + gap)
+  {
+    DrawInputLegend(tester, false, bold);
+    EndInputLegend();
+    return;
+  }
+  const std::size_t half = (LEGEND_ROWS.size() + 1) / 2;
+  // Each column as wide as its names need when both fit, so that fewer of
+  // them wrap; halves otherwise.
+  const float first_needs = LegendNaturalWidth(tester, false, bold, 0, half);
+  const float second_needs =
+      LegendNaturalWidth(tester, false, bold, half, LEGEND_ROWS.size() - half);
+  const float first_width = first_needs + second_needs + gap <= list_width ?
+                                std::floor(first_needs) :
+                                std::floor((list_width - gap) * 0.5f);
+  DrawInputLegend(tester, false, bold, 0, half, first_width);
+  EndInputLegend();
+  ImGui::SameLine(0.0f, gap);
+  DrawInputLegend(tester, false, bold, half, LEGEND_ROWS.size() - half,
+                  list_width - gap - first_width);
   EndInputLegend();
 }
 } // namespace
@@ -2395,6 +2484,9 @@ int main(int argc, char** argv)
       renderer, release_directory, "launcher-controller.png", "launcher controller art");
   const LauncherImage keyboard_art = LoadLauncherImage(
       renderer, release_directory, "launcher-keyboard.png", "launcher keyboard art");
+  // The Mods & expansions page's picture of what expansions could be.
+  const LauncherImage mods_art =
+      LoadLauncherImage(renderer, release_directory, "launcher-mods.png", "launcher mods art");
   // The background's floor slides (RenderBackground in launcher_ui.hpp).
   const LauncherImage background = LoadLauncherImage(
       renderer, release_directory, "launcher-background.png", "launcher background", true);
@@ -2738,6 +2830,14 @@ int main(int argc, char** argv)
   std::uint64_t summary_time_played = 0;
   int summary_installed_mods = 0;
   bool summary_stale = true;
+  // The Mods & expansions page's list, read again each time it is opened.
+  // The runner loads mods from the same two folders.
+  const std::vector<fs::path> mod_folders = {release_directory / "Mods", user_directory / "Mods"};
+  std::vector<fs::path> installed_mods;
+  const auto open_mods_page = [&] {
+    current_page = LauncherPage::Mods;
+    installed_mods = moderngekko::frontend::ListInstalledMods(mod_folders);
+  };
   int result = 0;
   // Set when the player chose Quit game in the in-game menu: the launcher
   // closes instead of coming back.
@@ -3056,6 +3156,9 @@ int main(int argc, char** argv)
     if (DrawNavigationItem(Tr("Game Files"), current_page == LauncherPage::GameFiles, fonts.bold,
                            scale))
       current_page = LauncherPage::GameFiles;
+    if (DrawNavigationItem(Tr("Mods & expansions"), current_page == LauncherPage::Mods, fonts.bold,
+                           scale))
+      open_mods_page();
     if (DrawNavigationItem(Tr("Screenshots"), current_page == LauncherPage::Screenshots,
                            fonts.bold, scale))
     {
@@ -3095,22 +3198,14 @@ int main(int argc, char** argv)
     {
       if (current_page == LauncherPage::Play)
       {
-        // Header: the project banner when the build bundled one. The banner
-        // already shows the game's name, so no text title follows it.
-        if (banner.texture)
-        {
-          DrawLauncherBanner(banner);
-          ImGui::Spacing();
-        }
-
         if (current_metadata)
         {
-          // Under the banner, two columns when the build has patch notes
-          // (and they get at least a few lines): on the left the game's
-          // state, PLAY, the Netplay links and the savestate choice; on the
-          // right the PATCH NOTES panel, from the top of the left column
-          // down to the summary cards. Without notes the left column takes
-          // the whole width.
+          // Two columns over the summary cards when the build has patch notes
+          // (and they get at least a few lines): on the left the project
+          // banner, the game's state, PLAY, the Netplay links and the
+          // savestate choice; on the right the PATCH NOTES panel, from the
+          // top of the page down to the cards. Without notes the left column
+          // takes the whole width.
           const char* language_code =
               moderngekko::frontend::LanguageCode(moderngekko::frontend::ActiveLanguage());
           if (patch_notes_language != language_code)
@@ -3120,16 +3215,24 @@ int main(int argc, char** argv)
           }
           const ImVec2 columns_top = ImGui::GetCursorPos();
           const float row_width = ImGui::GetContentRegionAvail().x;
-          const float notes_width = std::floor(row_width * 0.5f);
+          const float notes_width = std::floor(row_width * 0.38f);
           // Down to the cards, which keep their usual gap above them.
           const ImVec2 notes_size(
               notes_width, ImGui::GetContentRegionAvail().y - SummaryTileHeight(scale) -
                                ImGui::GetStyle().ItemSpacing.y * 3.0f);
           const bool show_patch_notes =
               !patch_notes.empty() && notes_size.y >= ImGui::GetTextLineHeightWithSpacing() * 3.0f;
-          const float column_width =
-              show_patch_notes ? row_width - notes_width - ImGui::GetStyle().ItemSpacing.x : -1.0f;
+          const float column_width = show_patch_notes ?
+                                         row_width - notes_width - ImGui::GetStyle().ItemSpacing.x :
+                                         row_width;
 
+          // The banner already shows the game's name, so no text title
+          // follows it.
+          if (banner.texture)
+          {
+            DrawLauncherBanner(banner, column_width);
+            ImGui::Spacing();
+          }
           const std::string ready = Format(Tr("GAME READY \xC2\xB7 %s"),
                                            current_metadata.metadata->disc_id.c_str());
           DrawStatusPill(ready.c_str(), LAUNCHER_ACCENT, scale, false);
@@ -3211,9 +3314,11 @@ int main(int argc, char** argv)
               ImGui::SetTooltip("%s", Tr("Savestates are available for solo play only."));
           }
 
-          ImGui::SetNextWindowPos(ImGui::GetMainViewport()->GetCenter(), ImGuiCond_Appearing,
+          // Kept in the middle of the window as it grows or shrinks with the
+          // choice of Invite code or Direct IP, so its buttons stay in sight.
+          ImGui::SetNextWindowPos(ImGui::GetMainViewport()->GetCenter(), ImGuiCond_Always,
                                   ImVec2(0.5f, 0.5f));
-          ImGui::SetNextWindowSize(ImVec2(500 * scale, 0.0f));
+          ImGui::SetNextWindowSize(ImVec2(560 * scale, 0.0f));
           if (ImGui::BeginPopupModal("Netplay##session", nullptr, ImGuiWindowFlags_NoResize))
           {
             const bool hosting = netplay_dialog_mode == LaunchMode::Host;
@@ -3369,9 +3474,7 @@ int main(int argc, char** argv)
           {
             summary_time_played = moderngekko::frontend::ReadTimePlayed(
                 user_directory, current_metadata.metadata->disc_id);
-            // The same two folders the runner loads mods from.
-            summary_installed_mods = moderngekko::frontend::CountInstalledMods(
-                {release_directory / "Mods", user_directory / "Mods"});
+            summary_installed_mods = moderngekko::frontend::CountInstalledMods(mod_folders);
             summary_stale = false;
           }
           PlaySummary summary;
@@ -3399,12 +3502,20 @@ int main(int argc, char** argv)
           case 2:
             current_page = LauncherPage::Settings;
             break;
+          case 3:
+            open_mods_page();
+            break;
           default:
             break;
           }
         }
         else
         {
+          if (banner.texture)
+          {
+            DrawLauncherBanner(banner, ImGui::GetContentRegionAvail().x);
+            ImGui::Spacing();
+          }
           DrawStatusPill(Tr("GAME NOT INSTALLED"), ImVec4(1.0f, 0.75f, 0.3f, 1.0f), scale, false);
           ImGui::Spacing();
           ImGui::TextUnformatted(Tr("No extracted game is configured yet."));
@@ -3419,6 +3530,10 @@ int main(int argc, char** argv)
     DrawPageHeader(Tr("Settings"),
                    Tr("Changes are saved right away and apply the next time you press PLAY."),
                    fonts.bold);
+    // Two columns of about the same height, so the page fits the window: the
+    // CPU core and the game window on the left, the picture and the sound on
+    // the right.
+    const bool settings_columns = BeginPageColumns("##settings_columns");
     BeginSection("##settings_cpu", Tr("CPU CORE"));
     ImGui::SetNextItemWidth(-1.0f);
     if (ImGui::BeginCombo("##cpu_core", Tr(cpu_cores[cpu_core_index].text)))
@@ -3450,157 +3565,21 @@ int main(int argc, char** argv)
       }
       ImGui::EndCombo();
     }
-    ImGui::PushTextWrapPos(0.0f);
-    ImGui::TextDisabled("%s", Tr("JIT64 is the validated full-speed mode. StaticRecomp runs the "
-                                 "recompiled game code and is still being optimized."));
-    ImGui::TextDisabled("%s", Tr("Netplay: everyone plays with the host's CPU core."));
+    // What the cores are, under the pointer, so the page fits the window.
+    ImGui::SetItemTooltip("%s\n%s",
+                          Tr("JIT64 is the validated full-speed mode. StaticRecomp runs the "
+                             "recompiled game code and is still being optimized."),
+                          Tr("Netplay: everyone plays with the host's CPU core."));
     if (!cpu_core_override.empty())
     {
+      ImGui::PushTextWrapPos(0.0f);
       ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.3f, 1.0f), "%s",
                          Format(Tr("MODERNGEKKO_STATICRECOMP=%s is set in the environment and "
                                    "overrides this setting."),
                                 cpu_core_override.c_str())
                              .c_str());
+      ImGui::PopTextWrapPos();
     }
-    ImGui::PopTextWrapPos();
-    EndSection();
-    BeginSection("##settings_graphics", Tr("GRAPHICS"));
-    ImGui::TextUnformatted(Tr("Graphics backend"));
-    ImGui::SetNextItemWidth(-1.0f);
-    if (ImGui::BeginCombo("##graphics_backend",
-                          graphics_backends[graphics_backend_index].text))
-    {
-      for (std::size_t i = 0; i < graphics_backends.size(); ++i)
-      {
-        const bool selected = graphics_backend_index == static_cast<int>(i);
-        if (ImGui::Selectable(graphics_backends[i].text, selected))
-        {
-          const std::string previous = config.graphics_backend;
-          config.graphics_backend = graphics_backends[i].value;
-          config.resolution = resolutions[resolution_index].text;
-          config.show_fps_in_title = show_fps_in_title;
-          config.controller = selected_controller;
-          std::string error;
-          if (moderngekko::frontend::SaveConfig(user_directory, config, &error))
-          {
-            graphics_backend_index = static_cast<int>(i);
-          }
-          else
-          {
-            config.graphics_backend = previous;
-            std::lock_guard lock(dialog.mutex);
-            dialog.error = std::move(error);
-          }
-        }
-        if (selected)
-          ImGui::SetItemDefaultFocus();
-      }
-      ImGui::EndCombo();
-    }
-    ImGui::Spacing();
-    ImGui::TextUnformatted(Tr("Internal resolution"));
-    ImGui::SetNextItemWidth(-1.0f);
-    if (ImGui::BeginCombo("##resolution", resolutions[resolution_index].text))
-    {
-      for (std::size_t i = 0; i < resolutions.size(); ++i)
-      {
-        const bool selected = resolution_index == static_cast<int>(i);
-        if (ImGui::Selectable(resolutions[i].text, selected))
-        {
-          std::string error;
-          if (moderngekko::frontend::SaveConfig(user_directory, resolutions[i].text,
-                                                show_fps_in_title, selected_controller, &error))
-          {
-            resolution_index = static_cast<int>(i);
-            config.resolution = resolutions[i].text;
-          }
-          else
-          {
-            std::lock_guard lock(dialog.mutex);
-            dialog.error = std::move(error);
-          }
-        }
-      }
-      ImGui::EndCombo();
-    }
-    ImGui::Spacing();
-    // What screenshots (F9, or the in-game menu's Take screenshot) are
-    // taken at: the game is drawn at it just for them.
-    const moderngekko::frontend::ScreenshotResolutionOption& shown_shot =
-        moderngekko::frontend::FindScreenshotResolution(config.screenshot_resolution);
-    ImGui::TextUnformatted(Tr("Screenshot resolution"));
-    ImGui::SetNextItemWidth(-1.0f);
-    if (ImGui::BeginCombo("##screenshot_resolution", Tr(shown_shot.text)))
-    {
-      for (const auto& option : moderngekko::frontend::SupportedScreenshotResolutions())
-      {
-        const bool selected = &shown_shot == &option;
-        if (ImGui::Selectable(Tr(option.text), selected))
-        {
-          const std::string previous = config.screenshot_resolution;
-          config.screenshot_resolution = option.value;
-          config.resolution = resolutions[resolution_index].text;
-          config.show_fps_in_title = show_fps_in_title;
-          config.controller = selected_controller;
-          std::string error;
-          if (!moderngekko::frontend::SaveConfig(user_directory, config, &error))
-          {
-            config.screenshot_resolution = previous;
-            std::lock_guard lock(dialog.mutex);
-            dialog.error = std::move(error);
-          }
-        }
-        if (selected)
-          ImGui::SetItemDefaultFocus();
-      }
-      ImGui::EndCombo();
-    }
-    ImGui::PushTextWrapPos(0.0f);
-    ImGui::TextDisabled("%s", Tr("F9 or Take screenshot in the in-game menu. The game is drawn at "
-                                 "this resolution just for the picture, never below its own."));
-    ImGui::PopTextWrapPos();
-    ImGui::Spacing();
-    // The picture effect (also in the in-game menu's Quick settings). An
-    // effect config.ini names but the build lacks shows as None.
-    const auto& effects = moderngekko::frontend::SupportedEffects();
-    const moderngekko::frontend::EffectOption* shown_effect =
-        moderngekko::frontend::FindEffect(config.effect);
-    if (!shown_effect)
-      shown_effect = &effects.front();
-    ImGui::TextUnformatted(Tr("Visual effect"));
-    ImGui::SetNextItemWidth(-1.0f);
-    if (ImGui::BeginCombo("##effect", Tr(shown_effect->text)))
-    {
-      for (const auto& effect : effects)
-      {
-        const bool selected = shown_effect == &effect;
-        if (ImGui::Selectable(Tr(effect.text), selected))
-        {
-          const std::string previous = config.effect;
-          config.effect = effect.value;
-          config.resolution = resolutions[resolution_index].text;
-          config.show_fps_in_title = show_fps_in_title;
-          config.controller = selected_controller;
-          std::string error;
-          if (!moderngekko::frontend::SaveConfig(user_directory, config, &error))
-          {
-            config.effect = previous;
-            std::lock_guard lock(dialog.mutex);
-            dialog.error = std::move(error);
-          }
-        }
-        if (selected)
-          ImGui::SetItemDefaultFocus();
-        ImGui::Indent(12.0f * scale);
-        ImGui::PushTextWrapPos(0.0f);
-        ImGui::TextDisabled("%s", Tr(effect.description));
-        ImGui::PopTextWrapPos();
-        ImGui::Unindent(12.0f * scale);
-      }
-      ImGui::EndCombo();
-    }
-    ImGui::SetItemTooltip("%s", Tr("Drawn over the game's picture. Light enough for integrated "
-                                   "graphics."));
     EndSection();
     BeginSection("##settings_display", Tr("DISPLAY"));
     // The section's labels share a column, so the lists next to them line up.
@@ -3793,7 +3772,14 @@ int main(int argc, char** argv)
         dialog.error = std::move(error);
       }
     }
-    ImGui::SameLine(0.0f, 40.0f * scale);
+    // Beside it when both fit the column, under it otherwise.
+    {
+      const float fps_width = ImGui::GetFrameHeight() + ImGui::GetStyle().ItemInnerSpacing.x +
+                              ImGui::CalcTextSize(Tr("Show FPS in window title")).x;
+      ImGui::SameLine(0.0f, 24.0f * scale);
+      if (ImGui::GetContentRegionAvail().x < fps_width)
+        ImGui::NewLine();
+    }
     const bool previous_show_fps_in_title = show_fps_in_title;
     if (ImGui::Checkbox(Tr("Show FPS in window title"), &show_fps_in_title))
     {
@@ -3811,11 +3797,169 @@ int main(int argc, char** argv)
       }
     }
     EndSection();
+    if (settings_columns)
+      NextPageColumn();
+    BeginSection("##settings_graphics", Tr("GRAPHICS"));
+    // Each list beside its label, the lists lined up as in DISPLAY.
+    float graphics_label_width = 0.0f;
+    for (const char* label : {Tr("Graphics backend"), Tr("Internal resolution"),
+                              Tr("Screenshot resolution"), Tr("Visual effect")})
+      graphics_label_width = std::max(graphics_label_width, ImGui::CalcTextSize(label).x);
+    const float graphics_list_x = ImGui::GetCursorPosX() + graphics_label_width + 16.0f * scale;
+    ImGui::AlignTextToFramePadding();
+    ImGui::TextUnformatted(Tr("Graphics backend"));
+    ImGui::SameLine(graphics_list_x);
+    ImGui::SetNextItemWidth(-1.0f);
+    if (ImGui::BeginCombo("##graphics_backend",
+                          graphics_backends[graphics_backend_index].text))
+    {
+      for (std::size_t i = 0; i < graphics_backends.size(); ++i)
+      {
+        const bool selected = graphics_backend_index == static_cast<int>(i);
+        if (ImGui::Selectable(graphics_backends[i].text, selected))
+        {
+          const std::string previous = config.graphics_backend;
+          config.graphics_backend = graphics_backends[i].value;
+          config.resolution = resolutions[resolution_index].text;
+          config.show_fps_in_title = show_fps_in_title;
+          config.controller = selected_controller;
+          std::string error;
+          if (moderngekko::frontend::SaveConfig(user_directory, config, &error))
+          {
+            graphics_backend_index = static_cast<int>(i);
+          }
+          else
+          {
+            config.graphics_backend = previous;
+            std::lock_guard lock(dialog.mutex);
+            dialog.error = std::move(error);
+          }
+        }
+        if (selected)
+          ImGui::SetItemDefaultFocus();
+      }
+      ImGui::EndCombo();
+    }
+    ImGui::AlignTextToFramePadding();
+    ImGui::TextUnformatted(Tr("Internal resolution"));
+    ImGui::SameLine(graphics_list_x);
+    ImGui::SetNextItemWidth(-1.0f);
+    if (ImGui::BeginCombo("##resolution", resolutions[resolution_index].text))
+    {
+      for (std::size_t i = 0; i < resolutions.size(); ++i)
+      {
+        const bool selected = resolution_index == static_cast<int>(i);
+        if (ImGui::Selectable(resolutions[i].text, selected))
+        {
+          std::string error;
+          if (moderngekko::frontend::SaveConfig(user_directory, resolutions[i].text,
+                                                show_fps_in_title, selected_controller, &error))
+          {
+            resolution_index = static_cast<int>(i);
+            config.resolution = resolutions[i].text;
+          }
+          else
+          {
+            std::lock_guard lock(dialog.mutex);
+            dialog.error = std::move(error);
+          }
+        }
+      }
+      ImGui::EndCombo();
+    }
+    // What screenshots (F9, or the in-game menu's Take screenshot) are
+    // taken at: the game is drawn at it just for them.
+    const moderngekko::frontend::ScreenshotResolutionOption& shown_shot =
+        moderngekko::frontend::FindScreenshotResolution(config.screenshot_resolution);
+    ImGui::AlignTextToFramePadding();
+    ImGui::TextUnformatted(Tr("Screenshot resolution"));
+    ImGui::SameLine(graphics_list_x);
+    ImGui::SetNextItemWidth(-1.0f);
+    if (ImGui::BeginCombo("##screenshot_resolution", Tr(shown_shot.text)))
+    {
+      for (const auto& option : moderngekko::frontend::SupportedScreenshotResolutions())
+      {
+        const bool selected = &shown_shot == &option;
+        if (ImGui::Selectable(Tr(option.text), selected))
+        {
+          const std::string previous = config.screenshot_resolution;
+          config.screenshot_resolution = option.value;
+          config.resolution = resolutions[resolution_index].text;
+          config.show_fps_in_title = show_fps_in_title;
+          config.controller = selected_controller;
+          std::string error;
+          if (!moderngekko::frontend::SaveConfig(user_directory, config, &error))
+          {
+            config.screenshot_resolution = previous;
+            std::lock_guard lock(dialog.mutex);
+            dialog.error = std::move(error);
+          }
+        }
+        if (selected)
+          ImGui::SetItemDefaultFocus();
+      }
+      ImGui::EndCombo();
+    }
+    ImGui::SetItemTooltip("%s", Tr("F9 or Take screenshot in the in-game menu. The game is drawn "
+                                   "at this resolution just for the picture, never below its "
+                                   "own."));
+    // The picture effect (also in the in-game menu's Quick settings). An
+    // effect config.ini names but the build lacks shows as None.
+    const auto& effects = moderngekko::frontend::SupportedEffects();
+    const moderngekko::frontend::EffectOption* shown_effect =
+        moderngekko::frontend::FindEffect(config.effect);
+    if (!shown_effect)
+      shown_effect = &effects.front();
+    ImGui::AlignTextToFramePadding();
+    ImGui::TextUnformatted(Tr("Visual effect"));
+    ImGui::SameLine(graphics_list_x);
+    ImGui::SetNextItemWidth(-1.0f);
+    if (ImGui::BeginCombo("##effect", Tr(shown_effect->text)))
+    {
+      for (const auto& effect : effects)
+      {
+        const bool selected = shown_effect == &effect;
+        if (ImGui::Selectable(Tr(effect.text), selected))
+        {
+          const std::string previous = config.effect;
+          config.effect = effect.value;
+          config.resolution = resolutions[resolution_index].text;
+          config.show_fps_in_title = show_fps_in_title;
+          config.controller = selected_controller;
+          std::string error;
+          if (!moderngekko::frontend::SaveConfig(user_directory, config, &error))
+          {
+            config.effect = previous;
+            std::lock_guard lock(dialog.mutex);
+            dialog.error = std::move(error);
+          }
+        }
+        if (selected)
+          ImGui::SetItemDefaultFocus();
+        ImGui::Indent(12.0f * scale);
+        ImGui::PushTextWrapPos(0.0f);
+        ImGui::TextDisabled("%s", Tr(effect.description));
+        ImGui::PopTextWrapPos();
+        ImGui::Unindent(12.0f * scale);
+      }
+      ImGui::EndCombo();
+    }
+    ImGui::SetItemTooltip("%s", Tr("Drawn over the game's picture. Light enough for integrated "
+                                   "graphics."));
+    EndSection();
     BeginSection("##settings_audio", Tr("AUDIO"));
     // The game's own volume (also in the in-game menu's Quick settings),
     // written when the slider is let go. The launcher's music has its own,
-    // below it.
+    // below it. Each slider beside its label, lined up as in the sections
+    // above.
+    float audio_label_width = ImGui::CalcTextSize(Tr("Game volume")).x;
+    if (has_music)
+      audio_label_width =
+          std::max(audio_label_width, ImGui::CalcTextSize(Tr("Launcher and lobby music")).x);
+    const float audio_slider_x = ImGui::GetCursorPosX() + audio_label_width + 16.0f * scale;
+    ImGui::AlignTextToFramePadding();
     ImGui::TextUnformatted(Tr("Game volume"));
+    ImGui::SameLine(audio_slider_x);
     ImGui::SetNextItemWidth(-1.0f);
     ImGui::SliderInt("##game_volume", &config.game_volume, 0, 100, "%d %%",
                      ImGuiSliderFlags_AlwaysClamp);
@@ -3831,13 +3975,14 @@ int main(int argc, char** argv)
         dialog.error = std::move(error);
       }
     }
-    ImGui::TextDisabled("%s", Tr("Also in the in-game menu's Quick settings."));
+    ImGui::SetItemTooltip("%s", Tr("Also in the in-game menu's Quick settings."));
     if (has_music)
     {
       // The music of the launcher and the Netplay lobby: heard as it moves,
       // written when the slider is let go.
-      ImGui::Spacing();
+      ImGui::AlignTextToFramePadding();
       ImGui::TextUnformatted(Tr("Launcher and lobby music"));
+      ImGui::SameLine(audio_slider_x);
       ImGui::SetNextItemWidth(-1.0f);
       if (ImGui::SliderInt("##music_volume", &config.music_volume, 0, 100,
                            config.music_volume == 0 ? Tr("Off") : "%d %%",
@@ -3857,6 +4002,8 @@ int main(int argc, char** argv)
       }
     }
     EndSection();
+    if (settings_columns)
+      EndPageColumns();
     }
       if (current_page == LauncherPage::Controls)
       {
@@ -3870,14 +4017,29 @@ int main(int argc, char** argv)
 #else
     const bool keyboard_only = false;
 #endif
+    // One row: the controller's state, the list and the button that writes a
+    // new profile for it (under the list when they don't all fit).
+    const float controller_row_y = ImGui::GetCursorPosY();
+    ImGui::SetCursorPosY(controller_row_y +
+                         std::max(0.0f, (ImGui::GetFrameHeight() - ImGui::GetTextLineHeight() -
+                                         6.0f * scale) *
+                                            0.5f));
     if (controller_index >= 0)
       DrawStatusPill(Tr("CONNECTED"), LAUNCHER_ACCENT, scale, false);
     else if (keyboard_only)
       DrawStatusPill(Tr("KEYBOARD ONLY"), LAUNCHER_ACCENT, scale, false);
     else
       DrawStatusPill(Tr("NOT DETECTED"), ImVec4(1.0f, 0.75f, 0.3f, 1.0f), scale, false);
-    ImGui::Spacing();
-    ImGui::SetNextItemWidth(-1.0f);
+    ImGui::SameLine();
+    ImGui::SetCursorPosY(controller_row_y);
+    const char* replace_label = Tr(REPLACE_PROFILE_BUTTON);
+    const float replace_width =
+        ImGui::CalcTextSize(replace_label).x + ImGui::GetStyle().FramePadding.x * 2.0f;
+    const bool replace_beside = ImGui::GetContentRegionAvail().x - replace_width -
+                                    ImGui::GetStyle().ItemSpacing.x >=
+                                200.0f * scale;
+    ImGui::SetNextItemWidth(replace_beside ? -(replace_width + ImGui::GetStyle().ItemSpacing.x) :
+                                             -1.0f);
     const char* controller_preview = controller_index >= 0
                                          ? controllers[controller_index].label.c_str()
                                      : keyboard_only ? Tr("Keyboard only")
@@ -3908,11 +4070,33 @@ int main(int argc, char** argv)
       }
       ImGui::EndCombo();
     }
-    ImGui::PushTextWrapPos(0.0f);
-    ImGui::TextDisabled("%s", controller_status.Text().c_str());
-    ImGui::PopTextWrapPos();
+    if (replace_beside)
+      ImGui::SameLine();
+#ifdef MODERNGEKKO_GAMECUBE_CONTROLLERS
+    // Without a gamepad this writes the keyboard-only profile.
+    ImGui::BeginDisabled(false);
+#else
+    ImGui::BeginDisabled(controller_index < 0);
+#endif
+    if (ImGui::Button(replace_label))
+    {
+#ifdef MODERNGEKKO_GAMECUBE_CONTROLLERS
+      if (controller_index < 0)
+        select_keyboard_only();
+      else
+#endif
+        select_controller(controller_index);
+    }
+    ImGui::EndDisabled();
+    // What the last change did is in the footer, always in sight.
     EndSection();
+    // The bottom of the page, which the tester's drawing grows down to.
+    const float page_bottom = ImGui::GetCursorScreenPos().y + ImGui::GetContentRegionAvail().y;
     BeginSection("##controls_mapping", Tr("BUTTON MAPPING"));
+    // The heading's line, where the tester says how to use it.
+    const TesterHintLine hint_line{ImGui::GetItemRectMin().y, ImGui::GetItemRectMax().x,
+                                   ImGui::GetCursorScreenPos().x +
+                                       ImGui::GetContentRegionAvail().x};
     ImGui::PushTextWrapPos(0.0f);
     if (controller_profile_exists)
       ImGui::TextDisabled("%s", Format(Tr("Using %s from your user folder."),
@@ -3925,24 +4109,8 @@ int main(int argc, char** argv)
     ImGui::PopTextWrapPos();
     // The tester starts on the line above, where it puts its tabs.
     if (controller_profile_exists)
-      DrawControllerTester(controller_tester, controller_art, keyboard_art, fonts.bold, scale);
-    ImGui::Spacing();
-#ifdef MODERNGEKKO_GAMECUBE_CONTROLLERS
-    // Without a gamepad this writes the keyboard-only profile.
-    ImGui::BeginDisabled(false);
-#else
-    ImGui::BeginDisabled(controller_index < 0);
-#endif
-    if (ImGui::Button(Tr(REPLACE_PROFILE_BUTTON)))
-    {
-#ifdef MODERNGEKKO_GAMECUBE_CONTROLLERS
-      if (controller_index < 0)
-        select_keyboard_only();
-      else
-#endif
-        select_controller(controller_index);
-    }
-    ImGui::EndDisabled();
+      DrawControllerTester(controller_tester, controller_art, keyboard_art, fonts.bold, scale,
+                           page_bottom, hint_line);
     EndSection();
     }
       if (current_page == LauncherPage::GameFiles)
@@ -3951,6 +4119,13 @@ int main(int argc, char** argv)
                    Tr("Use your own copy of the game as an ISO, WBFS or RVZ image. It is "
                       "extracted once and reused afterwards."),
                    fonts.bold);
+    // The game and its disc image on the left, the complete save on the
+    // right when the build brings one.
+#ifdef MODERNGEKKO_REQUIRED_DISC_ID
+    const bool files_columns = has_complete_save && BeginPageColumns("##files_columns");
+#else
+    const bool files_columns = false;
+#endif
     BeginSection("##files_installed", Tr("INSTALLED GAME"));
     if (current_metadata)
     {
@@ -4028,6 +4203,8 @@ int main(int argc, char** argv)
 #ifdef MODERNGEKKO_REQUIRED_DISC_ID
     if (has_complete_save)
     {
+      if (files_columns)
+        NextPageColumn();
       BeginSection("##files_complete_save", Tr("COMPLETE SAVE"));
       if (save_checked_at == 0 || SDL_GetTicks() - save_checked_at >= 1000)
       {
@@ -4146,7 +4323,81 @@ int main(int argc, char** argv)
       EndSection();
     }
 #endif
+    if (files_columns)
+      EndPageColumns();
     }
+      if (current_page == LauncherPage::Mods)
+      {
+    DrawPageHeader(Tr("Mods & expansions"),
+                   Tr("Mods change the game or add to it when it starts, without touching your "
+                      "copy of it."),
+                   fonts.bold);
+    // What is installed on the left, what is planned on the right.
+    const float mods_page_bottom =
+        ImGui::GetCursorScreenPos().y + ImGui::GetContentRegionAvail().y;
+    const bool mods_columns = BeginPageColumns("##mods_columns", 0.48f);
+    BeginSection("##mods_installed", Tr("INSTALLED MODS"));
+    if (installed_mods.empty())
+    {
+      ImGui::TextUnformatted(Tr("No mods installed yet."));
+    }
+    else
+    {
+      for (const fs::path& mod : installed_mods)
+      {
+        ImGui::Bullet();
+        ImGui::SameLine();
+        ImGui::TextUnformatted(moderngekko::frontend::ModPackageName(mod).c_str());
+        ImGui::SetItemTooltip("%s", moderngekko::frontend::PathText(mod).c_str());
+      }
+    }
+    ImGui::Spacing();
+    ImGui::PushTextWrapPos(0.0f);
+    ImGui::TextDisabled("%s", Tr("Mod packages (.mgm) go in this folder and load when the game "
+                                 "starts:"));
+    ImGui::TextUnformatted(moderngekko::frontend::PathText(user_directory / "Mods").c_str());
+    ImGui::PopTextWrapPos();
+    ImGui::Spacing();
+    if (ImGui::Button(Tr("Open folder")))
+      OpenFolder(user_directory / "Mods");
+    ImGui::Spacing();
+    ImGui::PushTextWrapPos(0.0f);
+    ImGui::TextDisabled("%s", Tr("Mod support is experimental: SR-ZGS doesn't have mods of its "
+                                 "own yet."));
+    ImGui::PopTextWrapPos();
+    EndSection();
+    if (mods_columns)
+      NextPageColumn();
+    BeginSection("##mods_expansions", Tr("EXPANSIONS"));
+    ImGui::SameLine();
+    DrawStatusPill(Tr("PLANNED"), LAUNCHER_ACCENT, scale, true);
+    const char* expansions_text = Tr("Story campaigns, characters, tracks and more, made by the "
+                                     "community, without changing the original game files.");
+    const char* expansions_goal = Tr("A long-term goal of the project.");
+    if (mods_art.texture)
+    {
+      // As large as the column and the room above the text under it allow,
+      // so the page doesn't scroll.
+      const ImGuiStyle& style = ImGui::GetStyle();
+      const float width = ImGui::GetContentRegionAvail().x;
+      const float text_height =
+          ImGui::CalcTextSize(expansions_text, nullptr, false, width).y +
+          ImGui::CalcTextSize(expansions_goal, nullptr, false, width).y + style.ItemSpacing.y * 2.0f;
+      const float room = mods_page_bottom - ImGui::GetCursorScreenPos().y - text_height -
+                         style.WindowPadding.y * 0.75f - style.ItemSpacing.y * 3.0f;
+      const float art_width = std::floor(std::clamp(room / mods_art.aspect, 120.0f * scale, width));
+      ImGui::SetCursorPosX(ImGui::GetCursorPosX() + std::floor((width - art_width) * 0.5f));
+      DrawLauncherBanner(mods_art, art_width);
+      ImGui::Spacing();
+    }
+    ImGui::PushTextWrapPos(0.0f);
+    ImGui::TextUnformatted(expansions_text);
+    ImGui::TextDisabled("%s", expansions_goal);
+    ImGui::PopTextWrapPos();
+    EndSection();
+    if (mods_columns)
+      EndPageColumns();
+      }
       if (current_page == LauncherPage::Screenshots)
         show_screenshots();
       if (current_page == LauncherPage::Credits)

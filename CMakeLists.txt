@@ -72,6 +72,8 @@ set(MODERNGEKKO_LAUNCHER_CONTROLLER_ART "" CACHE FILEPATH
     "Optional PNG of the SR-ZGS controller drawing for the Controls page tester")
 set(MODERNGEKKO_LAUNCHER_KEYBOARD_ART "" CACHE FILEPATH
     "Optional PNG of the SR-ZGS keyboard drawing for the Controls page tester")
+set(MODERNGEKKO_LAUNCHER_MODS_ART "" CACHE FILEPATH
+    "Optional PNG shown in the EXPANSIONS panel of the launcher's Mods & expansions page")
 set(MODERNGEKKO_LOBBY_ART "" CACHE FILEPATH
     "Optional portrait PNG shown on the left of the Netplay lobby")
 set(MODERNGEKKO_LAUNCHER_BACKGROUND "" CACHE FILEPATH
@@ -792,6 +794,10 @@ if(MODERNGEKKO_ENABLE_DOLPHIN_RUNTIME)
     # positions in the launcher matching that drawing.
     moderngekko_add_resource(moderngekko-launcher "${MODERNGEKKO_LAUNCHER_KEYBOARD_ART}"
                              launcher-keyboard.png)
+    # Resources/launcher-mods.png: the picture of the Mods & expansions page's
+    # EXPANSIONS panel. Without it the panel is text only.
+    moderngekko_add_resource(moderngekko-launcher "${MODERNGEKKO_LAUNCHER_MODS_ART}"
+                             launcher-mods.png)
     # Resources/launcher-background.png fills the window behind the pages (a
     # grid floor in it slides, see tools/moving_background.hpp), and
     # Resources/launcher-music.mp3 loops while the launcher is open.

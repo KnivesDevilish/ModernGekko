@@ -21,7 +21,9 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <string>
 #include <string_view>
+#include <system_error>
 #include <vector>
 
 namespace moderngekko::frontend::ui
@@ -402,6 +404,39 @@ inline void EndSection()
   ImGui::Spacing();
 }
 
+// Two columns of sections side by side, so a page uses the launcher's width
+// instead of growing down: the first column takes first_share of the width,
+// the second the rest, with the usual gap between items. Sections inside take
+// their column's width. BeginPageColumns() starts the first column,
+// NextPageColumn() the second, and EndPageColumns() ends both (only when
+// BeginPageColumns() returned true).
+inline bool BeginPageColumns(const char* id, float first_share = 0.5f)
+{
+  // The cells' padding is read as the table and its row start, so it only
+  // changes for them, not for tables inside the columns.
+  ImGui::PushStyleVar(ImGuiStyleVar_CellPadding,
+                      ImVec2(ImGui::GetStyle().ItemSpacing.x * 0.5f, 0.0f));
+  const bool open = ImGui::BeginTable(id, 2, ImGuiTableFlags_NoPadOuterX);
+  if (open)
+  {
+    ImGui::TableSetupColumn("##first", ImGuiTableColumnFlags_WidthStretch, first_share);
+    ImGui::TableSetupColumn("##second", ImGuiTableColumnFlags_WidthStretch, 1.0f - first_share);
+    ImGui::TableNextColumn();
+  }
+  ImGui::PopStyleVar();
+  return open;
+}
+
+inline void NextPageColumn()
+{
+  ImGui::TableNextColumn();
+}
+
+inline void EndPageColumns()
+{
+  ImGui::EndTable();
+}
+
 // One of a row of side-by-side choices, such as Netplay's Invite code / Direct
 // IP: the chosen one dark green with a lime label and underline, the others
 // quiet. Returns true when clicked.
@@ -436,6 +471,19 @@ inline bool DrawChoiceButton(const char* label, bool selected, ImVec2 size, ImFo
         ImGui::GetColorU32(LAUNCHER_ACCENT), 2.0f * scale);
   }
   return clicked;
+}
+
+// Opens a folder in the system's file manager, making it first when it is
+// missing (a Mods or ScreenShots folder nothing was put in yet).
+inline void OpenFolder(const fs::path& folder)
+{
+  std::error_code ec;
+  fs::create_directories(folder, ec);
+  std::string url = "file://";
+  const std::string text = folder.generic_string();
+  if (!text.starts_with('/'))
+    url += '/';
+  SDL_OpenURL((url + text).c_str());
 }
 
 // A text button without a frame, such as "Host Netplay" under PLAY.
