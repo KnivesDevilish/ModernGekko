@@ -174,6 +174,10 @@ struct RuntimeConfig
   WindowSystem window_system = WindowSystem::Default;
   bool headless = false;
   bool fullscreen = false;
+  // The game window's size when it opens (out of fullscreen); 0 fits it to
+  // the screen (src/runtime/window_size.hpp).
+  int window_width = 0;
+  int window_height = 0;
   bool allow_interpreter = false;
   bool show_fps_in_title = true;
   std::optional<std::string> window_title;

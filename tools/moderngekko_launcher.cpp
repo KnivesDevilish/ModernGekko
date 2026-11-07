@@ -3621,6 +3621,7 @@ int main(int argc, char** argv)
     if (!game_borders.borders.empty())
       display_label_width =
           std::max(display_label_width, ImGui::CalcTextSize(Tr("4:3 borders")).x);
+    display_label_width = std::max(display_label_width, ImGui::CalcTextSize(Tr("Window size")).x);
     const float display_list_x = display_label_x + display_label_width + 16.0f * scale;
     ImGui::AlignTextToFramePadding();
     ImGui::TextUnformatted(Tr("Aspect ratio"));
@@ -3733,6 +3734,59 @@ int main(int argc, char** argv)
       }
       ImGui::SetItemTooltip("%s", Tr("Pictures beside the game when it is shown in 4:3 on a "
                                      "wider screen. In Netplay too, only you see your choice."));
+    }
+    {
+      // The game window's size out of fullscreen. A size config.ini has
+      // that the list lacks shows as written.
+      const auto& window_sizes = moderngekko::frontend::SupportedWindowSizes();
+      const moderngekko::frontend::WindowSizeOption* shown_size = nullptr;
+      for (const auto& option : window_sizes)
+      {
+        if (config.window_size == option.value)
+          shown_size = &option;
+      }
+      const std::string shown_size_text =
+          shown_size ? std::string(Tr(shown_size->text)) :
+          moderngekko::frontend::WindowSizeOf(config.window_size).width > 0 ?
+                       config.window_size :
+                       std::string(Tr("Automatic"));
+      ImGui::AlignTextToFramePadding();
+      ImGui::TextUnformatted(Tr("Window size"));
+      ImGui::SameLine(display_list_x);
+      ImGui::SetNextItemWidth(-1.0f);
+      if (ImGui::BeginCombo("##window_size", shown_size_text.c_str()))
+      {
+        for (const auto& option : window_sizes)
+        {
+          const bool selected = shown_size == &option;
+          if (ImGui::Selectable(Tr(option.text), selected))
+          {
+            const std::string previous = config.window_size;
+            config.window_size = option.value;
+            config.resolution = resolutions[resolution_index].text;
+            config.show_fps_in_title = show_fps_in_title;
+            config.controller = selected_controller;
+            std::string error;
+            if (!moderngekko::frontend::SaveConfig(user_directory, config, &error))
+            {
+              config.window_size = previous;
+              std::lock_guard lock(dialog.mutex);
+              dialog.error = std::move(error);
+            }
+          }
+          if (selected)
+            ImGui::SetItemDefaultFocus();
+          if (*option.description)
+          {
+            ImGui::Indent(12.0f * scale);
+            ImGui::TextDisabled("%s", Tr(option.description));
+            ImGui::Unindent(12.0f * scale);
+          }
+        }
+        ImGui::EndCombo();
+      }
+      ImGui::SetItemTooltip("%s", Tr("The game window's size when it isn't fullscreen. How sharp "
+                                     "the game looks is the internal resolution, in Graphics."));
     }
     ImGui::Spacing();
     const bool previous_fullscreen = fullscreen;

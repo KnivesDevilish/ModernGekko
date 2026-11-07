@@ -49,6 +49,16 @@ struct ScreenshotResolutionOption {
   int dolphin_scale;
 };
 
+// A size for the game window (out of fullscreen). value is config.ini's;
+// width and height 0 fit it to the screen.
+struct WindowSizeOption {
+  const char *text;
+  const char *value;
+  int width;
+  int height;
+  const char *description;
+};
+
 struct ConfigResult {
   int dolphin_scale = 0;
   std::string resolution;
@@ -70,6 +80,9 @@ struct ConfigResult {
   std::string effect = "none";
   // The game's volume, 0 (silent) to 100.
   int game_volume = 100;
+  // The game window's size: "auto" (fits the screen), one of
+  // SupportedWindowSizes()' values, or another "<width>x<height>".
+  std::string window_size = "auto";
   // What screenshots are taken at: one of SupportedScreenshotResolutions()'
   // values. Never below the game's own resolution.
   std::string screenshot_resolution = "3840x2160";
@@ -103,6 +116,15 @@ const std::vector<AspectRatioOption> &SupportedAspectRatios();
 const std::vector<EffectOption> &SupportedEffects();
 // The effect of config.ini's value; nullptr for one this build doesn't have.
 const EffectOption *FindEffect(std::string_view value);
+// Automatic first, then sizes from small to large.
+const std::vector<WindowSizeOption> &SupportedWindowSizes();
+// The width and height of config.ini's value; 0 and 0 (fit the screen) for
+// "auto" or a value that isn't a size from 320x240 to 7680x4320.
+struct WindowDimensions {
+  int width = 0;
+  int height = 0;
+};
+WindowDimensions WindowSizeOf(std::string_view value);
 // From the game's own resolution up; ConfigResult's default among them.
 const std::vector<ScreenshotResolutionOption> &SupportedScreenshotResolutions();
 // The option of config.ini's value; the default's for one that isn't listed.

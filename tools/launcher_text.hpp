@@ -457,6 +457,11 @@ inline constexpr Translation SPANISH_TEXTS[] = {
     {"Down arrow", "Flecha abajo"},
     {"Left arrow", "Flecha izquierda"},
     {"Right arrow", "Flecha derecha"},
+    // Window size (Settings)
+    {"Window size", "Tamaño de la ventana"},
+    {"Automatic", "Automático"},
+    {"Fits your screen.", "Se ajusta a tu pantalla."},
+    {"The game window's size when it isn't fullscreen. How sharp the game looks is the internal resolution, in Graphics.", "El tamaño de la ventana del juego cuando no está en pantalla completa. Lo nítido que se ve el juego lo decide la resolución interna, en Gráficos."},
     // Screenshots (Settings)
     {"Screenshot resolution", "Resolución de las capturas"},
     {"Same as the game", "Igual que el juego"},
@@ -873,6 +878,11 @@ inline constexpr Translation JAPANESE_TEXTS[] = {
     {"Down arrow", "下矢印"},
     {"Left arrow", "左矢印"},
     {"Right arrow", "右矢印"},
+    // Window size (Settings)
+    {"Window size", "ウィンドウサイズ"},
+    {"Automatic", "自動"},
+    {"Fits your screen.", "画面に合わせます。"},
+    {"The game window's size when it isn't fullscreen. How sharp the game looks is the internal resolution, in Graphics.", "全画面でないときのゲームウィンドウの大きさです。ゲームの鮮明さは「グラフィック」の内部解像度で決まります。"},
     // Screenshots (Settings)
     {"Screenshot resolution", "スクリーンショットの解像度"},
     {"Same as the game", "ゲームと同じ"},

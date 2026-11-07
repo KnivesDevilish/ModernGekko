@@ -6,8 +6,10 @@
 // Shift+F1-F8, F11, F12) exist only when the build keeps savestates
 // (MODERNGEKKO_SAVESTATES, CMakeLists.txt); F9 takes the runtime's
 // screenshot, at the resolution chosen for screenshots
-// (src/runtime/screenshot_keys.hpp), and F10 (pause) waits while one is taken.
-// Alt+Enter (fullscreen) and Ctrl+Esc (quit) stay.
+// (src/runtime/screenshot_keys.hpp), and F10 (pause) waits while one is taken;
+// the window opens at the size chosen in the launcher, or 1280x720, and the
+// compositor places it (src/runtime/window_size.hpp). Alt+Enter (fullscreen)
+// and Ctrl+Esc (quit) stay.
 
 // Without the CMake option (CMakeLists.txt always passes it), the window keeps
 // its savestate keys, as before.
@@ -47,6 +49,7 @@
 #endif
 #include "Core/System.h"
 #include "../runtime/screenshot_keys.hpp"
+#include "../runtime/window_size.hpp"
 #include "UICommon/UICommon.h"
 #include "VideoCommon/Present.h"
 
@@ -223,6 +226,12 @@ PlatformWayland::~PlatformWayland()
 bool PlatformWayland::Init()
 {
   m_owner_thread = std::this_thread::get_id();
+  // The size chosen in the launcher, or 1280x720: a Wayland client can't see
+  // the screen before its window is shown, and the compositor places it.
+  const moderngekko::detail::WindowPlace place =
+      moderngekko::detail::PlaceWindow(moderngekko::detail::RequestedWindowSize(), {});
+  m_width = m_pending_width = place.width;
+  m_height = m_pending_height = place.height;
   m_xkb_context = xkb_context_new(XKB_CONTEXT_NO_FLAGS);
   m_display = wl_display_connect(nullptr);
   if (!m_display)

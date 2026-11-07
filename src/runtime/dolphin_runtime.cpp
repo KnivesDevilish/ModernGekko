@@ -34,6 +34,7 @@
 #include "pulse_volume.hpp"
 #endif
 #include "screenshot.hpp"
+#include "window_size.hpp"
 #include "moderngekko/cpu_state.h"
 #include "moderngekko/mod_loader.hpp"
 #include "moderngekko/module_loader.hpp"
@@ -654,6 +655,8 @@ RuntimeCreateResult Runtime::Create(RuntimeConfig config) {
     impl->ui_initialized = true;
   }
   Config::SetBase(Config::MAIN_FULLSCREEN, impl->config.fullscreen);
+  // Read by the fork's windows (src/platform/) as they open.
+  detail::RequestedWindowSize() = {impl->config.window_width, impl->config.window_height};
 
   if (impl->config.headless)
     impl->platform = Platform::CreateHeadlessPlatform();

@@ -995,6 +995,15 @@ if(BUILD_TESTING)
     add_test(NAME moderngekko.screenshot_steps
              COMMAND moderngekko_screenshot_steps_test)
 
+    # Header-only: the game window's size and place when it opens.
+    add_executable(moderngekko_window_size_test
+        tests/window_size_test.cpp)
+    target_include_directories(moderngekko_window_size_test PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/src")
+    target_compile_features(moderngekko_window_size_test PRIVATE cxx_std_23)
+    add_test(NAME moderngekko.window_size
+             COMMAND moderngekko_window_size_test)
+
     # The Netplay lobby's cached hash of the game files.
     add_executable(moderngekko_game_files_hash_test
         tests/game_files_hash_test.cpp

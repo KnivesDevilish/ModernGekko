@@ -475,6 +475,45 @@ int main() {
       previous = option.dolphin_scale;
     }
   }
+  // The window: automatic by default, a listed size or one written by hand
+  // kept, anything else fitting the screen, and a value with spaces refused.
+  {
+    const fs::path windows = directory / "windows";
+    auto window_config = netplay_config;
+    const auto defaults = moderngekko::frontend::LoadConfig(windows, true);
+    const auto automatic = moderngekko::frontend::WindowSizeOf(defaults.window_size);
+    if (!defaults || defaults.window_size != "auto" || automatic.width != 0 ||
+        automatic.height != 0)
+      return 101;
+    window_config.window_size = "1600x900";
+    if (!moderngekko::frontend::SaveConfig(windows, window_config, &error))
+      return 102;
+    const auto loaded = moderngekko::frontend::LoadConfig(windows, false);
+    const auto chosen = moderngekko::frontend::WindowSizeOf(loaded.window_size);
+    if (loaded.window_size != "1600x900" || chosen.width != 1600 || chosen.height != 900)
+      return 103;
+    const auto by_hand = moderngekko::frontend::WindowSizeOf("1000x700");
+    if (by_hand.width != 1000 || by_hand.height != 700)
+      return 104;
+    for (const char *odd : {"big", "100x100", "1280x", "x720", "-1280x720", "99999x720",
+                            "1280x720x2", "8000x4000"}) {
+      const auto size = moderngekko::frontend::WindowSizeOf(odd);
+      if (size.width != 0 || size.height != 0)
+        return 105;
+    }
+    window_config.window_size = "wide window";
+    if (moderngekko::frontend::SaveConfig(windows, window_config, &error))
+      return 106;
+    std::ofstream(windows / "config.ini", std::ios::trunc)
+        << "[Video]\nresolution=1920x1080\nwindow_size=a b\n";
+    if (moderngekko::frontend::LoadConfig(windows, false))
+      return 107;
+    for (const auto &option : moderngekko::frontend::SupportedWindowSizes()) {
+      const auto size = moderngekko::frontend::WindowSizeOf(option.value);
+      if (size.width != option.width || size.height != option.height)
+        return 108;
+    }
+  }
 
   fs::remove_all(directory);
   return 0;

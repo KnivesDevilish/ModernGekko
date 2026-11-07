@@ -411,6 +411,11 @@ int RunMain(int argc, char **argv) {
   if (config.graphics.backend.empty())
     config.graphics.backend = frontend_config.graphics_backend;
   config.fullscreen = frontend_config.fullscreen;
+  {
+    const auto window = moderngekko::frontend::WindowSizeOf(frontend_config.window_size);
+    config.window_width = window.width;
+    config.window_height = window.height;
+  }
   config.show_fps_in_title = frontend_config.show_fps_in_title;
   if (frontend_config.aspect_ratio == "4:3")
     config.graphics.aspect_ratio = moderngekko::AspectRatio::Standard;

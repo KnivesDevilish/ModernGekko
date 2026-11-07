@@ -6,8 +6,10 @@
 // Shift+F1-F8, F11, F12) exist only when the build keeps savestates
 // (MODERNGEKKO_SAVESTATES, CMakeLists.txt); F9 takes the runtime's
 // screenshot, at the resolution chosen for screenshots
-// (src/runtime/screenshot_keys.hpp), and F10 (pause) waits while one is taken.
-// Alt+Enter (fullscreen) and Ctrl+Esc (quit) stay.
+// (src/runtime/screenshot_keys.hpp), and F10 (pause) waits while one is taken;
+// the window opens at the size chosen in the launcher, or one that fits the
+// primary monitor, in its middle (src/runtime/window_size.hpp). Alt+Enter
+// (fullscreen) and Ctrl+Esc (quit) stay.
 
 // Without the CMake option (CMakeLists.txt always passes it), the window keeps
 // its savestate keys, as before.
@@ -33,6 +35,7 @@ static constexpr auto X_None = None;
 #endif
 #include "Core/System.h"
 #include "../runtime/screenshot_keys.hpp"
+#include "../runtime/window_size.hpp"
 
 #include <cstring>
 #include <thread>
@@ -94,6 +97,43 @@ PlatformX11::~PlatformX11()
   }
 }
 
+namespace
+{
+// The primary monitor's place on the desktop (the first monitor when none is
+// primary), or the whole screen without XRandR 1.5.
+moderngekko::detail::ScreenArea PrimaryMonitor(Display* display)
+{
+#ifdef HAVE_XRANDR
+  int event_base = 0;
+  int error_base = 0;
+  int major = 0;
+  int minor = 0;
+  if (XRRQueryExtension(display, &event_base, &error_base) &&
+      XRRQueryVersion(display, &major, &minor) && (major > 1 || (major == 1 && minor >= 5)))
+  {
+    moderngekko::detail::ScreenArea area;
+    int count = 0;
+    if (XRRMonitorInfo* monitors =
+            XRRGetMonitors(display, DefaultRootWindow(display), True, &count))
+    {
+      for (int i = 0; i < count; ++i)
+      {
+        if (i == 0 || monitors[i].primary)
+          area = {monitors[i].x, monitors[i].y, monitors[i].width, monitors[i].height};
+        if (monitors[i].primary)
+          break;
+      }
+      XRRFreeMonitors(monitors);
+    }
+    if (area.width > 0 && area.height > 0)
+      return area;
+  }
+#endif
+  const int screen = DefaultScreen(display);
+  return {0, 0, DisplayWidth(display, screen), DisplayHeight(display, screen)};
+}
+}  // namespace
+
 bool PlatformX11::Init()
 {
   XInitThreads();
@@ -104,8 +144,29 @@ bool PlatformX11::Init()
     return false;
   }
 
+  // The size chosen in the launcher, or one that fits the screen, in the
+  // middle of the primary monitor.
+  const moderngekko::detail::WindowPlace place = moderngekko::detail::PlaceWindow(
+      moderngekko::detail::RequestedWindowSize(), PrimaryMonitor(m_display));
+  m_window_x = place.x;
+  m_window_y = place.y;
+  m_window_width = static_cast<unsigned int>(place.width);
+  m_window_height = static_cast<unsigned int>(place.height);
+
   m_window = XCreateSimpleWindow(m_display, DefaultRootWindow(m_display), m_window_x, m_window_y,
                                  m_window_width, m_window_height, 0, 0, BlackPixel(m_display, 0));
+  // Window managers place windows as they like, unless told the program
+  // asked for this place and size.
+  if (XSizeHints* hints = XAllocSizeHints())
+  {
+    hints->flags = PPosition | PSize;
+    hints->x = m_window_x;
+    hints->y = m_window_y;
+    hints->width = static_cast<int>(m_window_width);
+    hints->height = static_cast<int>(m_window_height);
+    XSetWMNormalHints(m_display, m_window, hints);
+    XFree(hints);
+  }
   XSelectInput(m_display, m_window, StructureNotifyMask | KeyPressMask | FocusChangeMask);
   Atom wmProtocols[1];
   wmProtocols[0] = XInternAtom(m_display, "WM_DELETE_WINDOW", True);

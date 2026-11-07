@@ -245,6 +245,48 @@ const EffectOption *FindEffect(std::string_view value) {
   return nullptr;
 }
 
+const std::vector<WindowSizeOption> &SupportedWindowSizes() {
+  static const std::vector<WindowSizeOption> sizes = {
+      {MODERNGEKKO_UI_TEXT("Automatic"), "auto", 0, 0,
+       MODERNGEKKO_UI_TEXT("Fits your screen.")},
+      {"960x540", "960x540", 960, 540, ""},
+      {"1280x720", "1280x720", 1280, 720, ""},
+      {"1600x900", "1600x900", 1600, 900, ""},
+      {"1920x1080", "1920x1080", 1920, 1080, ""},
+      {"2560x1440", "2560x1440", 2560, 1440, ""},
+  };
+  return sizes;
+}
+
+WindowDimensions WindowSizeOf(std::string_view value) {
+  for (const WindowSizeOption &option : SupportedWindowSizes()) {
+    if (value == option.value)
+      return {option.width, option.height};
+  }
+  // Another size written by hand: digits, "x", digits.
+  const std::size_t x = value.find('x');
+  if (x == std::string_view::npos)
+    return {};
+  const auto number = [](std::string_view digits, int *out) {
+    if (digits.empty() || digits.size() > 5)
+      return false;
+    int result = 0;
+    for (const char c : digits) {
+      if (c < '0' || c > '9')
+        return false;
+      result = result * 10 + (c - '0');
+    }
+    *out = result;
+    return true;
+  };
+  WindowDimensions size;
+  if (!number(value.substr(0, x), &size.width) ||
+      !number(value.substr(x + 1), &size.height) || size.width < 320 ||
+      size.height < 240 || size.width > 7680 || size.height > 4320)
+    return {};
+  return size;
+}
+
 const std::vector<ScreenshotResolutionOption> &SupportedScreenshotResolutions() {
   // Up to 8x: the picture is drawn at it and then copied twice (to scale it
   // to the screen's shape and to read it back), which at 12x asks for more
@@ -364,6 +406,13 @@ ConfigResult LoadConfig(const fs::path &user_directory,
       if (config.effect.empty() ||
           config.effect.find_first_of(" \t\r\n=") != std::string::npos)
         return {.error = "effect must be none or the name of an effect"};
+    } else if (key == "window_size") {
+      // Kept as written: a size this build doesn't list still works, and
+      // anything else fits the screen.
+      config.window_size = value;
+      if (config.window_size.empty() ||
+          config.window_size.find_first_of(" \t\r\n=") != std::string::npos)
+        return {.error = "window_size must be auto or a size such as 1280x720"};
     } else if (key == "screenshot_resolution") {
       // Kept as written, as effect is: one this build doesn't list takes
       // the default.
@@ -545,6 +594,12 @@ bool SaveConfig(const fs::path &user_directory, const ConfigResult &config,
       *error = "screenshot_resolution must be game or a resolution";
     return false;
   }
+  if (config.window_size.empty() ||
+      config.window_size.find_first_of(" \t\r\n=") != std::string::npos) {
+    if (error)
+      *error = "window_size must be auto or a size such as 1280x720";
+    return false;
+  }
   std::error_code ec;
   fs::create_directories(user_directory, ec);
   if (ec) {
@@ -575,6 +630,9 @@ bool SaveConfig(const fs::path &user_directory, const ConfigResult &config,
        << config.resolution << '\n'
        << "backend=" << graphics_backend << '\n'
        << "fullscreen=" << (config.fullscreen ? "true" : "false") << '\n'
+       << "# The game window out of fullscreen: auto (fits the screen) or a\n"
+       << "# size such as 1280x720\n"
+       << "window_size=" << config.window_size << '\n'
        << "# 16:9, 4:3 or stretch\n"
        << "aspect_ratio=" << aspect_ratio << '\n'
        << "# Pictures beside a 4:3 game: none, random or a border's id\n"
