@@ -33,6 +33,7 @@
 #if MODERNGEKKO_HAS_PULSE
 #include "pulse_volume.hpp"
 #endif
+#include "screenshot.hpp"
 #include "moderngekko/cpu_state.h"
 #include "moderngekko/mod_loader.hpp"
 #include "moderngekko/module_loader.hpp"
@@ -120,9 +121,11 @@ PowerPC::CPUCore SelectCPUCore() {
 std::vector<std::string> Host_GetPreferredLocales() { return {}; }
 void Host_PPCSymbolsChanged() {}
 void Host_PPCBreakpointsChanged() {}
-// The in-game menu keeps the controllers' input from the game while it is open.
+// The in-game menu keeps the controllers' input from the game while it is open,
+// and so does a paused game running a few frames for a screenshot.
 bool Host_UIBlocksControllerState() {
-  return moderngekko::detail::GameMenuBlocksInput();
+  return moderngekko::detail::GameMenuBlocksInput() ||
+         moderngekko::detail::ScreenshotBlocksInput();
 }
 void Host_Message(HostMessageID id) {
   if (id == HostMessageID::WMUserStop && s_platform)
@@ -537,6 +540,8 @@ struct Runtime::Impl {
   // The game's volume, which Dolphin's PulseAudio backend leaves out.
   std::unique_ptr<detail::PulseStreamVolume> pulse_volume;
 #endif
+  // F9's and the menu's screenshots, at graphics.screenshot_scale.
+  std::unique_ptr<detail::HighResScreenshot> screenshot;
 };
 
 namespace detail {
@@ -852,6 +857,20 @@ RuntimeRunResult Runtime::Run() {
         [border = m_impl->border.get()](const PresentInfo &) { border->AddToFrame(); });
   }
   if (!m_impl->config.headless) {
+    // A paused game runs a few frames for a screenshot; its sound stays out
+    // of them.
+    std::function<void(bool)> mute;
+#if MODERNGEKKO_HAS_PULSE
+    if (m_impl->pulse_volume) {
+      mute = [volume = m_impl->pulse_volume.get()](bool muted) {
+        volume->SetMuted(muted, std::chrono::milliseconds(80));
+      };
+    }
+#endif
+    m_impl->screenshot =
+        detail::HighResScreenshot::Create(graphics.screenshot_scale, std::move(mute));
+  }
+  if (!m_impl->config.headless) {
     detail::GameMenuHooks hooks;
     hooks.draw_others = [border = m_impl->border.get()] { border->AddToFrame(); };
     // As closing the game window does.
@@ -902,6 +921,10 @@ RuntimeRunResult Runtime::Run() {
       }
       }
     };
+    if (detail::HighResScreenshot *screenshot = m_impl->screenshot.get()) {
+      hooks.take_screenshot = [screenshot] { return screenshot->Take(); };
+      hooks.screenshot_status = [screenshot] { return screenshot->Status(); };
+    }
     m_impl->menu = detail::GameMenu::Create(m_impl->config.menu, std::move(hooks));
     if (m_impl->menu) {
       m_impl->menu_hook = GetVideoEvents().before_present_event.Register(
@@ -939,6 +962,8 @@ RuntimeRunResult Runtime::Run() {
       m_impl->menu ? m_impl->menu->Choice() : detail::GameMenuChoice::None;
   // Its thread reads the controllers, which go away with the runtime.
   m_impl->menu.reset();
+  // After the menu, which takes its screenshots; before the sound it mutes.
+  m_impl->screenshot.reset();
 #if MODERNGEKKO_HAS_PULSE
   m_impl->pulse_volume.reset();
 #endif

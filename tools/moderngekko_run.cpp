@@ -443,6 +443,10 @@ int RunMain(int argc, char **argv) {
   if (const auto *effect = moderngekko::frontend::FindEffect(frontend_config.effect))
     config.graphics.post_processing_shader = effect->shader;
   config.audio.volume = frontend_config.game_volume;
+  // Screenshots at the chosen resolution, whatever the game is shown at.
+  config.graphics.screenshot_scale =
+      moderngekko::frontend::FindScreenshotResolution(frontend_config.screenshot_resolution)
+          .dolphin_scale;
 
   // The menu over the game (M, or Guide on a pad), in the launcher's language:
   // config.ini's, or the system's. It answers to the first controller.
@@ -464,6 +468,11 @@ int RunMain(int argc, char **argv) {
     config.menu.open_fallback = std::move(keys.open_fallback);
     config.menu.release_directory = executable_directory;
     AddQuickSettings(&config, frontend_config, border_list);
+    moderngekko::frontend::GameMenuControlsLegend legend =
+        moderngekko::frontend::GameMenuControls();
+    config.menu.controls_title = std::move(legend.title);
+    for (auto &row : legend.rows)
+      config.menu.controls.push_back({row.label, std::move(row.keys)});
   }
 
 #if defined(__linux__)

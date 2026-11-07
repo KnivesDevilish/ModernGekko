@@ -3517,6 +3517,42 @@ int main(int argc, char** argv)
       ImGui::EndCombo();
     }
     ImGui::Spacing();
+    // What screenshots (F9, or the in-game menu's Take screenshot) are
+    // taken at: the game is drawn at it just for them.
+    const moderngekko::frontend::ScreenshotResolutionOption& shown_shot =
+        moderngekko::frontend::FindScreenshotResolution(config.screenshot_resolution);
+    ImGui::TextUnformatted(Tr("Screenshot resolution"));
+    ImGui::SetNextItemWidth(-1.0f);
+    if (ImGui::BeginCombo("##screenshot_resolution", Tr(shown_shot.text)))
+    {
+      for (const auto& option : moderngekko::frontend::SupportedScreenshotResolutions())
+      {
+        const bool selected = &shown_shot == &option;
+        if (ImGui::Selectable(Tr(option.text), selected))
+        {
+          const std::string previous = config.screenshot_resolution;
+          config.screenshot_resolution = option.value;
+          config.resolution = resolutions[resolution_index].text;
+          config.show_fps_in_title = show_fps_in_title;
+          config.controller = selected_controller;
+          std::string error;
+          if (!moderngekko::frontend::SaveConfig(user_directory, config, &error))
+          {
+            config.screenshot_resolution = previous;
+            std::lock_guard lock(dialog.mutex);
+            dialog.error = std::move(error);
+          }
+        }
+        if (selected)
+          ImGui::SetItemDefaultFocus();
+      }
+      ImGui::EndCombo();
+    }
+    ImGui::PushTextWrapPos(0.0f);
+    ImGui::TextDisabled("%s", Tr("F9 or Take screenshot in the in-game menu. The game is drawn at "
+                                 "this resolution just for the picture, never below its own."));
+    ImGui::PopTextWrapPos();
+    ImGui::Spacing();
     // The picture effect (also in the in-game menu's Quick settings). An
     // effect config.ini names but the build lacks shows as None.
     const auto& effects = moderngekko::frontend::SupportedEffects();

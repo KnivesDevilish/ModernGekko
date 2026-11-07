@@ -5,6 +5,7 @@
 // Dolphin's on-screen interface (game_menu.cpp draws it on the game's frames).
 // The texts are the launcher's translations (tools/launcher_text.hpp).
 
+#include "game_menu_controls.hpp"
 #include "game_menu_state.hpp"
 #include "launcher_look.hpp"
 #include "launcher_text.hpp"
@@ -17,6 +18,8 @@
 #include <cmath>
 #include <cstddef>
 #include <span>
+#include <string>
+#include <string_view>
 
 namespace moderngekko::detail
 {
@@ -24,6 +27,35 @@ struct GameMenuFonts
 {
   ImFont* regular = nullptr;  // ImGui's current font when null
   ImFont* bold = nullptr;     // the regular font when null
+};
+
+// What the pages show besides their rows.
+struct GameMenuContent
+{
+  // The Quick settings' rows, in the state's order.
+  std::span<const QuickSetting> settings;
+  // The Controls page: the emulated controller's name (its first column's
+  // title), its rows, and the pad's own name (empty for a keyboard).
+  std::string_view controls_title;
+  std::span<const ControlsRow> controls;
+  std::string_view controller_name;
+  // In Netplay the game keeps running behind the menu, and leaving goes back
+  // to the lobby instead of the launcher.
+  bool netplay = false;
+};
+
+// A line at the bottom of the screen saying how a screenshot went, shown
+// whether the menu is open or not.
+struct GameMenuNotice
+{
+  enum class Kind
+  {
+    Working,
+    Done,
+    Failed,
+  };
+  std::string text;
+  Kind kind = Kind::Working;
 };
 
 namespace game_menu_draw
@@ -42,6 +74,10 @@ inline const char* ItemText(MenuItem item, bool netplay)
     return Tr("Continue");
   case MenuItem::QuickSettings:
     return Tr("Quick settings");
+  case MenuItem::Controls:
+    return Tr("See controls");
+  case MenuItem::Screenshot:
+    return Tr("Take screenshot");
   case MenuItem::Leave:
     return netplay ? Tr("Back to the lobby") : Tr("Back to the launcher");
   case MenuItem::Quit:
@@ -106,6 +142,47 @@ inline void DrawBadge(ImDrawList* list, ImFont* font, ImVec2 centre, float radiu
                 letter);
 }
 
+// The names of a Controls row's inputs, translated and joined; what the page
+// says instead when there are none or the profile was edited by hand.
+inline std::string ControlNames(const std::vector<std::string>& names, bool custom, bool* none)
+{
+  using moderngekko::frontend::Tr;
+  *none = false;
+  if (custom)
+    return Tr("edited by hand");
+  std::string joined;
+  for (const std::string& name : names)
+  {
+    if (!joined.empty())
+      joined += ", ";
+    joined += Tr(name.c_str());
+  }
+  if (joined.empty())
+  {
+    *none = true;
+    return Tr("not set");
+  }
+  return joined;
+}
+
+// text cut to fit width, ending in "..." when it doesn't.
+inline std::string FitText(ImFont* font, float size, std::string text, float width)
+{
+  if (font->CalcTextSizeA(size, FLT_MAX, 0.0f, text.c_str()).x <= width)
+    return text;
+  while (!text.empty())
+  {
+    // Back by one UTF-8 character.
+    std::size_t end = text.size() - 1;
+    while (end > 0 && (static_cast<unsigned char>(text[end]) & 0xC0) == 0x80)
+      --end;
+    text.resize(end);
+    if (font->CalcTextSizeA(size, FLT_MAX, 0.0f, (text + "...").c_str()).x <= width)
+      return text + "...";
+  }
+  return text;
+}
+
 // A small arrow pointing left or right, centred on a point.
 inline void DrawArrow(ImDrawList* list, ImVec2 centre, float size, bool right, ImU32 colour)
 {
@@ -118,13 +195,11 @@ inline void DrawArrow(ImDrawList* list, ImVec2 centre, float size, bool right, I
 }  // namespace game_menu_draw
 
 // Draws the open menu over a window of display pixels. fade goes from 0 to 1
-// as the menu opens. settings are the Quick settings' rows, in the state's
-// order. In Netplay the game keeps running behind it, and leaving goes back
-// to the lobby instead of the launcher.
+// as the menu opens.
 inline void DrawGameMenu(ImDrawList* list, ImVec2 display, const GameMenuFonts& fonts,
-                         const MenuState& state, std::span<const QuickSetting> settings,
-                         bool netplay, float fade)
+                         const MenuState& state, const GameMenuContent& content, float fade)
 {
+  using moderngekko::frontend::Format;
   using moderngekko::frontend::Tr;
   using namespace game_menu_draw;
   if (!state.IsOpen() || display.x <= 0.0f || display.y <= 0.0f)
@@ -132,7 +207,10 @@ inline void DrawGameMenu(ImDrawList* list, ImVec2 display, const GameMenuFonts& 
   ImFont* regular = fonts.regular ? fonts.regular : ImGui::GetFont();
   ImFont* bold = fonts.bold ? fonts.bold : regular;
   fade = std::clamp(fade, 0.0f, 1.0f);
+  const std::span<const QuickSetting> settings = content.settings;
+  const bool netplay = content.netplay;
   const bool settings_page = state.Page() == MenuPage::QuickSettings;
+  const bool controls_page = state.Page() == MenuPage::Controls;
 
   // Sized for 1280x720 and scaled to the window, never so small it can't be read.
   const float s = std::max(0.7f, std::min(display.x / 1280.0f, display.y / 720.0f));
@@ -144,6 +222,7 @@ inline void DrawGameMenu(ImDrawList* list, ImVec2 display, const GameMenuFonts& 
   // What the page says: its title, a line under it, its rows.
   const char* title = "";
   const char* body = nullptr;
+  std::string controller_line;
   switch (state.Page())
   {
   case MenuPage::Main:
@@ -154,6 +233,18 @@ inline void DrawGameMenu(ImDrawList* list, ImVec2 display, const GameMenuFonts& 
   case MenuPage::QuickSettings:
     title = Tr("Quick settings");
     body = Tr("Changes apply at once and are kept for next time.");
+    break;
+  case MenuPage::Controls:
+    title = Tr("Controls");
+    if (content.controller_name.empty())
+    {
+      body = Tr("Keyboard only");
+    }
+    else
+    {
+      controller_line = Format(Tr("Controller: %s"), std::string(content.controller_name).c_str());
+      body = controller_line.c_str();
+    }
     break;
   case MenuPage::ConfirmLeave:
     title = netplay ? Tr("Back to the lobby?") : Tr("Back to the launcher?");
@@ -168,8 +259,10 @@ inline void DrawGameMenu(ImDrawList* list, ImVec2 display, const GameMenuFonts& 
   }
 
   const float padding = 30.0f * s;
-  // The settings' rows hold a name and a choice side by side.
-  const float width = std::min((settings_page ? 640.0f : 470.0f) * s, display.x - 32.0f * s);
+  // The settings' rows hold a name and a choice side by side, and the
+  // controls' a button and two columns of inputs.
+  const float wanted_width = settings_page ? 640.0f : controls_page ? 720.0f : 470.0f;
+  const float width = std::min(wanted_width * s, display.x - 32.0f * s);
   const float inner = width - padding * 2.0f;
   const float title_size = 31.0f * s;
   const float body_size = 17.0f * s;
@@ -192,8 +285,24 @@ inline void DrawGameMenu(ImDrawList* list, ImVec2 display, const GameMenuFonts& 
   const ImVec2 title_extent = bold->CalcTextSizeA(title_size, FLT_MAX, inner, title);
   const ImVec2 body_extent =
       body ? regular->CalcTextSizeA(body_size, FLT_MAX, inner, body) : ImVec2(0.0f, 0.0f);
+  // The Controls page: a line of column titles, then a row per button. A
+  // column with nothing in any row is left out.
+  const float table_row_height = 30.0f * s;
+  const float table_size = 18.0f * s;
+  bool any_pad = false;
+  bool any_keys = false;
+  for (const ControlsRow& row : content.controls)
+  {
+    any_pad = any_pad || !row.pad.empty() || row.custom;
+    any_keys = any_keys || !row.keys.empty();
+  }
+  if (!any_pad && !any_keys)
+    any_pad = true;
+  const float table_height =
+      controls_page ? table_row_height * static_cast<float>(content.controls.size() + 1) : 0.0f;
   const float rows_height =
-      static_cast<float>(items.size()) * (row_height + row_gap) - row_gap;
+      controls_page ? table_height :
+                      static_cast<float>(items.size()) * (row_height + row_gap) - row_gap;
   const float height = padding + title_extent.y + (body ? 10.0f * s + body_extent.y : 0.0f) +
                        22.0f * s + rows_height + setting_hint_height + 24.0f * s + 1.0f +
                        16.0f * s + badge_radius * 2.0f + padding;
@@ -222,6 +331,65 @@ inline void DrawGameMenu(ImDrawList* list, ImVec2 display, const GameMenuFonts& 
     y += body_extent.y;
   }
   y += 22.0f * s;
+
+  if (controls_page)
+  {
+    float label_width = bold->CalcTextSizeA(hint_size, FLT_MAX, 0.0f,
+                                            std::string(content.controls_title).c_str())
+                            .x;
+    for (const ControlsRow& row : content.controls)
+      label_width = std::max(
+          label_width, bold->CalcTextSizeA(table_size, FLT_MAX, 0.0f, Tr(row.label.c_str())).x);
+    label_width += 24.0f * s;
+    const int columns = (any_pad ? 1 : 0) + (any_keys ? 1 : 0);
+    const float column_gap = 16.0f * s;
+    const float column_width =
+        (inner - label_width - column_gap * static_cast<float>(columns - 1)) /
+        static_cast<float>(columns);
+    const float pad_x = x + label_width;
+    const float keys_x = any_pad ? pad_x + column_width + column_gap : pad_x;
+    const auto middle = [&](ImFont* font, float size, const char* text, float row_y) {
+      return row_y + (table_row_height - font->CalcTextSizeA(size, FLT_MAX, 0.0f, text).y) * 0.5f;
+    };
+    // The column titles, quieter than the rows.
+    const std::string first_title(content.controls_title);
+    list->AddText(bold, hint_size, ImVec2(x, middle(bold, hint_size, first_title.c_str(), y)),
+                  dim_text_colour, first_title.c_str());
+    if (any_pad)
+      list->AddText(bold, hint_size,
+                    ImVec2(pad_x, middle(bold, hint_size, Tr("Controller"), y)),
+                    dim_text_colour, Tr("Controller"));
+    if (any_keys)
+      list->AddText(bold, hint_size, ImVec2(keys_x, middle(bold, hint_size, Tr("Keyboard"), y)),
+                    dim_text_colour, Tr("Keyboard"));
+    y += table_row_height;
+    for (std::size_t i = 0; i < content.controls.size(); ++i)
+    {
+      const ControlsRow& row = content.controls[i];
+      // Every other row a little lighter, to follow a line across.
+      if (i % 2 == 0)
+        list->AddRectFilled(ImVec2(x - 12.0f * s, y), ImVec2(x + inner + 12.0f * s,
+                                                              y + table_row_height),
+                            Colour(1.0f, 1.0f, 1.0f, 0.035f * fade), 6.0f * s);
+      const char* label = Tr(row.label.c_str());
+      list->AddText(bold, table_size, ImVec2(x, middle(bold, table_size, label, y)), accent_colour,
+                    label);
+      const auto cell = [&](float cell_x, const std::vector<std::string>& names, bool custom) {
+        bool none = false;
+        const std::string text = FitText(regular, table_size,
+                                         ControlNames(names, custom, &none), column_width);
+        list->AddText(regular, table_size,
+                      ImVec2(cell_x, middle(regular, table_size, text.c_str(), y)),
+                      none ? dim_text_colour : text_colour, text.c_str());
+      };
+      if (any_pad)
+        cell(pad_x, row.pad, row.custom);
+      if (any_keys)
+        cell(keys_x, row.keys, row.custom);
+      y += table_row_height;
+    }
+    y += row_gap;
+  }
 
   for (std::size_t i = 0; i < items.size(); ++i)
   {
@@ -307,10 +475,51 @@ inline void DrawGameMenu(ImDrawList* list, ImVec2 display, const GameMenuFonts& 
     hint_x += arrow * 2.5f + 8.0f * s;
     hint_text(Tr("Change"));
   }
-  else
+  else if (!controls_page)
   {
     hint("A", Colour(0.16f, 0.72f, 0.45f, fade), Colour(0.03f, 0.08f, 0.05f, fade), Tr("Accept"));
   }
   hint("B", Colour(0.86f, 0.25f, 0.24f, fade), Colour(1.0f, 1.0f, 1.0f, fade), Tr("Go back"));
+}
+}  // namespace moderngekko::detail
+
+namespace moderngekko::detail
+{
+// The notice line at the bottom of the screen, over the game or the menu.
+// alpha fades it out.
+inline void DrawGameMenuNotice(ImDrawList* list, ImVec2 display, const GameMenuFonts& fonts,
+                               const GameMenuNotice& notice, float alpha)
+{
+  using namespace game_menu_draw;
+  if (notice.text.empty() || display.x <= 0.0f || display.y <= 0.0f)
+    return;
+  alpha = std::clamp(alpha, 0.0f, 1.0f);
+  ImFont* font = fonts.regular ? fonts.regular : ImGui::GetFont();
+  const float s = std::max(0.7f, std::min(display.x / 1280.0f, display.y / 720.0f));
+  const float size = 17.0f * s;
+  const float dot = 5.0f * s;
+  const float padding_x = 18.0f * s;
+  const float height = 40.0f * s;
+  const std::string text = FitText(font, size, notice.text,
+                                   display.x - 32.0f * s - padding_x * 2.0f - dot * 4.0f);
+  const ImVec2 extent = font->CalcTextSizeA(size, FLT_MAX, 0.0f, text.c_str());
+  const float width = padding_x * 2.0f + dot * 2.0f + 12.0f * s + extent.x;
+  const ImVec2 min(std::floor((display.x - width) * 0.5f),
+                   std::floor(display.y - 36.0f * s - height));
+  const ImVec2 max(min.x + width, min.y + height);
+  list->AddRectFilled(min, max, Colour(0.031f, 0.031f, 0.035f, 0.94f * alpha), height * 0.5f);
+  list->AddRect(min, max, Colour(0.157f, 0.157f, 0.169f, alpha), height * 0.5f, 0,
+                std::max(1.0f, s));
+  ImVec4 colour = moderngekko::frontend::ui::LAUNCHER_ACCENT;
+  if (notice.kind == GameMenuNotice::Kind::Done)
+    colour = ImVec4(0.16f, 0.72f, 0.45f, 1.0f);
+  else if (notice.kind == GameMenuNotice::Kind::Failed)
+    colour = ImVec4(0.86f, 0.25f, 0.24f, 1.0f);
+  list->AddCircleFilled(ImVec2(min.x + padding_x + dot, min.y + height * 0.5f), dot,
+                        Colour(colour.x, colour.y, colour.z, alpha), 16);
+  list->AddText(font, size,
+                ImVec2(min.x + padding_x + dot * 2.0f + 12.0f * s,
+                       min.y + (height - extent.y) * 0.5f),
+                Colour(0.94f, 0.94f, 0.94f, alpha), text.c_str());
 }
 }  // namespace moderngekko::detail

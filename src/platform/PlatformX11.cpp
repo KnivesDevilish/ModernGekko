@@ -2,9 +2,11 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 // This fork's copy of vendor/dolphin/Source/Core/DolphinNoGUI/PlatformX11.cpp
-// (RecompCore cf8ceb8). The only change: the savestate keys (F1-F8 and
+// (RecompCore cf8ceb8). The changes: the savestate keys (F1-F8 and
 // Shift+F1-F8, F11, F12) exist only when the build keeps savestates
-// (MODERNGEKKO_SAVESTATES, CMakeLists.txt). F9 (screenshot), F10 (pause),
+// (MODERNGEKKO_SAVESTATES, CMakeLists.txt); F9 takes the runtime's
+// screenshot, at the resolution chosen for screenshots
+// (src/runtime/screenshot_keys.hpp), and F10 (pause) waits while one is taken.
 // Alt+Enter (fullscreen) and Ctrl+Esc (quit) stay.
 
 // Without the CMake option (CMakeLists.txt always passes it), the window keeps
@@ -30,6 +32,7 @@ static constexpr auto X_None = None;
 #include "Core/State.h"
 #endif
 #include "Core/System.h"
+#include "../runtime/screenshot_keys.hpp"
 
 #include <cstring>
 #include <thread>
@@ -210,7 +213,8 @@ void PlatformX11::ProcessEvents()
       {
         RequestShutdown();
       }
-      else if (key == XK_F10)
+      // A paused game may be running a few frames for a screenshot.
+      else if (key == XK_F10 && !moderngekko::detail::ScreenshotBusy())
       {
         if (Core::GetState(Core::System::GetInstance()) == Core::State::Running)
         {
@@ -245,7 +249,7 @@ void PlatformX11::ProcessEvents()
       }
 #endif
       else if (key == XK_F9)
-        Core::SaveScreenShot();
+        moderngekko::detail::TakeScreenshot();
 #if MODERNGEKKO_SAVESTATES
       else if (key == XK_F11)
         State::LoadLastSaved(Core::System::GetInstance());

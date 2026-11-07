@@ -193,6 +193,7 @@ PulseStreamVolume::~PulseStreamVolume()
     m_stop = true;
   }
   m_wake.notify_all();
+  m_applied_changed.notify_all();
   m_thread.join();
 }
 
@@ -204,6 +205,16 @@ void PulseStreamVolume::Set(int volume)
     ++m_requests;
   }
   m_wake.notify_all();
+}
+
+void PulseStreamVolume::SetMuted(bool muted, std::chrono::milliseconds wait)
+{
+  std::unique_lock lock(m_mutex);
+  m_muted = muted;
+  const unsigned request = ++m_requests;
+  m_wake.notify_all();
+  if (wait.count() > 0)
+    m_applied_changed.wait_for(lock, wait, [&] { return m_stop || m_applied >= request; });
 }
 
 void PulseStreamVolume::Run()
@@ -226,7 +237,7 @@ void PulseStreamVolume::Run()
         m_wake.wait_for(lock, RETRY, [&] { return m_stop || seen != m_requests; });
       if (m_stop)
         return;
-      volume = m_volume;
+      volume = m_muted ? 0 : m_volume;
       request = m_requests;
     }
     if (request != seen)
@@ -237,6 +248,11 @@ void PulseStreamVolume::Run()
     if (pulse.Apply(volume))
     {
       applied = request;
+      {
+        std::lock_guard lock(m_mutex);
+        m_applied = request;
+      }
+      m_applied_changed.notify_all();
       std::fprintf(stderr, "game volume: %d%% on the PulseAudio stream\n", volume);
     }
     else if (Clock::now() >= give_up)

@@ -13,22 +13,25 @@
 
 namespace moderngekko::detail
 {
-// The main page, the Quick settings, or the question asked before leaving
-// the game, which loses whatever the game hasn't saved.
+// The main page, the Quick settings, the controls, or the question asked
+// before leaving the game, which loses whatever the game hasn't saved.
 enum class MenuPage
 {
   Main,
   QuickSettings,
+  Controls,      // what each button of the controller and the keyboard does
   ConfirmLeave,  // Back to the launcher (Back to the lobby in Netplay)
   ConfirmQuit,   // Quit game
 };
 
 // The rows of the pages, top to bottom. On the Quick settings page every row
-// is a Setting.
+// is a Setting; the Controls page has none to choose.
 enum class MenuItem
 {
   Continue,
   QuickSettings,
+  Controls,
+  Screenshot,
   Leave,
   Quit,
   No,
@@ -60,6 +63,15 @@ enum class MenuEvent
   Leave,           // Yes to Back to the launcher
   Quit,            // Yes to Quit game
   SettingChanged,  // a quick setting took another choice: ChangedRow()
+  Screenshot,      // Take screenshot; the menu stays as it is
+};
+
+// The rows the main page has besides Continue, Back to the launcher and Quit
+// game, which it always has.
+struct MenuRows
+{
+  bool controls = false;    // See controls
+  bool screenshot = false;  // Take screenshot
 };
 
 class MenuState
@@ -68,9 +80,18 @@ public:
   // choice_counts: how many choices each quick setting has, and chosen the
   // one each starts on. Without any, the main page has no Quick settings.
   explicit MenuState(std::vector<std::size_t> choice_counts = {},
-                     std::vector<std::size_t> chosen = {})
+                     std::vector<std::size_t> chosen = {}, MenuRows rows = {})
       : m_choice_counts(std::move(choice_counts)), m_chosen(std::move(chosen))
   {
+    m_main_items.push_back(MenuItem::Continue);
+    if (!m_choice_counts.empty())
+      m_main_items.push_back(MenuItem::QuickSettings);
+    if (rows.controls)
+      m_main_items.push_back(MenuItem::Controls);
+    if (rows.screenshot)
+      m_main_items.push_back(MenuItem::Screenshot);
+    m_main_items.push_back(MenuItem::Leave);
+    m_main_items.push_back(MenuItem::Quit);
     m_chosen.resize(m_choice_counts.size(), 0);
     for (std::size_t row = 0; row < m_chosen.size(); ++row)
     {
@@ -106,6 +127,9 @@ public:
       case MenuPage::QuickSettings:
         ShowMainAt(MenuItem::QuickSettings);
         break;
+      case MenuPage::Controls:
+        ShowMainAt(MenuItem::Controls);
+        break;
       case MenuPage::ConfirmLeave:
         ShowMainAt(MenuItem::Leave);
         break;
@@ -113,6 +137,12 @@ public:
         ShowMainAt(MenuItem::Quit);
         break;
       }
+      return MenuEvent::None;
+    }
+    if (pressed.accept && m_page == MenuPage::Controls)
+    {
+      // Nothing to choose there: A goes back too.
+      ShowMainAt(MenuItem::Controls);
       return MenuEvent::None;
     }
     if (pressed.accept)
@@ -124,6 +154,11 @@ public:
       case MenuItem::QuickSettings:
         Show(MenuPage::QuickSettings, 0);
         return MenuEvent::None;
+      case MenuItem::Controls:
+        Show(MenuPage::Controls, 0);
+        return MenuEvent::None;
+      case MenuItem::Screenshot:
+        return MenuEvent::Screenshot;
       case MenuItem::Leave:
         Show(MenuPage::ConfirmLeave, 0);
         return MenuEvent::None;
@@ -146,6 +181,8 @@ public:
       }
     }
     const std::size_t count = Items().size();
+    if (count == 0)
+      return MenuEvent::None;
     if (pressed.up)
     {
       Show(m_page, (m_selected + count - 1) % count);
@@ -178,11 +215,11 @@ public:
     switch (m_page)
     {
     case MenuPage::Main:
-      if (m_choice_counts.empty())
-        return MAIN_ITEMS;
-      return MAIN_ITEMS_WITH_SETTINGS;
+      return m_main_items;
     case MenuPage::QuickSettings:
       return m_setting_items;
+    case MenuPage::Controls:
+      return {};
     case MenuPage::ConfirmLeave:
     case MenuPage::ConfirmQuit:
       break;
@@ -201,9 +238,6 @@ public:
   unsigned Version() const { return m_version; }
 
 private:
-  static constexpr MenuItem MAIN_ITEMS[] = {MenuItem::Continue, MenuItem::Leave, MenuItem::Quit};
-  static constexpr MenuItem MAIN_ITEMS_WITH_SETTINGS[] = {
-      MenuItem::Continue, MenuItem::QuickSettings, MenuItem::Leave, MenuItem::Quit};
   // No first, so a stray A doesn't leave the game.
   static constexpr MenuItem CONFIRM_ITEMS[] = {MenuItem::No, MenuItem::Yes};
 
@@ -224,10 +258,8 @@ private:
   // Back to the main page, on the row that led away from it.
   void ShowMainAt(MenuItem item)
   {
-    const auto items = m_choice_counts.empty() ? std::span<const MenuItem>(MAIN_ITEMS) :
-                                                 std::span<const MenuItem>(MAIN_ITEMS_WITH_SETTINGS);
     std::size_t row = 0;
-    while (row + 1 < items.size() && items[row] != item)
+    while (row + 1 < m_main_items.size() && m_main_items[row] != item)
       ++row;
     Show(MenuPage::Main, row);
   }
@@ -248,6 +280,7 @@ private:
   unsigned m_version = 0;
   std::vector<std::size_t> m_choice_counts;
   std::vector<std::size_t> m_chosen;
+  std::vector<MenuItem> m_main_items;
   std::vector<MenuItem> m_setting_items;
   std::size_t m_changed_row = 0;
 };

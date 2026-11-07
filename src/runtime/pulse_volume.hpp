@@ -7,6 +7,7 @@
 // for each stream, as the system's mixer shows: this sets the one of the
 // game's stream, Dolphin's "Playback" in this process, on the same scale.
 
+#include <chrono>
 #include <condition_variable>
 #include <memory>
 #include <mutex>
@@ -26,6 +27,9 @@ public:
 
   // From any thread; the stream gets it shortly after.
   void Set(int volume);
+  // Silences the stream, keeping its volume for when it is brought back.
+  // Waits up to wait for the sound server to have it.
+  void SetMuted(bool muted, std::chrono::milliseconds wait = {});
 
 private:
   void Run();
@@ -33,9 +37,12 @@ private:
   std::mutex m_mutex;
   std::condition_variable m_wake;
   int m_volume = 100;
+  bool m_muted = false;
   // Counts the volumes asked for, so a new one is applied even if the last
-  // one never found the stream.
+  // one never found the stream; m_applied is the last the stream got.
   unsigned m_requests = 1;
+  unsigned m_applied = 0;
+  std::condition_variable m_applied_changed;
   bool m_stop = false;
   std::thread m_thread;
 };

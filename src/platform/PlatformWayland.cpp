@@ -2,9 +2,11 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 // This fork's copy of vendor/dolphin/Source/Core/DolphinNoGUI/PlatformWayland.cpp
-// (RecompCore cf8ceb8). The only change: the savestate keys (F1-F8 and
+// (RecompCore cf8ceb8). The changes: the savestate keys (F1-F8 and
 // Shift+F1-F8, F11, F12) exist only when the build keeps savestates
-// (MODERNGEKKO_SAVESTATES, CMakeLists.txt). F9 (screenshot), F10 (pause),
+// (MODERNGEKKO_SAVESTATES, CMakeLists.txt); F9 takes the runtime's
+// screenshot, at the resolution chosen for screenshots
+// (src/runtime/screenshot_keys.hpp), and F10 (pause) waits while one is taken.
 // Alt+Enter (fullscreen) and Ctrl+Esc (quit) stay.
 
 // Without the CMake option (CMakeLists.txt always passes it), the window keeps
@@ -44,6 +46,7 @@
 #include "Core/State.h"
 #endif
 #include "Core/System.h"
+#include "../runtime/screenshot_keys.hpp"
 #include "UICommon/UICommon.h"
 #include "VideoCommon/Present.h"
 
@@ -635,7 +638,8 @@ void PlatformWayland::HandleHotkey(xkb_keysym_t symbol)
   {
     RequestShutdown();
   }
-  else if (symbol == XKB_KEY_F10)
+  // A paused game may be running a few frames for a screenshot.
+  else if (symbol == XKB_KEY_F10 && !moderngekko::detail::ScreenshotBusy())
   {
     const bool running = Core::GetState(system) == Core::State::Running;
     Core::SetState(system, running ? Core::State::Paused : Core::State::Running);
@@ -662,7 +666,7 @@ void PlatformWayland::HandleHotkey(xkb_keysym_t symbol)
 #endif
   else if (symbol == XKB_KEY_F9)
   {
-    Core::SaveScreenShot();
+    moderngekko::detail::TakeScreenshot();
   }
 #if MODERNGEKKO_SAVESTATES
   else if (symbol == XKB_KEY_F11)

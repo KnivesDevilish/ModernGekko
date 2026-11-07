@@ -1,10 +1,12 @@
 // The in-game menu's pages and buttons (src/runtime/game_menu_state.hpp):
 // it opens on the main page, leaving the game always asks first with No
 // selected, B goes back the way it came, the rows wrap, quick settings step
-// with left and right and go round with A, and held buttons count once
-// except the directions, which repeat.
+// with left and right and go round with A, the Controls page has nothing to
+// choose, Take screenshot leaves the menu as it is, and held buttons count
+// once except the directions, which repeat.
 #include "runtime/game_menu_state.hpp"
 
+#include <algorithm>
 #include <chrono>
 #include <cstdio>
 
@@ -257,6 +259,59 @@ int main()
         !repeat.Update(Right(), start + MenuButtonRepeat::REPEAT_DELAY).right ||
         !repeat.Update(Left(), start + std::chrono::seconds(1)).left || !Left().Any())
       return 42;
+  }
+  {
+    // See controls and Take screenshot come after Quick settings, before
+    // leaving; each only when the menu has it.
+    using moderngekko::detail::MenuRows;
+    const MenuItem all[] = {MenuItem::Continue, MenuItem::QuickSettings, MenuItem::Controls,
+                            MenuItem::Screenshot, MenuItem::Leave,       MenuItem::Quit};
+    MenuState state({3}, {0}, MenuRows{.controls = true, .screenshot = true});
+    state.Press(Open());
+    if (!std::ranges::equal(state.Items(), all))
+      return 55;
+    const MenuItem some[] = {MenuItem::Continue, MenuItem::Screenshot, MenuItem::Leave,
+                             MenuItem::Quit};
+    MenuState without({}, {}, MenuRows{.screenshot = true});
+    without.Press(Open());
+    if (!std::ranges::equal(without.Items(), some))
+      return 56;
+
+    // The Controls page has nothing to choose: up and down do nothing, and A
+    // and B both come back to its row.
+    state.Press(Down());
+    state.Press(Down());
+    if (SelectedItem(state) != MenuItem::Controls ||
+        state.Press(Accept()) != MenuEvent::None || state.Page() != MenuPage::Controls ||
+        !state.Items().empty())
+      return 57;
+    const unsigned controls_version = state.Version();
+    if (state.Press(Up()) != MenuEvent::None || state.Press(Down()) != MenuEvent::None ||
+        state.Press(Left()) != MenuEvent::None || state.Press(Right()) != MenuEvent::None ||
+        state.Version() != controls_version || state.Page() != MenuPage::Controls)
+      return 58;
+    if (state.Press(Back()) != MenuEvent::None || state.Page() != MenuPage::Main ||
+        SelectedItem(state) != MenuItem::Controls)
+      return 59;
+    state.Press(Accept());
+    if (state.Press(Accept()) != MenuEvent::None || state.Page() != MenuPage::Main ||
+        SelectedItem(state) != MenuItem::Controls || !state.IsOpen())
+      return 60;
+
+    // Take screenshot leaves the menu open where it is, and only tells.
+    state.Press(Down());
+    const unsigned shot_version = state.Version();
+    if (SelectedItem(state) != MenuItem::Screenshot ||
+        state.Press(Accept()) != MenuEvent::Screenshot || !state.IsOpen() ||
+        state.Page() != MenuPage::Main || SelectedItem(state) != MenuItem::Screenshot ||
+        state.Version() != shot_version)
+      return 61;
+    // Leaving still asks first, from its new row.
+    state.Press(Down());
+    state.Press(Accept());
+    state.Press(Back());
+    if (state.Page() != MenuPage::Main || SelectedItem(state) != MenuItem::Leave)
+      return 62;
   }
   std::puts("game menu state: ok");
   return 0;

@@ -18,9 +18,12 @@
 #include "VideoCommon/AsyncRequests.h"
 #include "VideoCommon/Present.h"
 #include "VideoCommon/VideoConfig.h"
+#include "game_menu_controls.hpp"
 #include "game_menu_draw.hpp"
 #include "game_menu_state.hpp"
 #include "launcher_look.hpp"
+#include "launcher_text.hpp"
+#include "screenshot.hpp"
 
 #include <imgui.h>
 
@@ -30,6 +33,7 @@
 #include <cmath>
 #include <cstdio>
 #include <mutex>
+#include <optional>
 #include <stop_token>
 #include <string_view>
 #include <thread>
@@ -50,6 +54,10 @@ constexpr std::chrono::milliseconds POLL_CLOSED{16};
 // A paused game under the open menu is drawn again when the menu changes, and
 // this often anyway, so it follows a resized window.
 constexpr std::chrono::milliseconds REDRAW_INTERVAL{100};
+// How long the line saying a screenshot was saved stays, and how long it
+// takes to fade out at the end.
+constexpr std::chrono::milliseconds NOTICE_TIME{4000};
+constexpr std::chrono::milliseconds NOTICE_FADE{400};
 
 std::atomic<bool> s_blocks_input{false};
 
@@ -129,7 +137,41 @@ struct View
 {
   MenuState state;
   Clock::time_point opened_at;
+  // How the last screenshot went: shown while it is taken (lasting), then
+  // until notice_until.
+  GameMenuNotice notice;
+  bool notice_lasting = false;
+  Clock::time_point notice_until;
+
+  bool NoticeShown(Clock::time_point now) const
+  {
+    return !notice.text.empty() && (notice_lasting || now < notice_until);
+  }
 };
+
+GameMenuNotice NoticeOf(const ScreenshotStatus& status)
+{
+  using moderngekko::frontend::Format;
+  using moderngekko::frontend::Tr;
+  GameMenuNotice notice;
+  switch (status.state)
+  {
+  case ScreenshotStatus::State::Idle:
+    break;
+  case ScreenshotStatus::State::Taking:
+    notice.text = Tr("Taking screenshot...");
+    break;
+  case ScreenshotStatus::State::Saved:
+    notice.kind = GameMenuNotice::Kind::Done;
+    notice.text = Format(Tr("Screenshot saved \xC2\xB7 %d x %d"), status.width, status.height);
+    break;
+  case ScreenshotStatus::State::Failed:
+    notice.kind = GameMenuNotice::Kind::Failed;
+    notice.text = Tr("Couldn't take the screenshot");
+    break;
+  }
+  return notice;
+}
 }  // namespace
 
 struct GameMenu::Impl
@@ -172,6 +214,11 @@ struct GameMenu::Impl
   bool netplay = false;
   std::shared_ptr<Shared> shared = std::make_shared<Shared>();
 
+  // The Controls page, read from the profile with the controls (then only
+  // read, by the video thread too).
+  std::vector<ControlsRow> controls;
+  std::string controller_name;
+
   // The menu thread's, apart from view.
   MenuController controller;
   std::vector<ControllerEmu::Control*> open_controls;
@@ -187,6 +234,8 @@ struct GameMenu::Impl
   bool leaving = false;
   unsigned drawn_version = 0;
   Clock::time_point last_redraw;
+  ScreenshotStatus last_status;
+  bool notice_was_shown = false;
   std::atomic<GameMenuChoice> choice{GameMenuChoice::None};
 
   std::mutex view_mutex;
@@ -211,7 +260,21 @@ struct GameMenu::Impl
 
     Common::IniFile profile;
     profile.Load(File::GetUserPath(D_CONFIG_IDX) + settings.profile_file);
-    controller.LoadConfig(profile.GetOrCreateSection(settings.profile_section));
+    Common::IniFile::Section* section = profile.GetOrCreateSection(settings.profile_section);
+    controller.LoadConfig(section);
+    // The Controls page shows the profile as it is now.
+    std::string device;
+    section->Get("Device", &device);
+    controls = ReadControls(
+        settings.controls,
+        [section](const std::string& key) -> std::optional<std::string> {
+          std::string value;
+          if (!section->Get(key, &value))
+            return std::nullopt;
+          return value;
+        },
+        device);
+    controller_name = PadDeviceName(device);
     // An older profile may have no menu button: the fallback's, then.
     if (!HasInput(open_controls) && !settings.open_fallback.empty())
     {
@@ -254,7 +317,12 @@ struct GameMenu::Impl
   void Resume()
   {
     Core::QueueHostJob([shared = shared](Core::System& system) {
-      if (shared->paused_by_menu.exchange(false) && Core::GetState(system) == Core::State::Paused)
+      if (!shared->paused_by_menu.exchange(false))
+        return;
+      // A paused game running for a screenshot just keeps running after it.
+      if (ResumeAfterScreenshot())
+        return;
+      if (Core::GetState(system) == Core::State::Paused)
         Core::SetState(system, Core::State::Running);
     });
   }
@@ -321,6 +389,19 @@ struct GameMenu::Impl
       const MenuButtons pressed = repeat.Update(held, now);
       const Core::State core_state = Core::GetState(system);
       const bool in_game = core_state == Core::State::Running || core_state == Core::State::Paused;
+      // While a screenshot is taken (a paused game may be running for it),
+      // the menu takes no presses.
+      const bool screenshot_busy = ScreenshotBusy();
+      std::optional<GameMenuNotice> new_notice;
+      if (hooks.screenshot_status)
+      {
+        const ScreenshotStatus status = hooks.screenshot_status();
+        if (status.state != last_status.state || status.count != last_status.count)
+        {
+          last_status = status;
+          new_notice = NoticeOf(status);
+        }
+      }
 
       MenuEvent event = MenuEvent::None;
       bool open = false;
@@ -328,14 +409,22 @@ struct GameMenu::Impl
       Clock::time_point opened_at;
       std::size_t changed_row = 0;
       std::size_t changed_choice = 0;
+      bool notice_shown = false;
       {
         std::lock_guard lock(view_mutex);
-        if (in_game && !leaving)
+        if (in_game && !leaving && !screenshot_busy)
         {
           event = view.state.Press(pressed);
           if (event == MenuEvent::Opened)
             view.opened_at = now;
         }
+        if (new_notice)
+        {
+          view.notice = std::move(*new_notice);
+          view.notice_lasting = last_status.state == ScreenshotStatus::State::Taking;
+          view.notice_until = now + NOTICE_TIME;
+        }
+        notice_shown = view.NoticeShown(now);
         open = view.state.IsOpen();
         version = view.state.Version();
         opened_at = view.opened_at;
@@ -365,6 +454,10 @@ struct GameMenu::Impl
       case MenuEvent::SettingChanged:
         ChangeSetting(changed_row, changed_choice);
         break;
+      case MenuEvent::Screenshot:
+        if (hooks.take_screenshot)
+          hooks.take_screenshot();
+        break;
       case MenuEvent::None:
         break;
       }
@@ -378,15 +471,19 @@ struct GameMenu::Impl
         s_blocks_input = false;
       }
 
+      // The notice comes, fades and goes on a paused game too.
+      const bool notice_redraw = new_notice.has_value() || notice_shown != notice_was_shown ||
+                                 (notice_shown && now - last_redraw >= REDRAW_INTERVAL);
+      notice_was_shown = notice_shown;
       if (core_state == Core::State::Paused && !leaving &&
-          (version != drawn_version || (open && (now - opened_at < FADE_TIME ||
-                                                 now - last_redraw >= REDRAW_INTERVAL))))
+          (version != drawn_version || notice_redraw ||
+           (open && (now - opened_at < FADE_TIME || now - last_redraw >= REDRAW_INTERVAL))))
       {
         drawn_version = version;
         last_redraw = now;
         RedrawPaused();
       }
-      std::this_thread::sleep_for(open ? POLL_OPEN : POLL_CLOSED);
+      std::this_thread::sleep_for(open || notice_shown ? POLL_OPEN : POLL_CLOSED);
     }
   }
 
@@ -429,15 +526,35 @@ struct GameMenu::Impl
       std::lock_guard lock(view_mutex);
       shown = view;
     }
-    if (!shown.state.IsOpen())
+    const Clock::time_point now = Clock::now();
+    const bool notice = shown.NoticeShown(now);
+    if (!shown.state.IsOpen() && !notice)
       return;
     LoadFonts();
-    const float opening =
-        std::chrono::duration<float>(Clock::now() - shown.opened_at) /
-        std::chrono::duration<float>(FADE_TIME);
-    const float eased = 1.0f - std::pow(1.0f - std::clamp(opening, 0.0f, 1.0f), 3.0f);
-    DrawGameMenu(ImGui::GetForegroundDrawList(), ImGui::GetIO().DisplaySize, fonts, shown.state,
-                 settings.quick_settings, netplay, eased);
+    ImDrawList* list = ImGui::GetForegroundDrawList();
+    const ImVec2 display = ImGui::GetIO().DisplaySize;
+    if (shown.state.IsOpen())
+    {
+      const float opening = std::chrono::duration<float>(now - shown.opened_at) /
+                            std::chrono::duration<float>(FADE_TIME);
+      const float eased = 1.0f - std::pow(1.0f - std::clamp(opening, 0.0f, 1.0f), 3.0f);
+      GameMenuContent content;
+      content.settings = settings.quick_settings;
+      content.controls_title = settings.controls_title;
+      content.controls = controls;
+      content.controller_name = controller_name;
+      content.netplay = netplay;
+      DrawGameMenu(list, display, fonts, shown.state, content, eased);
+    }
+    if (notice)
+    {
+      const float alpha =
+          shown.notice_lasting ?
+              1.0f :
+              std::chrono::duration<float>(shown.notice_until - now) /
+                  std::chrono::duration<float>(NOTICE_FADE);
+      DrawGameMenuNotice(list, display, fonts, shown.notice, alpha);
+    }
   }
 };
 
@@ -460,7 +577,10 @@ std::unique_ptr<GameMenu> GameMenu::Create(const GameMenuSettings& settings, Gam
     choice_counts.push_back(setting.choices.size());
     chosen.push_back(setting.selected);
   }
-  impl->view.state = MenuState(std::move(choice_counts), std::move(chosen));
+  impl->view.state =
+      MenuState(std::move(choice_counts), std::move(chosen),
+                MenuRows{.controls = !impl->settings.controls.empty(),
+                         .screenshot = static_cast<bool>(impl->hooks.take_screenshot)});
   impl->shared->menu = impl.get();
   impl->shared->draw_others = impl->hooks.draw_others;
   impl->LoadControls();

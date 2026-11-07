@@ -441,6 +441,26 @@ inline constexpr Translation SPANISH_TEXTS[] = {
     {"Changes apply at once and are kept for next time.", "Los cambios se aplican al momento y se guardan para la próxima vez."},
     {"Change", "Cambiar"},
     {"Higher looks sharper and needs a faster graphics card.", "Más alta se ve más nítida y pide una tarjeta gráfica más rápida."},
+    {"See controls", "Ver controles"},
+    {"Take screenshot", "Capturar pantalla"},
+    {"Taking screenshot...", "Haciendo la captura..."},
+    {"Screenshot saved \xC2\xB7 %d x %d", "Captura guardada \xC2\xB7 %d x %d"},
+    {"Couldn't take the screenshot", "No se pudo hacer la captura"},
+    // Keys on the in-game menu's Controls page (src/runtime/game_menu_controls.hpp)
+    {"Enter", "Intro"},
+    {"Left Shift", "Mayús izquierda"},
+    {"Right Shift", "Mayús derecha"},
+    {"Space", "Espacio"},
+    {"Left Ctrl", "Ctrl izquierdo"},
+    {"Backspace", "Retroceso"},
+    {"Up arrow", "Flecha arriba"},
+    {"Down arrow", "Flecha abajo"},
+    {"Left arrow", "Flecha izquierda"},
+    {"Right arrow", "Flecha derecha"},
+    // Screenshots (Settings)
+    {"Screenshot resolution", "Resolución de las capturas"},
+    {"Same as the game", "Igual que el juego"},
+    {"F9 or Take screenshot in the in-game menu. The game is drawn at this resolution just for the picture, never below its own.", "F9 o Capturar pantalla en el menú del juego. El juego se dibuja a esta resolución solo para la foto, nunca por debajo de la suya."},
     // Picture effects and the game's volume (Settings and Quick settings)
     {"Visual effect", "Efecto visual"},
     {"Game volume", "Volumen del juego"},
@@ -458,6 +478,8 @@ inline constexpr Translation SPANISH_TEXTS[] = {
     {"Softens jagged edges.", "Suaviza los bordes dentados."},
     {"CRT", "CRT"},
     {"Scanlines and darker corners, like an old TV.", "Líneas de escaneo y esquinas más oscuras, como un televisor antiguo."},
+    {"Outline", "Contorno"},
+    {"Dark lines along the edges, like a cartoon. They go round everything on screen, not only the characters.", "Líneas oscuras en los bordes, como en un dibujo animado. Rodean todo lo que hay en pantalla, no solo a los personajes."},
 };
 // clang-format on
 
@@ -835,6 +857,26 @@ inline constexpr Translation JAPANESE_TEXTS[] = {
     {"Changes apply at once and are kept for next time.", "変更はすぐに反映され、次回も保持されます。"},
     {"Change", "変更"},
     {"Higher looks sharper and needs a faster graphics card.", "高いほど鮮明になりますが、より高性能なグラフィックスが必要です。"},
+    {"See controls", "操作を見る"},
+    {"Take screenshot", "スクリーンショット"},
+    {"Taking screenshot...", "スクリーンショットを撮影中..."},
+    {"Screenshot saved \xC2\xB7 %d x %d", "スクリーンショットを保存しました \xC2\xB7 %d x %d"},
+    {"Couldn't take the screenshot", "スクリーンショットを撮れませんでした"},
+    // Keys on the in-game menu's Controls page (src/runtime/game_menu_controls.hpp)
+    {"Enter", "Enter"},
+    {"Left Shift", "左Shift"},
+    {"Right Shift", "右Shift"},
+    {"Space", "スペース"},
+    {"Left Ctrl", "左Ctrl"},
+    {"Backspace", "BackSpace"},
+    {"Up arrow", "上矢印"},
+    {"Down arrow", "下矢印"},
+    {"Left arrow", "左矢印"},
+    {"Right arrow", "右矢印"},
+    // Screenshots (Settings)
+    {"Screenshot resolution", "スクリーンショットの解像度"},
+    {"Same as the game", "ゲームと同じ"},
+    {"F9 or Take screenshot in the in-game menu. The game is drawn at this resolution just for the picture, never below its own.", "F9 またはゲーム内メニューの「スクリーンショット」で撮影します。撮影の間だけゲームをこの解像度で描画し、ゲームの解像度より低くはなりません。"},
     // Picture effects and the game's volume (Settings and Quick settings)
     {"Visual effect", "映像エフェクト"},
     {"Game volume", "ゲームの音量"},
@@ -852,6 +894,8 @@ inline constexpr Translation JAPANESE_TEXTS[] = {
     {"Softens jagged edges.", "ギザギザした輪郭を滑らかにします。"},
     {"CRT", "CRT"},
     {"Scanlines and darker corners, like an old TV.", "古いテレビのような走査線と暗い四隅。"},
+    {"Outline", "輪郭線"},
+    {"Dark lines along the edges, like a cartoon. They go round everything on screen, not only the characters.", "アニメのように輪郭に暗い線を引きます。キャラクターだけでなく、画面のすべてに線が付きます。"},
 };
 // clang-format on
 

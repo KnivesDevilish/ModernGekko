@@ -348,6 +348,7 @@ if(MODERNGEKKO_ENABLE_DOLPHIN_RUNTIME)
         src/runtime/dolphin_runtime.cpp
         src/runtime/game_border.cpp
         src/runtime/game_menu.cpp
+        src/runtime/screenshot.cpp
         tools/automation_protocol.cpp
         vendor/dolphin/Source/Core/DolphinNoGUI/Platform.cpp
         vendor/dolphin/Source/Core/DolphinNoGUI/PlatformHeadless.cpp
@@ -974,6 +975,25 @@ if(BUILD_TESTING)
     target_compile_features(moderngekko_game_menu_state_test PRIVATE cxx_std_23)
     add_test(NAME moderngekko.game_menu_state
              COMMAND moderngekko_game_menu_state_test)
+
+    # Header-only: the in-game menu's Controls page reading the profile.
+    add_executable(moderngekko_game_menu_controls_test
+        tests/game_menu_controls_test.cpp)
+    target_include_directories(moderngekko_game_menu_controls_test PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/src"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tools")
+    target_compile_features(moderngekko_game_menu_controls_test PRIVATE cxx_std_23)
+    add_test(NAME moderngekko.game_menu_controls
+             COMMAND moderngekko_game_menu_controls_test)
+
+    # Header-only: a screenshot's resolution, its frames and its PNG.
+    add_executable(moderngekko_screenshot_steps_test
+        tests/screenshot_steps_test.cpp)
+    target_include_directories(moderngekko_screenshot_steps_test PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/src")
+    target_compile_features(moderngekko_screenshot_steps_test PRIVATE cxx_std_23)
+    add_test(NAME moderngekko.screenshot_steps
+             COMMAND moderngekko_screenshot_steps_test)
 
     # The Netplay lobby's cached hash of the game files.
     add_executable(moderngekko_game_files_hash_test

@@ -35,6 +35,8 @@ constexpr const char* SOURCES[] = {
     "tools/netplay_session.cpp",
     "tools/moderngekko_run.cpp",
     "src/runtime/game_menu_draw.hpp",
+    "src/runtime/game_menu_controls.hpp",
+    "src/runtime/game_menu.cpp",
 };
 
 int HexValue(char c)

@@ -225,6 +225,10 @@ const std::vector<EffectOption> &SupportedEffects() {
        MODERNGEKKO_UI_TEXT("Richer colors and a little more contrast.")},
       {MODERNGEKKO_UI_TEXT("Sharpen"), "sharpen", "ModernGekko/sharpen",
        MODERNGEKKO_UI_TEXT("Details and edges stand out more.")},
+      {MODERNGEKKO_UI_TEXT("Outline"), "outline", "ModernGekko/outline",
+       MODERNGEKKO_UI_TEXT("Dark lines along the edges, like a cartoon. They "
+                           "go round everything on screen, not only the "
+                           "characters.")},
       {MODERNGEKKO_UI_TEXT("Smooth edges (FXAA)"), "fxaa", "FXAA",
        MODERNGEKKO_UI_TEXT("Softens jagged edges.")},
       {MODERNGEKKO_UI_TEXT("CRT"), "crt", "ModernGekko/crt",
@@ -239,6 +243,34 @@ const EffectOption *FindEffect(std::string_view value) {
       return &effect;
   }
   return nullptr;
+}
+
+const std::vector<ScreenshotResolutionOption> &SupportedScreenshotResolutions() {
+  // Up to 8x: the picture is drawn at it and then copied twice (to scale it
+  // to the screen's shape and to read it back), which at 12x asks for more
+  // video memory than many laptops have. A game set to 12x still takes them
+  // at 12x.
+  static const std::vector<ScreenshotResolutionOption> resolutions = {
+      {MODERNGEKKO_UI_TEXT("Same as the game"), "game", 0},
+      {"1920x1080", "1920x1080", 3},
+      {"2560x1440", "2560x1440", 4},
+      {"3840x2160", "3840x2160", 6},
+      {"5120x2880", "5120x2880", 8},
+  };
+  return resolutions;
+}
+
+const ScreenshotResolutionOption &FindScreenshotResolution(std::string_view value) {
+  const auto &resolutions = SupportedScreenshotResolutions();
+  const std::string_view fallback = ConfigResult{}.screenshot_resolution;
+  const ScreenshotResolutionOption *found = nullptr;
+  for (const ScreenshotResolutionOption &option : resolutions) {
+    if (value == option.value)
+      return option;
+    if (fallback == option.value)
+      found = &option;
+  }
+  return found ? *found : resolutions.front();
 }
 
 const std::vector<AspectRatioOption> &SupportedAspectRatios() {
@@ -332,6 +364,13 @@ ConfigResult LoadConfig(const fs::path &user_directory,
       if (config.effect.empty() ||
           config.effect.find_first_of(" \t\r\n=") != std::string::npos)
         return {.error = "effect must be none or the name of an effect"};
+    } else if (key == "screenshot_resolution") {
+      // Kept as written, as effect is: one this build doesn't list takes
+      // the default.
+      config.screenshot_resolution = value;
+      if (config.screenshot_resolution.empty() ||
+          config.screenshot_resolution.find_first_of(" \t\r\n=") != std::string::npos)
+        return {.error = "screenshot_resolution must be game or a resolution"};
     } else if (key == "game_volume") {
       int volume = -1;
       const auto parsed = std::from_chars(
@@ -500,6 +539,12 @@ bool SaveConfig(const fs::path &user_directory, const ConfigResult &config,
       *error = "effect must be none or the name of an effect";
     return false;
   }
+  if (config.screenshot_resolution.empty() ||
+      config.screenshot_resolution.find_first_of(" \t\r\n=") != std::string::npos) {
+    if (error)
+      *error = "screenshot_resolution must be game or a resolution";
+    return false;
+  }
   std::error_code ec;
   fs::create_directories(user_directory, ec);
   if (ec) {
@@ -534,8 +579,12 @@ bool SaveConfig(const fs::path &user_directory, const ConfigResult &config,
        << "aspect_ratio=" << aspect_ratio << '\n'
        << "# Pictures beside a 4:3 game: none, random or a border's id\n"
        << "border=" << game_border << '\n'
-       << "# Picture effect: none, bloom, chromatic, vivid, sharpen, fxaa or crt\n"
+       << "# Picture effect: none, bloom, chromatic, vivid, sharpen, outline, fxaa\n"
+       << "# or crt\n"
        << "effect=" << config.effect << '\n'
+       << "# Screenshots (F9 or the in-game menu): game, 1920x1080, 2560x1440,\n"
+       << "# 3840x2160 or 5120x2880, never below the game's own resolution\n"
+       << "screenshot_resolution=" << config.screenshot_resolution << '\n'
        << "show_fps_in_title=" << (config.show_fps_in_title ? "true" : "false")
        << '\n'
        << "[Audio]\n"
@@ -843,6 +892,45 @@ GameMenuKeys GameMenuProfileKeys() {
   keys.open_fallback = "Guide";
 #endif
   return keys;
+}
+
+GameMenuControlsLegend GameMenuControls() {
+  GameMenuControlsLegend legend;
+#ifdef MODERNGEKKO_GAMECUBE_CONTROLLERS
+  // The launcher tester's rows, but for the extra C and Select buttons,
+  // which only mods use; the stick row also has the D-pad.
+  legend.title = "GameCube";
+  legend.rows = {
+      {"A", {"Buttons/A"}},
+      {"B", {"Buttons/B"}},
+      {"X", {"Buttons/X"}},
+      {"Y", {"Buttons/Y"}},
+      {"Z", {"Buttons/Z"}},
+      {"L", {"Triggers/L", "Triggers/L-Analog"}},
+      {"R", {"Triggers/R", "Triggers/R-Analog"}},
+      {"Start", {"Buttons/Start"}},
+      {MODERNGEKKO_UI_TEXT("Stick"),
+       {"Main Stick/Up", "Main Stick/Down", "Main Stick/Left",
+        "Main Stick/Right", "D-Pad/Up", "D-Pad/Down", "D-Pad/Left",
+        "D-Pad/Right"}},
+      {MODERNGEKKO_UI_TEXT("Menu"), {"Extra/Menu"}},
+  };
+#else
+  legend.title = "Wii Remote";
+  legend.rows = {
+      {"A", {"Buttons/A"}},
+      {"B", {"Buttons/B"}},
+      {"1", {"Buttons/1"}},
+      {"2", {"Buttons/2"}},
+      {"\xE2\x88\x92", {"Buttons/-"}},
+      {"+", {"Buttons/+"}},
+      {"HOME", {"Buttons/Home"}},
+      {MODERNGEKKO_UI_TEXT("D-Pad"),
+       {"D-Pad/Up", "D-Pad/Down", "D-Pad/Left", "D-Pad/Right"}},
+      {MODERNGEKKO_UI_TEXT("Shake"), {"Shake/X", "Shake/Y", "Shake/Z"}},
+  };
+#endif
+  return legend;
 }
 
 #ifdef MODERNGEKKO_GAMECUBE_CONTROLLERS

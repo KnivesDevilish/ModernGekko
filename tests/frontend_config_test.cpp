@@ -176,6 +176,18 @@ int main() {
           return 44;
       }
     }
+    // The Controls page's rows name keys the generated profile binds.
+    const auto legend = moderngekko::frontend::GameMenuControls();
+    if (legend.title.empty() || legend.rows.size() < 8)
+      return 73;
+    for (const auto &row : legend.rows) {
+      if (!row.label || !*row.label || row.keys.empty())
+        return 73;
+      for (const std::string &key : row.keys) {
+        if (!section.contains("\n" + key + " = "))
+          return 74;
+      }
+    }
   }
 
 #ifdef MODERNGEKKO_GAMECUBE_CONTROLLERS
@@ -425,6 +437,43 @@ int main() {
     }
     if (moderngekko::frontend::FindEffect("sepia"))
       return 54;
+  }
+  // Screenshots: 3840x2160 by default, kept, the game's own with "game", the
+  // default for a value this build doesn't list, and a value with spaces
+  // refused.
+  {
+    const fs::path shots = directory / "screenshots";
+    auto shot_config = netplay_config;
+    const auto defaults = moderngekko::frontend::LoadConfig(shots, true);
+    if (!defaults || defaults.screenshot_resolution != "3840x2160" ||
+        moderngekko::frontend::FindScreenshotResolution(defaults.screenshot_resolution)
+                .dolphin_scale != 6 ||
+        moderngekko::frontend::FindScreenshotResolution("game").dolphin_scale != 0 ||
+        moderngekko::frontend::FindScreenshotResolution("9999x9999").dolphin_scale != 6)
+      return 75;
+    shot_config.screenshot_resolution = "5120x2880";
+    if (!moderngekko::frontend::SaveConfig(shots, shot_config, &error))
+      return 76;
+    const auto loaded = moderngekko::frontend::LoadConfig(shots, false);
+    if (loaded.screenshot_resolution != "5120x2880" ||
+        moderngekko::frontend::FindScreenshotResolution(loaded.screenshot_resolution)
+                .dolphin_scale != 8)
+      return 77;
+    shot_config.screenshot_resolution = "two words";
+    if (moderngekko::frontend::SaveConfig(shots, shot_config, &error))
+      return 78;
+    std::ofstream(shots / "config.ini", std::ios::trunc)
+        << "[Video]\nresolution=1920x1080\nscreenshot_resolution=a b\n";
+    if (moderngekko::frontend::LoadConfig(shots, false))
+      return 79;
+    // Each listed option is found again, and the scales only go up.
+    int previous = -1;
+    for (const auto &option : moderngekko::frontend::SupportedScreenshotResolutions()) {
+      if (&moderngekko::frontend::FindScreenshotResolution(option.value) != &option ||
+          option.dolphin_scale <= previous)
+        return 80;
+      previous = option.dolphin_scale;
+    }
   }
 
   fs::remove_all(directory);

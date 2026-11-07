@@ -2,8 +2,9 @@
 
 // The menu the player opens over the game with the menu button (M on the
 // keyboard, Guide on a pad, as the first controller's profile has them):
-// Continue, Quick settings, Back to the launcher and Quit game, the last two
-// after a question.
+// Continue, Quick settings, See controls, Take screenshot, Back to the
+// launcher and Quit game, the last two after a question. How a screenshot
+// went shows at the bottom of the screen, whether the menu is open or not.
 // In solo play it pauses the game, which is drawn again under the menu while
 // it stays open; in Netplay the match goes on behind it. While it is open the
 // game gets no input from the controllers (Host_UIBlocksControllerState).
@@ -12,6 +13,7 @@
 // game_menu_draw.hpp.
 
 #include "moderngekko/runtime.hpp"
+#include "screenshot.hpp"
 
 #include <cstddef>
 #include <functional>
@@ -37,6 +39,10 @@ struct GameMenuHooks
   // Makes a quick setting's choice take effect in the game, from the menu's
   // own thread.
   std::function<void(const QuickSetting& setting, std::size_t choice)> apply_setting;
+  // Takes a screenshot (screenshot.hpp), and says how the last one went.
+  // Without them the menu has no Take screenshot.
+  std::function<bool()> take_screenshot;
+  std::function<ScreenshotStatus()> screenshot_status;
 };
 
 class GameMenu
@@ -50,7 +56,8 @@ public:
   GameMenu& operator=(const GameMenu&) = delete;
 
   // On the video thread, before a frame is presented (VideoEvents'
-  // before_present_event): adds the open menu to that frame's on-screen UI.
+  // before_present_event): adds the open menu, and the screenshot notice, to
+  // that frame's on-screen UI.
   void AddToFrame();
 
   GameMenuChoice Choice() const;

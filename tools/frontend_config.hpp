@@ -40,6 +40,15 @@ struct EffectOption {
   const char *description;
 };
 
+// A resolution screenshots are taken at (F9, or the in-game menu's Take
+// screenshot): the game is drawn at it for the few frames the picture needs.
+// value is config.ini's; dolphin_scale 0 takes them at the game's own.
+struct ScreenshotResolutionOption {
+  const char *text;
+  const char *value;
+  int dolphin_scale;
+};
+
 struct ConfigResult {
   int dolphin_scale = 0;
   std::string resolution;
@@ -61,6 +70,9 @@ struct ConfigResult {
   std::string effect = "none";
   // The game's volume, 0 (silent) to 100.
   int game_volume = 100;
+  // What screenshots are taken at: one of SupportedScreenshotResolutions()'
+  // values. Never below the game's own resolution.
+  std::string screenshot_resolution = "3840x2160";
   // The launcher's language: "auto" (the system's), "en", "es" or "ja".
   std::string language = "auto";
   // Volume of the launcher's and the Netplay lobby's music, 0 (off) to 100.
@@ -91,6 +103,10 @@ const std::vector<AspectRatioOption> &SupportedAspectRatios();
 const std::vector<EffectOption> &SupportedEffects();
 // The effect of config.ini's value; nullptr for one this build doesn't have.
 const EffectOption *FindEffect(std::string_view value);
+// From the game's own resolution up; ConfigResult's default among them.
+const std::vector<ScreenshotResolutionOption> &SupportedScreenshotResolutions();
+// The option of config.ini's value; the default's for one that isn't listed.
+const ScreenshotResolutionOption &FindScreenshotResolution(std::string_view value);
 ConfigResult LoadConfig(const std::filesystem::path &user_directory,
                         bool create_if_missing);
 bool SaveConfig(const std::filesystem::path &user_directory,
@@ -132,6 +148,19 @@ struct GameMenuKeys {
   std::string open_fallback;
 };
 GameMenuKeys GameMenuProfileKeys();
+// What the in-game menu's Controls page lists: the emulated controller's
+// name and, for each of its buttons the game uses, the profile keys behind it
+// (as the launcher's tester groups them). Labels are English, for the menu to
+// translate.
+struct GameMenuControlRow {
+  const char *label;
+  std::vector<std::string> keys;
+};
+struct GameMenuControlsLegend {
+  std::string title;
+  std::vector<GameMenuControlRow> rows;
+};
+GameMenuControlsLegend GameMenuControls();
 #ifdef MODERNGEKKO_GAMECUBE_CONTROLLERS
 // Dolphin's name for the keyboard on this platform. Without a gamepad the
 // profile is written for this device: the first GameCube controller reads

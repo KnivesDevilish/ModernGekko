@@ -54,6 +54,12 @@ struct GraphicsSettings
   // A Dolphin post-processing shader drawn over the picture, by its name in
   // Sys/Shaders (such as "ModernGekko/bloom"); none when empty.
   std::string post_processing_shader;
+  // Screenshots (F9, or the in-game menu's Take screenshot) are taken at
+  // least at this internal resolution scale: the game is drawn at it for the
+  // few frames the picture needs, then goes back to its own
+  // (src/runtime/screenshot.hpp). 0, or a scale no higher than the game's,
+  // takes them at the game's.
+  int screenshot_scale = 0;
 };
 
 struct AudioSettings
@@ -94,6 +100,16 @@ struct QuickSetting
   std::size_t selected = 0;
 };
 
+// One row of the in-game menu's Controls page: a button of the emulated
+// controller, named in English (the menu translates it), and the profile keys
+// whose inputs press it, such as {"Stick", {"Main Stick/Up", ...}}. A row of
+// several keys names whole sticks ("Left stick") rather than directions.
+struct GameMenuControl
+{
+  std::string label;
+  std::vector<std::string> keys;
+};
+
 struct InputSettings
 {
   bool background_input = false;
@@ -132,6 +148,11 @@ struct GameMenuSettings
   // frontend can keep it for next time.
   std::vector<QuickSetting> quick_settings;
   std::function<void(std::size_t row, std::size_t choice)> keep_quick_setting;
+  // The Controls page, read from the profile when the game starts: the name
+  // of the emulated controller (its first column's title, such as
+  // "GameCube") and its rows. No Controls page without rows.
+  std::string controls_title;
+  std::vector<GameMenuControl> controls;
 };
 
 enum class WindowSystem
