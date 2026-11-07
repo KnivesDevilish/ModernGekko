@@ -8,7 +8,6 @@
 #include "Common/FileUtil.h"
 #include "Common/HookableEvent.h"
 #include "Common/Thread.h"
-#include "Common/TimeUtil.h"
 #include "Core/Config/ConfigManager.h"
 #include "Core/Config/GraphicsSettings.h"
 #include "Core/Core.h"
@@ -17,14 +16,11 @@
 #include "VideoCommon/VideoConfig.h"
 #include "VideoCommon/VideoEvents.h"
 
-#include <fmt/chrono.h>
-#include <fmt/format.h>
 
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
 #include <cstdio>
-#include <ctime>
 #include <filesystem>
 #include <mutex>
 #include <optional>
@@ -54,28 +50,23 @@ HighResScreenshot* s_active = nullptr;
 std::atomic<bool> s_busy{false};
 std::atomic<bool> s_blocks_input{false};
 
-// Where Dolphin's own F9 saves (Core/CoreScreenshot.cpp), named the same way:
-// ScreenShots/<game id>/<game id>_<date>_<time>.png, numbered after a second
-// one in the same second.
-std::string NewScreenshotPath()
+// Where Dolphin's own F9 saves (Core/CoreScreenshot.cpp), ScreenShots/<game
+// id>/, with a short name: the one chosen for them (the game's id without
+// one) and a number, such as SR-ZGS_0001.png (NextScreenshotName).
+std::string NewScreenshotPath(const std::string& name)
 {
   const std::string game = SConfig::GetInstance().GetGameID();
   std::string folder = File::GetUserPath(D_SCREENSHOTS_IDX) + game + DIR_SEP_CHR;
   if (!File::CreateFullPath(folder))
     folder = File::GetUserPath(D_SCREENSHOTS_IDX);
-  const std::optional<std::tm> now = Common::LocalTime(std::time(nullptr));
-  const std::string base =
-      now ? fmt::format("{}{}_{:%Y-%m-%d_%H-%M-%S}", folder, game, *now) : folder + game;
-  std::string path = base + ".png";
-  for (unsigned i = 1; File::Exists(path); ++i)
-    path = fmt::format("{}_{}.png", base, i);
-  return path;
+  return folder + NextScreenshotName(folder, name.empty() ? game : name);
 }
 }  // namespace
 
 struct HighResScreenshot::Shared
 {
   int scale = 0;
+  std::string name;
   std::function<void(bool)> mute;
 
   mutable std::mutex mutex;
@@ -156,7 +147,7 @@ struct HighResScreenshot::Shared
     }
     {
       std::lock_guard lock(mutex);
-      path = NewScreenshotPath();
+      path = NewScreenshotPath(name);
       frames.emplace(shot_scale, raised);
     }
     std::fprintf(stderr, "screenshot: drawing at %dx (the game's is %dx)%s\n", shot_scale,
@@ -312,12 +303,13 @@ struct HighResScreenshot::Shared
   }
 };
 
-std::unique_ptr<HighResScreenshot> HighResScreenshot::Create(int scale,
+std::unique_ptr<HighResScreenshot> HighResScreenshot::Create(int scale, std::string name,
                                                              std::function<void(bool)> mute)
 {
   std::unique_ptr<HighResScreenshot> screenshot(new HighResScreenshot());
   auto shared = std::make_shared<Shared>();
   shared->scale = scale;
+  shared->name = std::move(name);
   shared->mute = std::move(mute);
   screenshot->m_shared = shared;
   // After Dolphin's own handlers of the event (registered with the video

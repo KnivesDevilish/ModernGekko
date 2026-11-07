@@ -871,7 +871,8 @@ RuntimeRunResult Runtime::Run() {
     }
 #endif
     m_impl->screenshot =
-        detail::HighResScreenshot::Create(graphics.screenshot_scale, std::move(mute));
+        detail::HighResScreenshot::Create(graphics.screenshot_scale, graphics.screenshot_name,
+                                          std::move(mute));
   }
   if (!m_impl->config.headless) {
     detail::GameMenuHooks hooks;

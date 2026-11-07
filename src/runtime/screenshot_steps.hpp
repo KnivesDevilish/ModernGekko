@@ -13,11 +13,16 @@
 // and the screen may still be showing the frame before the last one.
 
 #include <algorithm>
+#include <cctype>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <filesystem>
 #include <fstream>
 #include <optional>
+#include <string>
+#include <string_view>
+#include <system_error>
 
 namespace moderngekko::detail
 {
@@ -94,6 +99,42 @@ private:
   int m_frames = 0;
   Step m_step = Step::Drawing;
 };
+
+// A screenshot's file name: the name chosen for them (the game's, such as
+// "SR-ZGS"; letters, digits, "-" and "_" kept) and the next number after the
+// highest already in the folder, four digits at least: "SR-ZGS_0001.png".
+// Numbers taken out of the middle are not given again, so a new screenshot
+// always sorts after the others.
+inline std::string NextScreenshotName(const std::filesystem::path& folder, std::string_view name)
+{
+  std::string prefix;
+  for (const char c : name)
+  {
+    const bool kept = std::isalnum(static_cast<unsigned char>(c)) || c == '-' || c == '_';
+    prefix += kept ? c : '_';
+  }
+  if (prefix.empty())
+    prefix = "Screenshot";
+  unsigned long highest = 0;
+  std::error_code ec;
+  for (std::filesystem::directory_iterator it(folder, ec), end; !ec && it != end; it.increment(ec))
+  {
+    const std::string file = it->path().filename().string();
+    if (file.size() <= prefix.size() + 5 || !file.starts_with(prefix + "_") ||
+        !file.ends_with(".png"))
+      continue;
+    const std::string_view digits =
+        std::string_view(file).substr(prefix.size() + 1, file.size() - prefix.size() - 5);
+    if (digits.empty() || digits.size() > 9 ||
+        !std::all_of(digits.begin(), digits.end(),
+                     [](char c) { return std::isdigit(static_cast<unsigned char>(c)) != 0; }))
+      continue;
+    highest = std::max(highest, std::stoul(std::string(digits)));
+  }
+  char number[16];
+  std::snprintf(number, sizeof(number), "%04lu", highest + 1);
+  return prefix + "_" + number + ".png";
+}
 
 struct PngSize
 {

@@ -30,6 +30,10 @@ set(MODERNGEKKO_LAUNCHER_OUTPUT_NAME "ModernGekko" CACHE STRING
     "Launcher executable filename without a platform suffix")
 set(MODERNGEKKO_RUNNER_OUTPUT_NAME "moderngekko-run" CACHE STRING
     "Runner executable filename without a platform suffix")
+# Screenshots are named <this>_0001.png and on (the game's disc ID when
+# empty), in ScreenShots/<disc ID>/ of the user directory.
+set(MODERNGEKKO_SCREENSHOT_NAME "" CACHE STRING
+    "What screenshots' file names start with, such as SR-ZGS")
 set(MODERNGEKKO_USER_DIRECTORY_NAME "moderngekko" CACHE STRING
     "Frontend user directory name")
 set(MODERNGEKKO_REQUIRED_DISC_ID "" CACHE STRING
@@ -603,6 +607,10 @@ if(MODERNGEKKO_ENABLE_DOLPHIN_RUNTIME)
         target_compile_definitions(moderngekko-run PRIVATE
             MODERNGEKKO_DEFAULT_WINDOW_TITLE="${MODERNGEKKO_DEFAULT_WINDOW_TITLE}")
     endif()
+    if(MODERNGEKKO_SCREENSHOT_NAME)
+        target_compile_definitions(moderngekko-run PRIVATE
+            MODERNGEKKO_SCREENSHOT_NAME="${MODERNGEKKO_SCREENSHOT_NAME}")
+    endif()
     if(MODERNGEKKO_REQUIRED_DISC_ID)
         target_compile_definitions(moderngekko-run PRIVATE
             MODERNGEKKO_REQUIRED_DISC_ID="${MODERNGEKKO_REQUIRED_DISC_ID}")
@@ -959,6 +967,15 @@ if(BUILD_TESTING)
              COMMAND moderngekko_launcher_update_test)
 
     # Header-only: the light format of the PATCH NOTES panel.
+    # Header-only: the Screenshots page's listing, names and picture sizes.
+    add_executable(moderngekko_launcher_screenshots_test
+        tests/launcher_screenshots_test.cpp)
+    target_include_directories(moderngekko_launcher_screenshots_test PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/tools")
+    target_compile_features(moderngekko_launcher_screenshots_test PRIVATE cxx_std_23)
+    add_test(NAME moderngekko.launcher_screenshots
+             COMMAND moderngekko_launcher_screenshots_test)
+
     # Header-only: installing a complete save and bringing the player's back.
     add_executable(moderngekko_launcher_save_test
         tests/launcher_save_test.cpp)

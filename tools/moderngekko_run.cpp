@@ -449,6 +449,9 @@ int RunMain(int argc, char **argv) {
     config.graphics.post_processing_shader = effect->shader;
   config.audio.volume = frontend_config.game_volume;
   // Screenshots at the chosen resolution, whatever the game is shown at.
+#ifdef MODERNGEKKO_SCREENSHOT_NAME
+  config.graphics.screenshot_name = MODERNGEKKO_SCREENSHOT_NAME;
+#endif
   config.graphics.screenshot_scale =
       moderngekko::frontend::FindScreenshotResolution(frontend_config.screenshot_resolution)
           .dolphin_scale;

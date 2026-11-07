@@ -60,6 +60,9 @@ struct GraphicsSettings
   // (src/runtime/screenshot.hpp). 0, or a scale no higher than the game's,
   // takes them at the game's.
   int screenshot_scale = 0;
+  // What screenshots' file names start with, before their number, such as
+  // "SR-ZGS" for SR-ZGS_0001.png; the game's disc ID when empty.
+  std::string screenshot_name;
 };
 
 struct AudioSettings

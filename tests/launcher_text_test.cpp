@@ -31,6 +31,7 @@ constexpr const char* SOURCES[] = {
     "tools/frontend_config.cpp",
     "tools/launcher_summary.hpp",
     "tools/launcher_ui.hpp",
+    "tools/launcher_gallery.hpp",
     "tools/netplay_lobby_ui.hpp",
     "tools/netplay_session.cpp",
     "tools/moderngekko_run.cpp",

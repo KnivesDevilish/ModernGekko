@@ -6,6 +6,7 @@
 #include "launcher_text.hpp"
 #include "launcher_music.hpp"
 #include "launcher_patch_notes.hpp"
+#include "launcher_gallery.hpp"
 #include "launcher_save.hpp"
 #include "launcher_ui.hpp"
 #include "launcher_update.hpp"
@@ -590,6 +591,7 @@ enum class LauncherPage
   Settings,
   Controls,
   GameFiles,
+  Screenshots,
   Credits,
 };
 
@@ -643,28 +645,6 @@ void DrawLauncherBanner(const LauncherBanner& banner)
       position, ImVec2(position.x + size.x, position.y + size.y), ImVec2(0.0f, 0.0f),
       ImVec2(1.0f, 1.0f), IM_COL32_WHITE, ImGui::GetStyle().ChildRounding);
   ImGui::Dummy(size);
-}
-
-// The music volume above the language menu at the bottom of the sidebar, 0
-// (off) to 100. Returns true while the volume changes; finished is set once
-// the player lets go of the slider, which is when it is worth saving.
-bool DrawMusicVolume(int& volume, bool* finished, float scale)
-{
-  const ImGuiStyle& style = ImGui::GetStyle();
-  const float language_height = ImGui::GetTextLineHeightWithSpacing() + ImGui::GetFrameHeight();
-  const float height = ImGui::GetTextLineHeightWithSpacing() + ImGui::GetFrameHeight() +
-                       style.ItemSpacing.y + 10.0f * scale;
-  ImGui::SetCursorPosY(std::max(ImGui::GetCursorPosY(),
-                                ImGui::GetWindowHeight() - language_height - height));
-  ImGui::Indent(12.0f * scale);
-  ImGui::TextDisabled("%s", Tr("MUSIC"));
-  ImGui::SetNextItemWidth(-1.0f);
-  const bool changed = ImGui::SliderInt("##music_volume", &volume, 0, 100,
-                                        volume == 0 ? Tr("Off") : "%d %%",
-                                        ImGuiSliderFlags_AlwaysClamp);
-  *finished = ImGui::IsItemDeactivatedAfterEdit();
-  ImGui::Unindent(12.0f * scale);
-  return changed;
 }
 
 // The system's first preferred language, such as "es" from es_VE.UTF-8, or
@@ -2426,7 +2406,7 @@ int main(int argc, char** argv)
   std::string patch_notes_language;
   // Resources/launcher-music.mp3 loops while the launcher is open, stops
   // while the game runs and starts over after. Without the file there is no
-  // music and no slider.
+  // music and no slider for it in Settings → Audio.
   moderngekko::frontend::MusicPlayer music(MODERNGEKKO_FRONTEND_NAME);
   const fs::path music_path = release_directory / "Resources" / "launcher-music.mp3";
   const bool has_music = music.Play(music_path, config.music_volume);
@@ -2514,6 +2494,23 @@ int main(int argc, char** argv)
   // see tools/game_borders.hpp); Settings offers them when there are any.
   const moderngekko::frontend::GameBorderList game_borders =
       moderngekko::frontend::LoadGameBorders(release_directory / "Resources" / "borders");
+  // The Screenshots page, made the first time it is shown: the game's
+  // screenshots, where Dolphin saves them (ScreenShots/<disc ID>, or every
+  // game's without a required disc), and their small pictures in Cache.
+  std::optional<moderngekko::frontend::ui::ScreenshotGallery> screenshot_gallery;
+  const auto show_screenshots = [&] {
+    if (!screenshot_gallery)
+    {
+#ifdef MODERNGEKKO_REQUIRED_DISC_ID
+      screenshot_gallery.emplace(user_directory / "ScreenShots" / MODERNGEKKO_REQUIRED_DISC_ID,
+                                 user_directory / "Cache" / "ScreenshotThumbnails", false);
+#else
+      screenshot_gallery.emplace(user_directory / "ScreenShots",
+                                 user_directory / "Cache" / "ScreenshotThumbnails", true);
+#endif
+    }
+    screenshot_gallery->Draw(renderer, fonts.bold, scale);
+  };
 #ifdef MODERNGEKKO_REQUIRED_DISC_ID
   // A complete save this build brings (Resources/complete-save, see
   // tools/launcher_save.hpp), which Game Files can install over the player's.
@@ -3059,27 +3056,16 @@ int main(int argc, char** argv)
     if (DrawNavigationItem(Tr("Game Files"), current_page == LauncherPage::GameFiles, fonts.bold,
                            scale))
       current_page = LauncherPage::GameFiles;
+    if (DrawNavigationItem(Tr("Screenshots"), current_page == LauncherPage::Screenshots,
+                           fonts.bold, scale))
+    {
+      current_page = LauncherPage::Screenshots;
+      if (screenshot_gallery)
+        screenshot_gallery->Refresh();
+    }
     if (DrawNavigationItem(Tr("Credits"), current_page == LauncherPage::Credits, fonts.bold,
                            scale))
       current_page = LauncherPage::Credits;
-    if (has_music)
-    {
-      bool finished = false;
-      if (DrawMusicVolume(config.music_volume, &finished, scale))
-        music.SetVolume(config.music_volume);
-      if (finished)
-      {
-        config.resolution = resolutions[resolution_index].text;
-        config.show_fps_in_title = show_fps_in_title;
-        config.controller = selected_controller;
-        std::string error;
-        if (!moderngekko::frontend::SaveConfig(user_directory, config, &error))
-        {
-          std::lock_guard lock(dialog.mutex);
-          dialog.error = std::move(error);
-        }
-      }
-    }
     {
       const std::string previous = config.language;
       if (DrawLanguageMenu(config.language, system_language, scale))
@@ -3828,7 +3814,7 @@ int main(int argc, char** argv)
     BeginSection("##settings_audio", Tr("AUDIO"));
     // The game's own volume (also in the in-game menu's Quick settings),
     // written when the slider is let go. The launcher's music has its own,
-    // in the sidebar.
+    // below it.
     ImGui::TextUnformatted(Tr("Game volume"));
     ImGui::SetNextItemWidth(-1.0f);
     ImGui::SliderInt("##game_volume", &config.game_volume, 0, 100, "%d %%",
@@ -3846,6 +3832,30 @@ int main(int argc, char** argv)
       }
     }
     ImGui::TextDisabled("%s", Tr("Also in the in-game menu's Quick settings."));
+    if (has_music)
+    {
+      // The music of the launcher and the Netplay lobby: heard as it moves,
+      // written when the slider is let go.
+      ImGui::Spacing();
+      ImGui::TextUnformatted(Tr("Launcher and lobby music"));
+      ImGui::SetNextItemWidth(-1.0f);
+      if (ImGui::SliderInt("##music_volume", &config.music_volume, 0, 100,
+                           config.music_volume == 0 ? Tr("Off") : "%d %%",
+                           ImGuiSliderFlags_AlwaysClamp))
+        music.SetVolume(config.music_volume);
+      if (ImGui::IsItemDeactivatedAfterEdit())
+      {
+        config.resolution = resolutions[resolution_index].text;
+        config.show_fps_in_title = show_fps_in_title;
+        config.controller = selected_controller;
+        std::string error;
+        if (!moderngekko::frontend::SaveConfig(user_directory, config, &error))
+        {
+          std::lock_guard lock(dialog.mutex);
+          dialog.error = std::move(error);
+        }
+      }
+    }
     EndSection();
     }
       if (current_page == LauncherPage::Controls)
@@ -4137,6 +4147,8 @@ int main(int argc, char** argv)
     }
 #endif
     }
+      if (current_page == LauncherPage::Screenshots)
+        show_screenshots();
       if (current_page == LauncherPage::Credits)
       {
 #if defined(MODERNGEKKO_FRONTEND_VERSION) && defined(MODERNGEKKO_UPDATE_REPOSITORY)
@@ -4239,6 +4251,8 @@ int main(int argc, char** argv)
     SDL_DestroyTexture(banner.texture);
   if (background.texture)
     SDL_DestroyTexture(background.texture);
+  // Its thread stops and its pictures go before the renderer.
+  screenshot_gallery.reset();
   SDL_DestroyRenderer(renderer);
   SDL_DestroyWindow(window);
   SDL_Quit();

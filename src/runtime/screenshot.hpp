@@ -8,8 +8,9 @@
 // resolution for the few frames that takes (screenshot_steps.hpp), then goes
 // back to its own; the setting is never changed. A paused game runs those
 // frames without sound or input and pauses again, so the picture is of a
-// moment a few frames later. The PNG goes where Dolphin puts its own:
-// ScreenShots/<game id>/ in the user folder.
+// moment a few frames later. The PNG goes where Dolphin puts its own,
+// ScreenShots/<game id>/ in the user folder, with a short name: SR-ZGS_0001.png
+// and on.
 
 #include "screenshot_keys.hpp"
 
@@ -46,11 +47,12 @@ struct ScreenshotStatus
 class HighResScreenshot
 {
 public:
-  // scale: GraphicsSettings::screenshot_scale. mute silences the game's sound
+  // scale: GraphicsSettings::screenshot_scale; name: what the files' names
+  // start with (GraphicsSettings::screenshot_name). mute silences the game's sound
   // (true) and brings it back (false) around a paused game's frames for the
   // picture; without it the sound stream is stopped for them instead. Until
   // it is destroyed, F9 takes its screenshots (TakeScreenshot).
-  static std::unique_ptr<HighResScreenshot> Create(int scale,
+  static std::unique_ptr<HighResScreenshot> Create(int scale, std::string name,
                                                    std::function<void(bool muted)> mute);
   ~HighResScreenshot();
   HighResScreenshot(const HighResScreenshot&) = delete;

@@ -14,6 +14,7 @@
 namespace
 {
 using moderngekko::detail::FinishedPngSize;
+using moderngekko::detail::NextScreenshotName;
 using moderngekko::detail::ScreenshotFrames;
 using moderngekko::detail::ScreenshotScale;
 using Action = ScreenshotFrames::Action;
@@ -104,6 +105,32 @@ int main()
     if (FinishedPngSize(png))
       return 94;
     std::filesystem::remove(png, ec);
+  }
+  {
+    // Short names, numbered on from the highest; other files don't count.
+    const std::filesystem::path folder =
+        std::filesystem::temp_directory_path() / "moderngekko_screenshot_names_test";
+    std::error_code ec;
+    std::filesystem::remove_all(folder, ec);
+    if (NextScreenshotName(folder, "SR-ZGS") != "SR-ZGS_0001.png")
+      return 129;
+    std::filesystem::create_directories(folder);
+    for (const char* name : {"SR-ZGS_0001.png", "SR-ZGS_0007.png", "SR-ZGS_12x.png",
+                             "SR-ZGS_0099.jpg", "RS9E8P_2026-11-07_08-09-29.png",
+                             "SR-ZGS_.png", "Other_0050.png"})
+      std::ofstream(folder / name) << "x";
+    if (NextScreenshotName(folder, "SR-ZGS") != "SR-ZGS_0008.png" ||
+        NextScreenshotName(folder, "Other") != "Other_0051.png")
+      return 130;
+    std::ofstream(folder / "SR-ZGS_12345.png") << "x";
+    if (NextScreenshotName(folder, "SR-ZGS") != "SR-ZGS_12346.png")
+      return 131;
+    // Characters a file name shouldn't have become "_"; no name at all is
+    // "Screenshot".
+    if (NextScreenshotName(folder, "My Game: 2") != "My_Game__2_0001.png" ||
+        NextScreenshotName(folder, "") != "Screenshot_0001.png")
+      return 132;
+    std::filesystem::remove_all(folder, ec);
   }
   std::puts("screenshot steps: ok");
   return 0;
