@@ -7,12 +7,12 @@
 // it suits integrated graphics.
 
 // How bright a colour has to be to glow, and how gradually the glow starts.
-const float THRESHOLD = 0.6;
+const float THRESHOLD = 0.52;
 const float KNEE = 0.3;
 // How far the glow reaches, as a fraction of the picture's height.
-const float RADIUS = 0.03;
+const float RADIUS = 0.034;
 // How strong it is.
-const float STRENGTH = 0.75;
+const float STRENGTH = 1.2;
 
 // Where the glow is sampled around a pixel, within a disc of radius 1, and
 // how much each sample counts (z). A golden-angle spiral, which covers the
@@ -82,7 +82,7 @@ void main()
 {
   float2 position = PicturePosition();
   float3 colour = Picture(position);
-  float3 glow = Glow(position) * STRENGTH;
+  float3 glow = min(Glow(position) * STRENGTH, float3(1.0, 1.0, 1.0));
   // Screen blending: the glow lightens the picture without washing it out.
   colour = 1.0 - (1.0 - colour) * (1.0 - glow);
   SetOutput(float4(colour, 1.0));

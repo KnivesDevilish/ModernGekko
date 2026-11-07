@@ -30,6 +30,9 @@
 #include "dolphin_runtime_internal.hpp"
 #include "game_border.hpp"
 #include "game_menu.hpp"
+#if MODERNGEKKO_HAS_PULSE
+#include "pulse_volume.hpp"
+#endif
 #include "moderngekko/cpu_state.h"
 #include "moderngekko/mod_loader.hpp"
 #include "moderngekko/module_loader.hpp"
@@ -530,6 +533,10 @@ struct Runtime::Impl {
   // The menu opened over the game (config.menu), drawn by menu_hook.
   std::unique_ptr<detail::GameMenu> menu;
   Common::EventHook menu_hook;
+#if MODERNGEKKO_HAS_PULSE
+  // The game's volume, which Dolphin's PulseAudio backend leaves out.
+  std::unique_ptr<detail::PulseStreamVolume> pulse_volume;
+#endif
 };
 
 namespace detail {
@@ -826,6 +833,15 @@ RuntimeRunResult Runtime::Run() {
   }
   m_impl->booted = true;
   const GraphicsSettings &graphics = m_impl->config.graphics;
+#if MODERNGEKKO_HAS_PULSE
+  // Dolphin's PulseAudio backend plays at full volume whatever its volume
+  // setting says, so the game's stream gets the volume itself, every time:
+  // the sound server may have kept another one from the last game.
+  if (!m_impl->config.headless && m_impl->config.audio.backend == BACKEND_PULSEAUDIO) {
+    m_impl->pulse_volume = std::make_unique<detail::PulseStreamVolume>(
+        m_impl->config.audio.mute ? 0 : std::clamp(m_impl->config.audio.volume, 0, 100));
+  }
+#endif
   if (!m_impl->config.headless) {
     // A slot even without a border, so the in-game menu can put one up.
     std::unique_ptr<detail::GameBorderOverlay> border;
@@ -871,6 +887,10 @@ RuntimeRunResult Runtime::Run() {
             Config::SetBaseOrCurrent(Config::MAIN_AUDIO_VOLUME, volume);
             AudioCommon::UpdateSoundStream(system);
           });
+#if MODERNGEKKO_HAS_PULSE
+          if (impl->pulse_volume)
+            impl->pulse_volume->Set(volume);
+#endif
         }
         break;
       case QuickSetting::Kind::Border: {
@@ -919,6 +939,9 @@ RuntimeRunResult Runtime::Run() {
       m_impl->menu ? m_impl->menu->Choice() : detail::GameMenuChoice::None;
   // Its thread reads the controllers, which go away with the runtime.
   m_impl->menu.reset();
+#if MODERNGEKKO_HAS_PULSE
+  m_impl->pulse_volume.reset();
+#endif
   title_thread.request_stop();
   if (title_thread.joinable())
     title_thread.join();

@@ -389,16 +389,16 @@ int main() {
     const auto defaults = moderngekko::frontend::LoadConfig(effect, true);
     if (!defaults || defaults.effect != "none" || defaults.game_volume != 100)
       return 45;
-    effect_config.effect = "bloom-chromatic";
+    effect_config.effect = "chromatic";
     effect_config.game_volume = 35;
     if (!moderngekko::frontend::SaveConfig(effect, effect_config, &error))
       return 46;
     const auto loaded = moderngekko::frontend::LoadConfig(effect, false);
-    if (loaded.effect != "bloom-chromatic" || loaded.game_volume != 35)
+    if (loaded.effect != "chromatic" || loaded.game_volume != 35)
       return 47;
     // The short SaveConfig the Settings page uses keeps them.
     if (!moderngekko::frontend::SaveConfig(effect, "1920x1080", true, controller, &error) ||
-        moderngekko::frontend::LoadConfig(effect, false).effect != "bloom-chromatic" ||
+        moderngekko::frontend::LoadConfig(effect, false).effect != "chromatic" ||
         moderngekko::frontend::LoadConfig(effect, false).game_volume != 35)
       return 48;
     effect_config.game_volume = 101;

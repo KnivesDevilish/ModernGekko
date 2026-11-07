@@ -398,6 +398,22 @@ if(MODERNGEKKO_ENABLE_DOLPHIN_RUNTIME)
     # imgui: the 4:3 borders are drawn on Dolphin's on-screen UI
     # (src/runtime/game_border.cpp).
     target_link_libraries(moderngekko PRIVATE core uicommon imgui)
+    # The game's volume on Linux, where Dolphin plays through its PulseAudio
+    # backend, which ignores Dolphin's volume (src/runtime/pulse_volume.hpp).
+    if(UNIX AND NOT APPLE)
+        find_package(PkgConfig QUIET)
+        if(PKG_CONFIG_FOUND)
+            pkg_check_modules(MODERNGEKKO_PULSE QUIET IMPORTED_TARGET GLOBAL libpulse)
+        endif()
+        if(TARGET PkgConfig::MODERNGEKKO_PULSE)
+            target_sources(moderngekko PRIVATE src/runtime/pulse_volume.cpp)
+            target_link_libraries(moderngekko PRIVATE PkgConfig::MODERNGEKKO_PULSE)
+            target_compile_definitions(moderngekko PRIVATE MODERNGEKKO_HAS_PULSE=1)
+        else()
+            message(WARNING "libpulse not found: the game volume setting won't change "
+                            "the game's sound through Dolphin's PulseAudio backend")
+        endif()
+    endif()
     if(TARGET PkgConfig::X11)
         target_sources(moderngekko PRIVATE
             src/platform/PlatformX11.cpp)

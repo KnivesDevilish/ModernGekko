@@ -221,9 +221,6 @@ const std::vector<EffectOption> &SupportedEffects() {
        "ModernGekko/chromatic_aberration",
        MODERNGEKKO_UI_TEXT("Red and blue drift apart toward the edges, as "
                            "through a camera lens.")},
-      {MODERNGEKKO_UI_TEXT("Bloom + chromatic aberration"), "bloom-chromatic",
-       "ModernGekko/bloom_chromatic",
-       MODERNGEKKO_UI_TEXT("Both effects together.")},
       {MODERNGEKKO_UI_TEXT("Vivid colors"), "vivid", "ModernGekko/vivid",
        MODERNGEKKO_UI_TEXT("Richer colors and a little more contrast.")},
       {MODERNGEKKO_UI_TEXT("Sharpen"), "sharpen", "ModernGekko/sharpen",
@@ -537,8 +534,7 @@ bool SaveConfig(const fs::path &user_directory, const ConfigResult &config,
        << "aspect_ratio=" << aspect_ratio << '\n'
        << "# Pictures beside a 4:3 game: none, random or a border's id\n"
        << "border=" << game_border << '\n'
-       << "# Picture effect: none, bloom, chromatic, bloom-chromatic, vivid,\n"
-          "# sharpen, fxaa or crt\n"
+       << "# Picture effect: none, bloom, chromatic, vivid, sharpen, fxaa or crt\n"
        << "effect=" << config.effect << '\n'
        << "show_fps_in_title=" << (config.show_fps_in_title ? "true" : "false")
        << '\n'
