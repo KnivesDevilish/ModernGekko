@@ -326,6 +326,35 @@ int main() {
       return 35;
   }
 
+  // 4:3 border: random until chosen, then saved, kept by the short
+  // SaveConfig, read in any case; any id is kept, but not two words.
+  {
+    const fs::path border = directory / "border";
+    auto border_config = moderngekko::frontend::LoadConfig(border, true);
+    if (border_config.game_border != "random")
+      return 38;
+    border_config.game_border = "green-grid";
+    if (!moderngekko::frontend::SaveConfig(border, border_config, &error) ||
+        !moderngekko::frontend::SaveConfig(border, "1920x1080", true, controller, &error) ||
+        moderngekko::frontend::LoadConfig(border, false).game_border != "green-grid")
+      return 39;
+    border_config.game_border = "two words";
+    if (moderngekko::frontend::SaveConfig(border, border_config, &error))
+      return 40;
+    {
+      std::ofstream file(border / "config.ini", std::ios::trunc);
+      file << "[Video]\nresolution=1920x1080\nborder = None\n";
+    }
+    if (moderngekko::frontend::LoadConfig(border, false).game_border != "none")
+      return 41;
+    {
+      std::ofstream file(border / "config.ini", std::ios::trunc);
+      file << "[Video]\nresolution=1920x1080\nborder=../sonic\n";
+    }
+    if (moderngekko::frontend::LoadConfig(border, false))
+      return 42;
+  }
+
   fs::remove_all(directory);
   return 0;
 }

@@ -28,6 +28,7 @@
 #include "VideoCommon/VideoConfig.h"
 #include "automation_protocol.hpp"
 #include "dolphin_runtime_internal.hpp"
+#include "game_border.hpp"
 #include "moderngekko/cpu_state.h"
 #include "moderngekko/mod_loader.hpp"
 #include "moderngekko/module_loader.hpp"
@@ -516,6 +517,10 @@ struct Runtime::Impl {
   Common::EventHook present_hook;
   bool automation_registered = false;
   std::jthread automation_thread;
+  // The pictures beside a game that doesn't fill the window, added to every
+  // frame by border_hook on the video thread.
+  std::unique_ptr<detail::GameBorderOverlay> border;
+  Common::EventHook border_hook;
 };
 
 namespace detail {
@@ -809,6 +814,16 @@ RuntimeRunResult Runtime::Run() {
                          "Dolphin could not boot sys/main.dol"}};
   }
   m_impl->booted = true;
+  const GraphicsSettings &graphics = m_impl->config.graphics;
+  if (!m_impl->config.headless && !graphics.border_folder.empty() &&
+      !graphics.border_id.empty()) {
+    m_impl->border =
+        detail::GameBorderOverlay::Create(graphics.border_folder, graphics.border_id);
+    if (m_impl->border) {
+      m_impl->border_hook = GetVideoEvents().before_present_event.Register(
+          [border = m_impl->border.get()](const PresentInfo &) { border->AddToFrame(); });
+    }
+  }
   m_impl->present_hook =
       GetVideoEvents().after_present_event.Register([this](const PresentInfo &info) {
         m_impl->automation_state.frame_count.store(info.frame_count,
@@ -833,6 +848,8 @@ RuntimeRunResult Runtime::Run() {
     });
   }
   m_impl->platform->MainLoop();
+  // Unhooked before Dolphin stops: the video thread calls the hook until then.
+  m_impl->border_hook = {};
   title_thread.request_stop();
   if (title_thread.joinable())
     title_thread.join();

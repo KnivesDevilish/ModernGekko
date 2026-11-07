@@ -1,5 +1,6 @@
 #include "frontend_config.hpp"
 #include "dol_patch.hpp"
+#include "game_borders.hpp"
 #include "launcher_savestates.hpp"
 #include "launcher_summary.hpp"
 #include "launcher_text.hpp"
@@ -2489,6 +2490,10 @@ int main(int argc, char** argv)
     if (config.aspect_ratio == aspect_ratios[i].value)
       aspect_ratio_index = static_cast<int>(i);
   }
+  // The pictures this build can show beside a 4:3 game (Resources/borders,
+  // see tools/game_borders.hpp); Settings offers them when there are any.
+  const moderngekko::frontend::GameBorderList game_borders =
+      moderngekko::frontend::LoadGameBorders(release_directory / "Resources" / "borders");
   // The runner gives MODERNGEKKO_STATICRECOMP priority over config.ini and
   // inherits this process' environment, so say so when it is set.
   const char* cpu_core_environment_value = std::getenv("MODERNGEKKO_STATICRECOMP");
@@ -3487,9 +3492,16 @@ int main(int argc, char** argv)
     }
     EndSection();
     BeginSection("##settings_display", Tr("DISPLAY"));
+    // The section's labels share a column, so the lists next to them line up.
+    const float display_label_x = ImGui::GetCursorPosX();
+    float display_label_width = ImGui::CalcTextSize(Tr("Aspect ratio")).x;
+    if (!game_borders.borders.empty())
+      display_label_width =
+          std::max(display_label_width, ImGui::CalcTextSize(Tr("4:3 borders")).x);
+    const float display_list_x = display_label_x + display_label_width + 16.0f * scale;
     ImGui::AlignTextToFramePadding();
     ImGui::TextUnformatted(Tr("Aspect ratio"));
-    ImGui::SameLine(0.0f, 16.0f * scale);
+    ImGui::SameLine(display_list_x);
     ImGui::SetNextItemWidth(-1.0f);
     if (ImGui::BeginCombo("##aspect_ratio", Tr(aspect_ratios[aspect_ratio_index].text)))
     {
@@ -3529,6 +3541,76 @@ int main(int argc, char** argv)
     }
     ImGui::SetItemTooltip("%s",
                           Tr("Netplay: the host's 16:9 or 4:3 choice applies to every player."));
+    if (!game_borders.borders.empty())
+    {
+      // None, Random (one picked each time the game opens) or one of the
+      // build's borders, by the name in the launcher's language. A border
+      // config.ini names but the build lacks shows none, and so says None.
+      const char* border_language =
+          moderngekko::frontend::LanguageCode(moderngekko::frontend::ActiveLanguage());
+      const std::string shown_border =
+          config.game_border == "random" || game_borders.Find(config.game_border) ?
+              config.game_border :
+              std::string("none");
+      const auto border_name = [&](std::string_view setting) -> std::string {
+        if (setting == "random")
+          return Tr("Random");
+        if (const auto* border = game_borders.Find(setting))
+          return border->Name(border_language);
+        return Tr("None");
+      };
+      const auto choose_border = [&](const std::string& setting) {
+        const std::string previous = config.game_border;
+        config.game_border = setting;
+        config.resolution = resolutions[resolution_index].text;
+        config.show_fps_in_title = show_fps_in_title;
+        config.controller = selected_controller;
+        std::string error;
+        if (!moderngekko::frontend::SaveConfig(user_directory, config, &error))
+        {
+          config.game_border = previous;
+          std::lock_guard lock(dialog.mutex);
+          dialog.error = std::move(error);
+        }
+      };
+      const auto describe_border = [&](const char* text) {
+        ImGui::Indent(12.0f * scale);
+        ImGui::PushTextWrapPos(0.0f);
+        ImGui::TextDisabled("%s", text);
+        ImGui::PopTextWrapPos();
+        ImGui::Unindent(12.0f * scale);
+      };
+      ImGui::AlignTextToFramePadding();
+      ImGui::TextUnformatted(Tr("4:3 borders"));
+      ImGui::SameLine(display_list_x);
+      ImGui::SetNextItemWidth(-1.0f);
+      if (ImGui::BeginCombo("##game_border", border_name(shown_border).c_str()))
+      {
+        if (ImGui::Selectable(Tr("None"), shown_border == "none"))
+          choose_border("none");
+        if (shown_border == "none")
+          ImGui::SetItemDefaultFocus();
+        describe_border(Tr("Black bars beside the game."));
+        if (ImGui::Selectable(Tr("Random"), shown_border == "random"))
+          choose_border("random");
+        if (shown_border == "random")
+          ImGui::SetItemDefaultFocus();
+        describe_border(Tr("One picked at random each time the game opens."));
+        for (const auto& border : game_borders.borders)
+        {
+          const bool selected = shown_border == border.id;
+          ImGui::PushID(border.id.c_str());
+          if (ImGui::Selectable(border.Name(border_language).c_str(), selected))
+            choose_border(border.id);
+          ImGui::PopID();
+          if (selected)
+            ImGui::SetItemDefaultFocus();
+        }
+        ImGui::EndCombo();
+      }
+      ImGui::SetItemTooltip("%s", Tr("Pictures beside the game when it is shown in 4:3 on a "
+                                     "wider screen. In Netplay too, only you see your choice."));
+    }
     ImGui::Spacing();
     const bool previous_fullscreen = fullscreen;
     if (ImGui::Checkbox(Tr("Start in fullscreen"), &fullscreen))

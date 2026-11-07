@@ -74,6 +74,11 @@ set(MODERNGEKKO_LOBBY_BACKGROUND "" CACHE FILEPATH
     "Optional picture behind the Netplay lobby")
 set(MODERNGEKKO_LAUNCHER_PATCH_NOTES "" CACHE FILEPATH
     "Optional UTF-8 text shown in the PLAY page's PATCH NOTES panel")
+# A folder with borders.txt and its pictures (format in tools/game_borders.hpp):
+# the borders the launcher offers in Settings and the runtime draws beside a
+# 4:3 game on a wide screen.
+set(MODERNGEKKO_GAME_BORDERS "" CACHE PATH
+    "Optional folder with the pictures shown beside a 4:3 game")
 # With both set, the launcher shows its version and looks on GitHub for a
 # newer published release (tools/launcher_update.hpp).
 set(MODERNGEKKO_FRONTEND_VERSION "" CACHE STRING
@@ -95,6 +100,23 @@ function(moderngekko_add_resource target source name)
                 "-DDESTINATION=$<TARGET_FILE_DIR:${target}>/Resources/${name}"
                 -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/CopyOptionalResource.cmake"
         COMMENT "Copying ${name} into Resources/"
+        VERBATIM)
+    add_dependencies(${target} ${_copy_target})
+endfunction()
+
+# Same for a folder, as Resources/<name>/: the copy follows the folder, a file
+# taken out of it is taken out of the copy (cmake/CopyOptionalResourceFolder.cmake).
+function(moderngekko_add_resource_folder target source name)
+    if(NOT source)
+        return()
+    endif()
+    string(MAKE_C_IDENTIFIER "${target}_resource_folder_${name}" _copy_target)
+    add_custom_target(${_copy_target}
+        COMMAND "${CMAKE_COMMAND}"
+                "-DSOURCE=${source}"
+                "-DDESTINATION=$<TARGET_FILE_DIR:${target}>/Resources/${name}"
+                -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/CopyOptionalResourceFolder.cmake"
+        COMMENT "Copying ${name}/ into Resources/"
         VERBATIM)
     add_dependencies(${target} ${_copy_target})
 endfunction()
@@ -318,6 +340,7 @@ target_link_libraries(moderngekko PUBLIC ModernGekko::ABI PRIVATE fmt::fmt)
 if(MODERNGEKKO_ENABLE_DOLPHIN_RUNTIME)
     target_sources(moderngekko PRIVATE
         src/runtime/dolphin_runtime.cpp
+        src/runtime/game_border.cpp
         tools/automation_protocol.cpp
         vendor/dolphin/Source/Core/DolphinNoGUI/Platform.cpp
         vendor/dolphin/Source/Core/DolphinNoGUI/PlatformHeadless.cpp
@@ -357,7 +380,9 @@ if(MODERNGEKKO_ENABLE_DOLPHIN_RUNTIME)
     else()
         target_compile_definitions(moderngekko PRIVATE _M_GENERIC=1)
     endif()
-    target_link_libraries(moderngekko PRIVATE core uicommon)
+    # imgui: the 4:3 borders are drawn on Dolphin's on-screen UI
+    # (src/runtime/game_border.cpp).
+    target_link_libraries(moderngekko PRIVATE core uicommon imgui)
     if(TARGET PkgConfig::X11)
         target_sources(moderngekko PRIVATE
             vendor/dolphin/Source/Core/DolphinNoGUI/PlatformX11.cpp)
@@ -605,6 +630,9 @@ if(MODERNGEKKO_ENABLE_DOLPHIN_RUNTIME)
     # see moderngekko_use_music_output for where the sound goes).
     moderngekko_add_resource(moderngekko-run "${MODERNGEKKO_LOBBY_MUSIC}" lobby-music.mp3)
     moderngekko_use_music_output(moderngekko-run)
+    # Resources/borders: the pictures beside a 4:3 game. The runner draws the
+    # one config.ini names; the launcher, next to it, lists them in Settings.
+    moderngekko_add_resource_folder(moderngekko-run "${MODERNGEKKO_GAME_BORDERS}" borders)
 
     add_executable(moderngekko-launcher
         tools/moderngekko_launcher.cpp
@@ -884,6 +912,15 @@ if(BUILD_TESTING)
     target_compile_features(moderngekko_launcher_patch_notes_test PRIVATE cxx_std_23)
     add_test(NAME moderngekko.launcher_patch_notes
              COMMAND moderngekko_launcher_patch_notes_test)
+
+    # Header-only: borders.txt, choosing a 4:3 border and placing it in a bar.
+    add_executable(moderngekko_game_borders_test
+        tests/game_borders_test.cpp)
+    target_include_directories(moderngekko_game_borders_test PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/tools")
+    target_compile_features(moderngekko_game_borders_test PRIVATE cxx_std_23)
+    add_test(NAME moderngekko.game_borders
+             COMMAND moderngekko_game_borders_test)
 
     # The Netplay lobby's cached hash of the game files.
     add_executable(moderngekko_game_files_hash_test

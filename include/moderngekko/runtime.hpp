@@ -43,6 +43,12 @@ struct GraphicsSettings
   std::string backend;
   std::optional<int> internal_resolution_scale;
   AspectRatio aspect_ratio = AspectRatio::Widescreen;
+  // Pictures in the black bars beside the game when it doesn't fill the
+  // window, as a 4:3 game on a wide screen (src/runtime/game_border.hpp): the
+  // folder with borders.txt and the id of the border to show. No border when
+  // either is empty.
+  std::filesystem::path border_folder;
+  std::string border_id;
 };
 
 struct AudioSettings

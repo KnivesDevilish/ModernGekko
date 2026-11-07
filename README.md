@@ -14,6 +14,7 @@ The changes live in the `knives/srzgs-launcher` branch, which starts from the or
 - GameCube controller profiles with keyboard keys and three extra buttons, a controller tester, a keyboard-only profile when there is no gamepad, and following a gamepad whose name changes.
 - A Netplay lobby with invite codes or direct IP, GameCube ports for every seat, and the host's CPU core for every player.
 - Music for the launcher and the lobby (cubeb, or PulseAudio on Linux), background pictures and an optional check for new releases on GitHub.
+- 4:3 borders: pictures in the bars beside a 4:3 game on a wide screen, chosen in the launcher's Settings (one of them, none, or a random one each time the game opens) and drawn by the runtime on Dolphin's on-screen UI layer. A grid in them can slide, as in the launcher's background.
 - Small runtime changes: the runtime's on-screen messages are hidden, the game files are not hashed twice when the runner boots a game, and the launcher starts faster.
 
 New CMake options. All of them are optional: when one is left empty, the launcher works without that picture, music, panel or version check.
@@ -27,6 +28,7 @@ New CMake options. All of them are optional: when one is left empty, the launche
 | `MODERNGEKKO_LOBBY_ART`, `MODERNGEKKO_LOBBY_BACKGROUND` | Portrait and background picture of the Netplay lobby |
 | `MODERNGEKKO_LAUNCHER_PATCH_NOTES` | UTF-8 text for the PATCH NOTES panel, with optional `[en]`, `[es]` and `[ja]` sections |
 | `MODERNGEKKO_FRONTEND_VERSION`, `MODERNGEKKO_UPDATE_REPOSITORY` | Version shown by the launcher and the GitHub repository whose releases it checks |
+| `MODERNGEKKO_GAME_BORDERS` | Folder with the 4:3 borders' pictures and their `borders.txt` (format in `tools/game_borders.hpp`) |
 
 SR-ZGS passes all of them from `tools/build_tools.sh`.
 

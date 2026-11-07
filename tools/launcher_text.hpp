@@ -161,6 +161,15 @@ inline constexpr Translation SPANISH_TEXTS[] = {
      "pantalla 16:9 se ve igual que 16:9."},
     {"Netplay: the host's 16:9 or 4:3 choice applies to every player.",
      "Netplay: la elección 16:9 o 4:3 del anfitrión se aplica a todos."},
+    {"4:3 borders", "Bordes en 4:3"},
+    {"Random", "Aleatorio"},
+    {"Black bars beside the game.", "Franjas negras a los lados del juego."},
+    {"One picked at random each time the game opens.",
+     "Uno elegido al azar cada vez que se abre el juego."},
+    {"Pictures beside the game when it is shown in 4:3 on a wider screen. In Netplay too, only "
+     "you see your choice.",
+     "Imágenes a los lados del juego cuando se ve en 4:3 en una pantalla más ancha. También en "
+     "Netplay, solo tú ves tu elección."},
     {"Start in fullscreen", "Iniciar en pantalla completa"},
     {"Show FPS in window title", "Mostrar FPS en el título"},
 
@@ -530,6 +539,15 @@ inline constexpr Translation JAPANESE_TEXTS[] = {
      "同じ表示になります。"},
     {"Netplay: the host's 16:9 or 4:3 choice applies to every player.",
      "ネットプレイ：ホストが選んだ16:9か4:3が全員に適用されます。"},
+    {"4:3 borders", "4:3の壁紙"},
+    {"Random", "ランダム"},
+    {"Black bars beside the game.", "ゲームの左右は黒い帯のままです。"},
+    {"One picked at random each time the game opens.",
+     "ゲームを起動するたびにランダムに選ばれます。"},
+    {"Pictures beside the game when it is shown in 4:3 on a wider screen. In Netplay too, only "
+     "you see your choice.",
+     "4:3の映像を横長の画面に表示するとき、左右に出す画像です。ネットプレイでも、選んだ"
+     "壁紙は自分の画面だけに表示されます。"},
     {"Start in fullscreen", "フルスクリーンで起動"},
     {"Show FPS in window title", "ウィンドウタイトルにFPSを表示"},
     // Credits page

@@ -1,4 +1,5 @@
 #include "frontend_config.hpp"
+#include "game_borders.hpp"
 #include "ui_text.hpp"
 
 #include <algorithm>
@@ -286,6 +287,11 @@ ConfigResult LoadConfig(const fs::path &user_directory,
       config.aspect_ratio = NormalizeAspectRatio(raw_value);
       if (config.aspect_ratio.empty())
         return {.error = "aspect_ratio must be 16:9, 4:3 or stretch"};
+    } else if (key == "border") {
+      // Any id is kept: a border the build doesn't have just shows none.
+      config.game_border = NormalizeBorderSetting(raw_value);
+      if (config.game_border.empty())
+        return {.error = "border must be none, random or a border's id"};
     } else if (key == "language") {
       config.language = NormalizeLanguage(raw_value);
       if (config.language.empty())
@@ -421,6 +427,12 @@ bool SaveConfig(const fs::path &user_directory, const ConfigResult &config,
       *error = "aspect_ratio must be 16:9, 4:3 or stretch";
     return false;
   }
+  const std::string game_border = NormalizeBorderSetting(config.game_border);
+  if (game_border.empty()) {
+    if (error)
+      *error = "border must be none, random or a border's id";
+    return false;
+  }
   const std::string language = NormalizeLanguage(config.language);
   if (language.empty()) {
     if (error)
@@ -464,6 +476,8 @@ bool SaveConfig(const fs::path &user_directory, const ConfigResult &config,
        << "fullscreen=" << (config.fullscreen ? "true" : "false") << '\n'
        << "# 16:9, 4:3 or stretch\n"
        << "aspect_ratio=" << aspect_ratio << '\n'
+       << "# Pictures beside a 4:3 game: none, random or a border's id\n"
+       << "border=" << game_border << '\n'
        << "show_fps_in_title=" << (config.show_fps_in_title ? "true" : "false")
        << '\n'
        << "[Core]\n"

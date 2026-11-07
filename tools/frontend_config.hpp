@@ -42,6 +42,10 @@ struct ConfigResult {
   bool fullscreen = false;
   // "16:9", "4:3" or "stretch" (see SupportedAspectRatios).
   std::string aspect_ratio = "16:9";
+  // The pictures beside a 4:3 game on a wide screen: "none", "random" (one is
+  // picked each time the game opens) or the id of a border in
+  // Resources/borders/borders.txt (tools/game_borders.hpp).
+  std::string game_border = "random";
   // The launcher's language: "auto" (the system's), "en", "es" or "ja".
   std::string language = "auto";
   // Volume of the launcher's and the Netplay lobby's music, 0 (off) to 100.

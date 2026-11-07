@@ -1,6 +1,7 @@
 #include "cache_affinity.hpp"
 #include "frontend_config.hpp"
 #include "dol_patch.hpp"
+#include "game_borders.hpp"
 #include "moderngekko/game.hpp"
 #include "moderngekko/runtime.hpp"
 #include "netplay_address.hpp"
@@ -16,6 +17,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <random>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -281,6 +283,25 @@ int RunMain(int argc, char **argv) {
     config.graphics.aspect_ratio = moderngekko::AspectRatio::Stretch;
   else
     config.graphics.aspect_ratio = moderngekko::AspectRatio::Widescreen;
+
+  // The pictures beside a game that doesn't fill the window: the one
+  // config.ini names, none, or for "random" one picked now, so each time the
+  // game opens it may be another. Resources/borders is the build's
+  // (MODERNGEKKO_GAME_BORDERS); the runtime reports problems with it.
+  {
+    const std::filesystem::path borders = executable_directory / "Resources" / "borders";
+    const moderngekko::frontend::GameBorderList list =
+        moderngekko::frontend::LoadGameBorders(borders);
+    const std::uint64_t random_number =
+        (static_cast<std::uint64_t>(std::random_device{}()) << 32) ^
+        static_cast<std::uint64_t>(
+            std::chrono::steady_clock::now().time_since_epoch().count());
+    if (const auto *border = moderngekko::frontend::ChooseGameBorder(
+            list, frontend_config.game_border, random_number)) {
+      config.graphics.border_folder = borders;
+      config.graphics.border_id = border->id;
+    }
+  }
 
 #if defined(__linux__)
   // The system's volume mixer lists the game under the name its audio

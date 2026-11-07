@@ -11,8 +11,9 @@ license text.
 
 The characters come from the JAPANESE_TEXTS table of tools/launcher_text.hpp,
 plus CHARACTERS below for Japanese drawn elsewhere, plus every --extra file:
-the game's patch notes (MODERNGEKKO_LAUNCHER_PATCH_NOTES), whose Japanese part
-needs its characters too. After changing any of them, run from the
+the game's patch notes (MODERNGEKKO_LAUNCHER_PATCH_NOTES) and its 4:3 borders'
+borders.txt (MODERNGEKKO_GAME_BORDERS), whose Japanese parts need their
+characters too. After changing any of them, run from the
 repository root (needs Python 3 and fonttools):
     python3 tools/make_launcher_cjk_font.py [--extra FILE]... [Regular.ttc Bold.ttc]
 The default paths are those of Fedora/Bazzite and Debian/Ubuntu.
