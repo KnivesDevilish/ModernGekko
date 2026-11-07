@@ -17,6 +17,7 @@
 #include "InputCommon/ControllerInterface/ControllerInterface.h"
 #include "VideoCommon/AsyncRequests.h"
 #include "VideoCommon/Present.h"
+#include "VideoCommon/VideoConfig.h"
 #include "game_menu_draw.hpp"
 #include "game_menu_state.hpp"
 #include "launcher_look.hpp"
@@ -153,6 +154,9 @@ struct GameMenu::Impl
         std::lock_guard lock(mutex);
         if (menu && g_presenter)
         {
+          // What a running game does after each frame: a quick setting
+          // changed while paused (an effect, the resolution) shows at once.
+          CheckForConfigChanges();
           if (draw_others)
             draw_others();
           menu->AddToFrame();
@@ -175,6 +179,8 @@ struct GameMenu::Impl
   std::vector<ControllerEmu::Control*> back_controls;
   std::vector<ControllerEmu::Control*> up_controls;
   std::vector<ControllerEmu::Control*> down_controls;
+  std::vector<ControllerEmu::Control*> left_controls;
+  std::vector<ControllerEmu::Control*> right_controls;
   Common::EventHook devices_hook;
   MenuButtonRepeat repeat;
   bool resume_pending = false;
@@ -200,6 +206,8 @@ struct GameMenu::Impl
     back_controls = Controls(&controller, settings.back_keys);
     up_controls = Controls(&controller, settings.up_keys);
     down_controls = Controls(&controller, settings.down_keys);
+    left_controls = Controls(&controller, settings.left_keys);
+    right_controls = Controls(&controller, settings.right_keys);
 
     Common::IniFile profile;
     profile.Load(File::GetUserPath(D_CONFIG_IDX) + settings.profile_file);
@@ -226,6 +234,8 @@ struct GameMenu::Impl
     held.back = AnyHeld(back_controls);
     held.up = AnyHeld(up_controls);
     held.down = AnyHeld(down_controls);
+    held.left = AnyHeld(left_controls);
+    held.right = AnyHeld(right_controls);
     return held;
   }
 
@@ -269,6 +279,21 @@ struct GameMenu::Impl
     });
   }
 
+  // A quick setting took another choice: into the game at once, then kept
+  // by the frontend for next time.
+  void ChangeSetting(std::size_t row, std::size_t choice)
+  {
+    if (row >= settings.quick_settings.size())
+      return;
+    const QuickSetting& setting = settings.quick_settings[row];
+    if (choice >= setting.choices.size())
+      return;
+    if (hooks.apply_setting)
+      hooks.apply_setting(setting, choice);
+    if (settings.keep_quick_setting)
+      settings.keep_quick_setting(row, choice);
+  }
+
   void Leave(GameMenuChoice how)
   {
     choice = how;
@@ -301,6 +326,8 @@ struct GameMenu::Impl
       bool open = false;
       unsigned version = 0;
       Clock::time_point opened_at;
+      std::size_t changed_row = 0;
+      std::size_t changed_choice = 0;
       {
         std::lock_guard lock(view_mutex);
         if (in_game && !leaving)
@@ -312,6 +339,9 @@ struct GameMenu::Impl
         open = view.state.IsOpen();
         version = view.state.Version();
         opened_at = view.opened_at;
+        changed_row = view.state.ChangedRow();
+        if (changed_row < view.state.SettingCount())
+          changed_choice = view.state.Chosen(changed_row);
       }
 
       switch (event)
@@ -331,6 +361,9 @@ struct GameMenu::Impl
         break;
       case MenuEvent::Quit:
         Leave(GameMenuChoice::Quit);
+        break;
+      case MenuEvent::SettingChanged:
+        ChangeSetting(changed_row, changed_choice);
         break;
       case MenuEvent::None:
         break;
@@ -404,7 +437,7 @@ struct GameMenu::Impl
         std::chrono::duration<float>(FADE_TIME);
     const float eased = 1.0f - std::pow(1.0f - std::clamp(opening, 0.0f, 1.0f), 3.0f);
     DrawGameMenu(ImGui::GetForegroundDrawList(), ImGui::GetIO().DisplaySize, fonts, shown.state,
-                 netplay, eased);
+                 settings.quick_settings, netplay, eased);
   }
 };
 
@@ -418,6 +451,16 @@ std::unique_ptr<GameMenu> GameMenu::Create(const GameMenuSettings& settings, Gam
   impl->settings = settings;
   impl->hooks = std::move(hooks);
   impl->netplay = NetPlay::IsNetPlayRunning();
+  // The rows keep the frontend's order: keep_quick_setting is told rows by
+  // their place in settings.quick_settings.
+  std::vector<std::size_t> choice_counts;
+  std::vector<std::size_t> chosen;
+  for (const QuickSetting& setting : impl->settings.quick_settings)
+  {
+    choice_counts.push_back(setting.choices.size());
+    chosen.push_back(setting.selected);
+  }
+  impl->view.state = MenuState(std::move(choice_counts), std::move(chosen));
   impl->shared->menu = impl.get();
   impl->shared->draw_others = impl->hooks.draw_others;
   impl->LoadControls();

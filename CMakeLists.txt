@@ -648,6 +648,17 @@ if(MODERNGEKKO_ENABLE_DOLPHIN_RUNTIME)
     # Resources/borders: the pictures beside a 4:3 game. The runner draws the
     # one config.ini names; the launcher, next to it, lists them in Settings.
     moderngekko_add_resource_folder(moderngekko-run "${MODERNGEKKO_GAME_BORDERS}" borders)
+    # Sys/Shaders/ModernGekko: the fork's picture effects (shaders/), which the
+    # in-game menu's Quick settings and the launcher's Settings offer; Dolphin
+    # looks for post-processing shaders in Sys/Shaders.
+    add_custom_target(moderngekko_run_shaders
+        COMMAND "${CMAKE_COMMAND}"
+                "-DSOURCE=${CMAKE_CURRENT_SOURCE_DIR}/shaders"
+                "-DDESTINATION=$<TARGET_FILE_DIR:moderngekko-run>/Sys/Shaders/ModernGekko"
+                -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/CopyOptionalResourceFolder.cmake"
+        COMMENT "Copying shaders/ into Sys/Shaders/ModernGekko"
+        VERBATIM)
+    add_dependencies(moderngekko-run moderngekko_run_shaders)
 
     add_executable(moderngekko-launcher
         tools/moderngekko_launcher.cpp

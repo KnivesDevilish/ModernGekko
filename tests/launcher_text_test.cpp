@@ -33,6 +33,7 @@ constexpr const char* SOURCES[] = {
     "tools/launcher_ui.hpp",
     "tools/netplay_lobby_ui.hpp",
     "tools/netplay_session.cpp",
+    "tools/moderngekko_run.cpp",
     "src/runtime/game_menu_draw.hpp",
 };
 

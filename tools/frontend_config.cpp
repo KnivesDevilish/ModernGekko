@@ -211,6 +211,39 @@ const std::vector<CpuCoreOption> &SupportedCpuCores() {
   return cores;
 }
 
+const std::vector<EffectOption> &SupportedEffects() {
+  static const std::vector<EffectOption> effects = {
+      {MODERNGEKKO_UI_TEXT("None"), "none", "",
+       MODERNGEKKO_UI_TEXT("The game's picture as it is.")},
+      {MODERNGEKKO_UI_TEXT("Bloom"), "bloom", "ModernGekko/bloom",
+       MODERNGEKKO_UI_TEXT("Lights and bright highlights glow softly.")},
+      {MODERNGEKKO_UI_TEXT("Chromatic aberration"), "chromatic",
+       "ModernGekko/chromatic_aberration",
+       MODERNGEKKO_UI_TEXT("Red and blue drift apart toward the edges, as "
+                           "through a camera lens.")},
+      {MODERNGEKKO_UI_TEXT("Bloom + chromatic aberration"), "bloom-chromatic",
+       "ModernGekko/bloom_chromatic",
+       MODERNGEKKO_UI_TEXT("Both effects together.")},
+      {MODERNGEKKO_UI_TEXT("Vivid colors"), "vivid", "ModernGekko/vivid",
+       MODERNGEKKO_UI_TEXT("Richer colors and a little more contrast.")},
+      {MODERNGEKKO_UI_TEXT("Sharpen"), "sharpen", "ModernGekko/sharpen",
+       MODERNGEKKO_UI_TEXT("Details and edges stand out more.")},
+      {MODERNGEKKO_UI_TEXT("Smooth edges (FXAA)"), "fxaa", "FXAA",
+       MODERNGEKKO_UI_TEXT("Softens jagged edges.")},
+      {MODERNGEKKO_UI_TEXT("CRT"), "crt", "ModernGekko/crt",
+       MODERNGEKKO_UI_TEXT("Scanlines and darker corners, like an old TV.")},
+  };
+  return effects;
+}
+
+const EffectOption *FindEffect(std::string_view value) {
+  for (const EffectOption &effect : SupportedEffects()) {
+    if (value == effect.value)
+      return &effect;
+  }
+  return nullptr;
+}
+
 const std::vector<AspectRatioOption> &SupportedAspectRatios() {
   // The first entry is the default used when config.ini has no aspect_ratio.
   // The texts are English; the launcher translates them when it shows them.
@@ -296,6 +329,21 @@ ConfigResult LoadConfig(const fs::path &user_directory,
       config.language = NormalizeLanguage(raw_value);
       if (config.language.empty())
         return {.error = "language must be auto, en, es or ja"};
+    } else if (key == "effect") {
+      // Kept as written: an effect this build lacks is shown as none.
+      config.effect = value;
+      if (config.effect.empty() ||
+          config.effect.find_first_of(" \t\r\n=") != std::string::npos)
+        return {.error = "effect must be none or the name of an effect"};
+    } else if (key == "game_volume") {
+      int volume = -1;
+      const auto parsed = std::from_chars(
+          raw_value.data(), raw_value.data() + raw_value.size(), volume);
+      if (parsed.ec != std::errc{} ||
+          parsed.ptr != raw_value.data() + raw_value.size() || volume < 0 ||
+          volume > 100)
+        return {.error = "game_volume must be a number from 0 to 100"};
+      config.game_volume = volume;
     } else if (key == "music_volume") {
       int volume = -1;
       const auto parsed = std::from_chars(
@@ -444,6 +492,17 @@ bool SaveConfig(const fs::path &user_directory, const ConfigResult &config,
       *error = "music_volume must be a number from 0 to 100";
     return false;
   }
+  if (config.game_volume < 0 || config.game_volume > 100) {
+    if (error)
+      *error = "game_volume must be a number from 0 to 100";
+    return false;
+  }
+  if (config.effect.empty() ||
+      config.effect.find_first_of(" \t\r\n=") != std::string::npos) {
+    if (error)
+      *error = "effect must be none or the name of an effect";
+    return false;
+  }
   std::error_code ec;
   fs::create_directories(user_directory, ec);
   if (ec) {
@@ -478,8 +537,14 @@ bool SaveConfig(const fs::path &user_directory, const ConfigResult &config,
        << "aspect_ratio=" << aspect_ratio << '\n'
        << "# Pictures beside a 4:3 game: none, random or a border's id\n"
        << "border=" << game_border << '\n'
+       << "# Picture effect: none, bloom, chromatic, bloom-chromatic, vivid,\n"
+          "# sharpen, fxaa or crt\n"
+       << "effect=" << config.effect << '\n'
        << "show_fps_in_title=" << (config.show_fps_in_title ? "true" : "false")
        << '\n'
+       << "[Audio]\n"
+       << "# The game's volume: 0 (silent) to 100\n"
+       << "game_volume=" << config.game_volume << '\n'
        << "[Core]\n"
        << "# jit64 or staticrecomp. MODERNGEKKO_STATICRECOMP overrides it.\n"
        << "cpu_core=" << cpu_core << '\n'
@@ -764,6 +829,8 @@ GameMenuKeys GameMenuProfileKeys() {
   keys.back = {"Buttons/B"};
   keys.up = {"D-Pad/Up", "Main Stick/Up"};
   keys.down = {"D-Pad/Down", "Main Stick/Down"};
+  keys.left = {"D-Pad/Left", "Main Stick/Left"};
+  keys.right = {"D-Pad/Right", "Main Stick/Right"};
   keys.open_fallback = "Guide | `" + std::string(KEYBOARD_DEVICE) + ":M`";
 #else
   // HOME is Guide. The sideways Wii Remote's 2 and 1 sit where a pad's south
@@ -775,6 +842,8 @@ GameMenuKeys GameMenuProfileKeys() {
   keys.back = {"Buttons/1", "Buttons/B"};
   keys.up = {"D-Pad/Up"};
   keys.down = {"D-Pad/Down"};
+  keys.left = {"D-Pad/Left"};
+  keys.right = {"D-Pad/Right"};
   keys.open_fallback = "Guide";
 #endif
   return keys;

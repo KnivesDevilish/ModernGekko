@@ -2,7 +2,8 @@
 
 // The menu the player opens over the game with the menu button (M on the
 // keyboard, Guide on a pad, as the first controller's profile has them):
-// Continue, Back to the launcher and Quit game, the last two after a question.
+// Continue, Quick settings, Back to the launcher and Quit game, the last two
+// after a question.
 // In solo play it pauses the game, which is drawn again under the menu while
 // it stays open; in Netplay the match goes on behind it. While it is open the
 // game gets no input from the controllers (Host_UIBlocksControllerState).
@@ -12,6 +13,7 @@
 
 #include "moderngekko/runtime.hpp"
 
+#include <cstddef>
 #include <functional>
 #include <memory>
 
@@ -32,6 +34,9 @@ struct GameMenuHooks
   std::function<void()> draw_others;
   // Ends the game, as closing its window does. From the menu's own thread.
   std::function<void()> stop_game;
+  // Makes a quick setting's choice take effect in the game, from the menu's
+  // own thread.
+  std::function<void(const QuickSetting& setting, std::size_t choice)> apply_setting;
 };
 
 class GameMenu

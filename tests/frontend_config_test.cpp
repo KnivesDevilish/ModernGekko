@@ -162,13 +162,15 @@ int main() {
     const std::size_t start = generated.find(header);
     if (menu.profile_file != CONTROLLER_CONFIG_NAME || start == std::string::npos ||
         menu.open.empty() || menu.accept.empty() || menu.back.empty() || menu.up.empty() ||
-        menu.down.empty() || menu.open_fallback.empty())
+        menu.down.empty() || menu.left.empty() || menu.right.empty() ||
+        menu.open_fallback.empty())
       return 43;
     const std::size_t end = generated.find("\n[", start);
     const std::string section =
         "\n" + generated.substr(start, end == std::string::npos ? std::string::npos
                                                                 : end + 1 - start);
-    for (const auto *keys : {&menu.open, &menu.accept, &menu.back, &menu.up, &menu.down}) {
+    for (const auto *keys : {&menu.open, &menu.accept, &menu.back, &menu.up, &menu.down,
+                             &menu.left, &menu.right}) {
       for (const std::string &key : *keys) {
         if (!section.contains("\n" + key + " = "))
           return 44;
@@ -376,6 +378,53 @@ int main() {
     }
     if (moderngekko::frontend::LoadConfig(border, false))
       return 42;
+  }
+
+  // The picture effect and the game's volume: none and 100 by default, kept,
+  // and an impossible value refused. The effects have distinct values, none
+  // first, and each one with a shader but none.
+  {
+    const fs::path effect = directory / "effect";
+    auto effect_config = netplay_config;
+    const auto defaults = moderngekko::frontend::LoadConfig(effect, true);
+    if (!defaults || defaults.effect != "none" || defaults.game_volume != 100)
+      return 45;
+    effect_config.effect = "bloom-chromatic";
+    effect_config.game_volume = 35;
+    if (!moderngekko::frontend::SaveConfig(effect, effect_config, &error))
+      return 46;
+    const auto loaded = moderngekko::frontend::LoadConfig(effect, false);
+    if (loaded.effect != "bloom-chromatic" || loaded.game_volume != 35)
+      return 47;
+    // The short SaveConfig the Settings page uses keeps them.
+    if (!moderngekko::frontend::SaveConfig(effect, "1920x1080", true, controller, &error) ||
+        moderngekko::frontend::LoadConfig(effect, false).effect != "bloom-chromatic" ||
+        moderngekko::frontend::LoadConfig(effect, false).game_volume != 35)
+      return 48;
+    effect_config.game_volume = 101;
+    if (moderngekko::frontend::SaveConfig(effect, effect_config, &error))
+      return 49;
+    effect_config.game_volume = 50;
+    effect_config.effect = "two words";
+    if (moderngekko::frontend::SaveConfig(effect, effect_config, &error))
+      return 50;
+    for (const char *bad : {"game_volume=-1", "game_volume=loud", "effect=a b"}) {
+      std::ofstream(effect / "config.ini", std::ios::trunc)
+          << "[Video]\nresolution=1920x1080\n" << bad << '\n';
+      if (moderngekko::frontend::LoadConfig(effect, false))
+        return 51;
+    }
+    const auto &effects = moderngekko::frontend::SupportedEffects();
+    if (effects.empty() || std::string(effects.front().value) != "none" ||
+        *effects.front().shader != '\0')
+      return 52;
+    for (std::size_t i = 0; i < effects.size(); ++i) {
+      if (moderngekko::frontend::FindEffect(effects[i].value) != &effects[i] ||
+          (i > 0 && *effects[i].shader == '\0'))
+        return 53;
+    }
+    if (moderngekko::frontend::FindEffect("sepia"))
+      return 54;
   }
 
   fs::remove_all(directory);

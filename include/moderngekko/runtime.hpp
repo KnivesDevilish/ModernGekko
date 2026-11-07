@@ -3,7 +3,9 @@
 #include "moderngekko/game.hpp"
 #include "moderngekko/module_abi.h"
 
+#include <cstddef>
 #include <filesystem>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <string>
@@ -49,12 +51,47 @@ struct GraphicsSettings
   // either is empty.
   std::filesystem::path border_folder;
   std::string border_id;
+  // A Dolphin post-processing shader drawn over the picture, by its name in
+  // Sys/Shaders (such as "ModernGekko/bloom"); none when empty.
+  std::string post_processing_shader;
 };
 
 struct AudioSettings
 {
   std::string backend;
   bool mute = false;
+  // The game's volume, 0 to 100. mute silences it whatever this says.
+  int volume = 100;
+};
+
+// One row of the in-game menu's Quick settings: the choices it steps
+// through, the one chosen, and what it changes in the running game.
+struct QuickSetting
+{
+  enum class Kind
+  {
+    // value: a post-processing shader, as GraphicsSettings has it.
+    Effect,
+    // value: Dolphin's internal resolution scale, such as "2".
+    InternalResolution,
+    // value: the game's volume, "0" to "100".
+    GameVolume,
+    // value: a border's id in GraphicsSettings::border_folder; none when
+    // empty.
+    Border,
+  };
+  struct Choice
+  {
+    // Shown in the row: English, which the menu translates, or a name kept
+    // as it is (a resolution, a border's name).
+    std::string label;
+    // A line shown under the rows while this choice is chosen; may be empty.
+    std::string description;
+    std::string value;
+  };
+  Kind kind = Kind::Effect;
+  std::vector<Choice> choices;
+  std::size_t selected = 0;
 };
 
 struct InputSettings
@@ -83,10 +120,18 @@ struct GameMenuSettings
   std::vector<std::string> back_keys;
   std::vector<std::string> up_keys;
   std::vector<std::string> down_keys;
+  std::vector<std::string> left_keys;
+  std::vector<std::string> right_keys;
   std::string open_fallback;
   // The interface font is looked for after the system's fonts in
   // <release_directory>/Sys/Resources (tools/launcher_look.hpp).
   std::filesystem::path release_directory;
+  // The Quick settings page; the main page has no Quick settings without
+  // any. A change applies to the game at once, then keep_quick_setting is
+  // called with the row and the choice (on the menu's own thread) so the
+  // frontend can keep it for next time.
+  std::vector<QuickSetting> quick_settings;
+  std::function<void(std::size_t row, std::size_t choice)> keep_quick_setting;
 };
 
 enum class WindowSystem

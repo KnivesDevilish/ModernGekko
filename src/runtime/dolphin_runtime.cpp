@@ -35,6 +35,7 @@
 #include "moderngekko/module_loader.hpp"
 
 #include <algorithm>
+#include <charconv>
 #include <array>
 #include <atomic>
 #include <chrono>
@@ -522,8 +523,9 @@ struct Runtime::Impl {
   bool automation_registered = false;
   std::jthread automation_thread;
   // The pictures beside a game that doesn't fill the window, added to every
-  // frame by border_hook on the video thread.
-  std::unique_ptr<detail::GameBorderOverlay> border;
+  // frame by border_hook on the video thread. The slot lets the in-game
+  // menu switch it for another.
+  std::unique_ptr<detail::GameBorderSlot> border;
   Common::EventHook border_hook;
   // The menu opened over the game (config.menu), drawn by menu_hook.
   std::unique_ptr<detail::GameMenu> menu;
@@ -692,6 +694,8 @@ RuntimeCreateResult Runtime::Create(RuntimeConfig config) {
   if (impl->config.graphics.internal_resolution_scale)
     Config::SetBase(Config::GFX_EFB_SCALE,
                     *impl->config.graphics.internal_resolution_scale);
+  Config::SetBase(Config::GFX_ENHANCE_POST_SHADER,
+                  impl->config.graphics.post_processing_shader);
   Config::SetBase(Config::GFX_SHADER_CACHE, true);
   Config::SetBase(Config::GFX_SHADER_COMPILATION_MODE,
                   ShaderCompilationMode::AsynchronousUberShaders);
@@ -714,8 +718,8 @@ RuntimeCreateResult Runtime::Create(RuntimeConfig config) {
         preferred != preferred_backends.end() ? *preferred : BACKEND_NULLSOUND;
   }
   Config::SetBase(Config::MAIN_AUDIO_BACKEND, impl->config.audio.backend);
-  if (impl->config.audio.mute)
-    Config::SetBase(Config::MAIN_AUDIO_VOLUME, 0);
+  Config::SetBase(Config::MAIN_AUDIO_VOLUME,
+                  impl->config.audio.mute ? 0 : std::clamp(impl->config.audio.volume, 0, 100));
   Config::SetBase(Config::MAIN_INPUT_BACKGROUND_INPUT,
                   impl->config.input.background_input);
   // Dolphin's on-screen messages ("Wii Remote 1 connected", savestate
@@ -822,23 +826,62 @@ RuntimeRunResult Runtime::Run() {
   }
   m_impl->booted = true;
   const GraphicsSettings &graphics = m_impl->config.graphics;
-  if (!m_impl->config.headless && !graphics.border_folder.empty() &&
-      !graphics.border_id.empty()) {
-    m_impl->border =
-        detail::GameBorderOverlay::Create(graphics.border_folder, graphics.border_id);
-    if (m_impl->border) {
-      m_impl->border_hook = GetVideoEvents().before_present_event.Register(
-          [border = m_impl->border.get()](const PresentInfo &) { border->AddToFrame(); });
-    }
+  if (!m_impl->config.headless) {
+    // A slot even without a border, so the in-game menu can put one up.
+    std::unique_ptr<detail::GameBorderOverlay> border;
+    if (!graphics.border_folder.empty() && !graphics.border_id.empty())
+      border = detail::GameBorderOverlay::Create(graphics.border_folder, graphics.border_id);
+    m_impl->border = std::make_unique<detail::GameBorderSlot>(std::move(border));
+    m_impl->border_hook = GetVideoEvents().before_present_event.Register(
+        [border = m_impl->border.get()](const PresentInfo &) { border->AddToFrame(); });
   }
   if (!m_impl->config.headless) {
     detail::GameMenuHooks hooks;
-    hooks.draw_others = [border = m_impl->border.get()] {
-      if (border)
-        border->AddToFrame();
-    };
+    hooks.draw_others = [border = m_impl->border.get()] { border->AddToFrame(); };
     // As closing the game window does.
     hooks.stop_game = [platform = m_impl->platform.get()] { platform->Stop(); };
+    // Dolphin's settings change on the host thread (the game window's loop),
+    // as its own settings windows change them; Dolphin applies them to the
+    // running game from there.
+    hooks.apply_setting = [impl = m_impl.get()](const QuickSetting &setting,
+                                                std::size_t choice) {
+      const std::string value = setting.choices[choice].value;
+      int number = 0;
+      const bool numeric =
+          !value.empty() &&
+          std::from_chars(value.data(), value.data() + value.size(), number).ec ==
+              std::errc{};
+      switch (setting.kind) {
+      case QuickSetting::Kind::Effect:
+        Core::QueueHostJob([value](Core::System &) {
+          Config::SetBaseOrCurrent(Config::GFX_ENHANCE_POST_SHADER, value);
+        });
+        break;
+      case QuickSetting::Kind::InternalResolution:
+        if (numeric && number >= 1) {
+          Core::QueueHostJob([number](Core::System &) {
+            Config::SetBaseOrCurrent(Config::GFX_EFB_SCALE, number);
+          });
+        }
+        break;
+      case QuickSetting::Kind::GameVolume:
+        if (numeric) {
+          const int volume = impl->config.audio.mute ? 0 : std::clamp(number, 0, 100);
+          Core::QueueHostJob([volume](Core::System &system) {
+            Config::SetBaseOrCurrent(Config::MAIN_AUDIO_VOLUME, volume);
+            AudioCommon::UpdateSoundStream(system);
+          });
+        }
+        break;
+      case QuickSetting::Kind::Border: {
+        const std::filesystem::path &folder = impl->config.graphics.border_folder;
+        impl->border->Replace(value.empty() || folder.empty()
+                                  ? nullptr
+                                  : detail::GameBorderOverlay::Create(folder, value));
+        break;
+      }
+      }
+    };
     m_impl->menu = detail::GameMenu::Create(m_impl->config.menu, std::move(hooks));
     if (m_impl->menu) {
       m_impl->menu_hook = GetVideoEvents().before_present_event.Register(

@@ -302,6 +302,49 @@ GameBorderOverlay::~GameBorderOverlay()
     (void)picture.texture.release();
 }
 
+void GameBorderOverlay::FreeTextures()
+{
+  for (auto& [name, picture] : m_impl->pictures)
+  {
+    if (picture.texture && picture.presenter == g_presenter.get())
+      picture.texture.reset();
+    else
+      (void)picture.texture.release();
+  }
+}
+
+GameBorderSlot::GameBorderSlot(std::unique_ptr<GameBorderOverlay> border)
+    : m_shown(std::move(border))
+{
+}
+
+void GameBorderSlot::Replace(std::unique_ptr<GameBorderOverlay> border)
+{
+  std::lock_guard lock(m_mutex);
+  m_next = std::move(border);
+  m_replace = true;
+}
+
+void GameBorderSlot::AddToFrame()
+{
+  std::unique_ptr<GameBorderOverlay> old;
+  {
+    std::lock_guard lock(m_mutex);
+    if (m_replace)
+    {
+      old = std::move(m_shown);
+      m_shown = std::move(m_next);
+      m_replace = false;
+    }
+  }
+  // The frame that drew the old border has been presented; the backend lets
+  // its textures go once the GPU is done with them.
+  if (old)
+    old->FreeTextures();
+  if (m_shown)
+    m_shown->AddToFrame();
+}
+
 void GameBorderOverlay::AddToFrame()
 {
   if (!g_presenter || !g_gfx || !ImGui::GetCurrentContext())

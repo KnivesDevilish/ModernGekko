@@ -1,7 +1,8 @@
 // The in-game menu's pages and buttons (src/runtime/game_menu_state.hpp):
 // it opens on the main page, leaving the game always asks first with No
-// selected, B goes back the way it came, the rows wrap, and held buttons
-// count once except up and down, which repeat.
+// selected, B goes back the way it came, the rows wrap, quick settings step
+// with left and right and go round with A, and held buttons count once
+// except the directions, which repeat.
 #include "runtime/game_menu_state.hpp"
 
 #include <chrono>
@@ -44,6 +45,19 @@ MenuButtons Down()
 {
   MenuButtons b;
   b.down = true;
+  return b;
+}
+
+MenuButtons Left()
+{
+  MenuButtons b;
+  b.left = true;
+  return b;
+}
+MenuButtons Right()
+{
+  MenuButtons b;
+  b.right = true;
   return b;
 }
 
@@ -175,6 +189,74 @@ int main()
     MenuButtons held = Up();
     if (!held.Any() || MenuButtons{}.Any())
       return 27;
+  }
+  {
+    // With quick settings, the main page has a Quick settings row second.
+    MenuState state({3, 11}, {1, 10});
+    state.Press(Open());
+    if (state.Items().size() != 4 || state.Items()[1] != MenuItem::QuickSettings ||
+        state.SettingCount() != 2 || state.Chosen(0) != 1 || state.Chosen(1) != 10)
+      return 28;
+    state.Press(Down());
+    if (state.Press(Accept()) != MenuEvent::None || state.Page() != MenuPage::QuickSettings ||
+        state.Items().size() != 2 || SelectedItem(state) != MenuItem::Setting ||
+        state.Selected() != 0)
+      return 29;
+    // Right and left step and stop at the ends; A goes round.
+    if (state.Press(Right()) != MenuEvent::SettingChanged || state.Chosen(0) != 2 ||
+        state.ChangedRow() != 0)
+      return 30;
+    if (state.Press(Right()) != MenuEvent::None || state.Chosen(0) != 2)
+      return 31;
+    if (state.Press(Accept()) != MenuEvent::SettingChanged || state.Chosen(0) != 0)
+      return 32;
+    if (state.Press(Left()) != MenuEvent::None || state.Chosen(0) != 0)
+      return 33;
+    state.Press(Down());
+    const unsigned before = state.Version();
+    if (state.Press(Left()) != MenuEvent::SettingChanged || state.Chosen(1) != 9 ||
+        state.ChangedRow() != 1 || state.Version() == before)
+      return 34;
+    // B goes back to the main page, on Quick settings.
+    if (state.Press(Back()) != MenuEvent::None || state.Page() != MenuPage::Main ||
+        SelectedItem(state) != MenuItem::QuickSettings || !state.IsOpen())
+      return 35;
+    // Left and right do nothing elsewhere; the confirm pages still return to
+    // their rows.
+    if (state.Press(Right()) != MenuEvent::None || state.Page() != MenuPage::Main)
+      return 36;
+    state.Press(Down());
+    state.Press(Accept());
+    if (state.Page() != MenuPage::ConfirmLeave)
+      return 37;
+    state.Press(Back());
+    if (SelectedItem(state) != MenuItem::Leave)
+      return 38;
+    state.Press(Down());
+    state.Press(Accept());
+    state.Press(Accept());
+    if (state.Page() != MenuPage::Main || SelectedItem(state) != MenuItem::Quit)
+      return 39;
+    // The choices made stay when the menu opens again.
+    state.Press(Open());
+    state.Press(Open());
+    if (state.Chosen(0) != 0 || state.Chosen(1) != 9)
+      return 40;
+    // A chosen past the end, or a setting without choices, starts at 0.
+    MenuState odd({2, 0}, {5});
+    if (odd.Chosen(0) != 0 || odd.Chosen(1) != 0)
+      return 41;
+  }
+  {
+    // Left and right repeat like up and down.
+    using Clock = MenuButtonRepeat::Clock;
+    MenuButtonRepeat repeat;
+    const Clock::time_point start{};
+    if (!repeat.Update(Right(), start).right ||
+        repeat.Update(Right(), start + MenuButtonRepeat::REPEAT_DELAY / 2).right ||
+        !repeat.Update(Right(), start + MenuButtonRepeat::REPEAT_DELAY).right ||
+        !repeat.Update(Left(), start + std::chrono::seconds(1)).left || !Left().Any())
+      return 42;
   }
   std::puts("game menu state: ok");
   return 0;

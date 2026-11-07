@@ -3516,6 +3516,67 @@ int main(int argc, char** argv)
       }
       ImGui::EndCombo();
     }
+    ImGui::Spacing();
+    // The picture effect (also in the in-game menu's Quick settings). An
+    // effect config.ini names but the build lacks shows as None.
+    const auto& effects = moderngekko::frontend::SupportedEffects();
+    const moderngekko::frontend::EffectOption* shown_effect =
+        moderngekko::frontend::FindEffect(config.effect);
+    if (!shown_effect)
+      shown_effect = &effects.front();
+    ImGui::TextUnformatted(Tr("Visual effect"));
+    ImGui::SetNextItemWidth(-1.0f);
+    if (ImGui::BeginCombo("##effect", Tr(shown_effect->text)))
+    {
+      for (const auto& effect : effects)
+      {
+        const bool selected = shown_effect == &effect;
+        if (ImGui::Selectable(Tr(effect.text), selected))
+        {
+          const std::string previous = config.effect;
+          config.effect = effect.value;
+          config.resolution = resolutions[resolution_index].text;
+          config.show_fps_in_title = show_fps_in_title;
+          config.controller = selected_controller;
+          std::string error;
+          if (!moderngekko::frontend::SaveConfig(user_directory, config, &error))
+          {
+            config.effect = previous;
+            std::lock_guard lock(dialog.mutex);
+            dialog.error = std::move(error);
+          }
+        }
+        if (selected)
+          ImGui::SetItemDefaultFocus();
+        ImGui::Indent(12.0f * scale);
+        ImGui::PushTextWrapPos(0.0f);
+        ImGui::TextDisabled("%s", Tr(effect.description));
+        ImGui::PopTextWrapPos();
+        ImGui::Unindent(12.0f * scale);
+      }
+      ImGui::EndCombo();
+    }
+    ImGui::SetItemTooltip("%s", Tr("Drawn over the game's picture. Light enough for integrated "
+                                   "graphics."));
+    ImGui::Spacing();
+    // The game's own volume (also in the in-game menu's Quick settings),
+    // written when the slider is let go.
+    ImGui::TextUnformatted(Tr("Game volume"));
+    ImGui::SetNextItemWidth(-1.0f);
+    ImGui::SliderInt("##game_volume", &config.game_volume, 0, 100, "%d %%",
+                     ImGuiSliderFlags_AlwaysClamp);
+    if (ImGui::IsItemDeactivatedAfterEdit())
+    {
+      config.resolution = resolutions[resolution_index].text;
+      config.show_fps_in_title = show_fps_in_title;
+      config.controller = selected_controller;
+      std::string error;
+      if (!moderngekko::frontend::SaveConfig(user_directory, config, &error))
+      {
+        std::lock_guard lock(dialog.mutex);
+        dialog.error = std::move(error);
+      }
+    }
     EndSection();
     BeginSection("##settings_display", Tr("DISPLAY"));
     // The section's labels share a column, so the lists next to them line up.
@@ -3901,6 +3962,20 @@ int main(int argc, char** argv)
         music.Play(music_path, config.music_volume);
       done = false;
       current_page = LauncherPage::Play;
+      // The in-game menu's Quick settings write config.ini while the game
+      // runs: what they change is read back, the rest stays as shown here.
+      if (const auto saved = moderngekko::frontend::LoadConfig(user_directory, false))
+      {
+        config.effect = saved.effect;
+        config.game_volume = saved.game_volume;
+        config.game_border = saved.game_border;
+        config.resolution = saved.resolution;
+        for (std::size_t i = 0; i < resolutions.size(); ++i)
+        {
+          if (saved.resolution == resolutions[i].text)
+            resolution_index = static_cast<int>(i);
+        }
+      }
       // Time played and savestates changed while the game ran.
       summary_stale = true;
       launcher_savestates = PlaySavestates(user_directory);

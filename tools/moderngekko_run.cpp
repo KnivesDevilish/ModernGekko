@@ -8,6 +8,7 @@
 #include "netplay_address.hpp"
 #include "netplay_session.hpp"
 #include "runner_exit_code.hpp"
+#include "ui_text.hpp"
 
 #include "Common/StringUtil.h"
 
@@ -57,6 +58,126 @@ std::string SystemLanguageCode() {
       locales && count > 0 && locales[0]->language ? locales[0]->language : "";
   SDL_free(locales);
   return language;
+}
+
+// What config.ini keeps for each of the in-game menu's Quick settings: the
+// field and, choice by choice, the value written to it.
+struct KeptSetting {
+  enum class Field { Effect, Resolution, GameVolume, Border };
+  Field field;
+  std::vector<std::string> values;
+};
+
+// The in-game menu's Quick settings, as config.ini has them now: the picture
+// effect, the internal resolution, the game's volume and, for a 4:3 game,
+// the border. A change is written back to config.ini, so the launcher shows
+// it and the next game starts with it.
+void AddQuickSettings(moderngekko::RuntimeConfig *config,
+                      const moderngekko::frontend::ConfigResult &frontend_config,
+                      const moderngekko::frontend::GameBorderList &border_list) {
+  using moderngekko::QuickSetting;
+  std::vector<KeptSetting> kept;
+
+  QuickSetting effect{QuickSetting::Kind::Effect, {}, 0};
+  KeptSetting effect_kept{KeptSetting::Field::Effect, {}};
+  for (const auto &option : moderngekko::frontend::SupportedEffects()) {
+    if (frontend_config.effect == option.value)
+      effect.selected = effect.choices.size();
+    effect.choices.push_back({option.text, option.description, option.shader});
+    effect_kept.values.emplace_back(option.value);
+  }
+  config->menu.quick_settings.push_back(std::move(effect));
+  kept.push_back(std::move(effect_kept));
+
+  // The launcher's sizes; a scale config.ini names without one of them is
+  // added, so it can be chosen again.
+  QuickSetting resolution{QuickSetting::Kind::InternalResolution, {}, 0};
+  KeptSetting resolution_kept{KeptSetting::Field::Resolution, {}};
+  bool listed = false;
+  for (const auto &option : moderngekko::frontend::SupportedResolutions()) {
+    if (option.dolphin_scale == frontend_config.dolphin_scale) {
+      resolution.selected = resolution.choices.size();
+      listed = true;
+    }
+    resolution.choices.push_back({option.text, {}, std::to_string(option.dolphin_scale)});
+    resolution_kept.values.emplace_back(option.text);
+  }
+  if (!listed && frontend_config.dolphin_scale > 0) {
+    resolution.selected = resolution.choices.size();
+    resolution.choices.push_back(
+        {frontend_config.resolution, {}, std::to_string(frontend_config.dolphin_scale)});
+    resolution_kept.values.push_back(frontend_config.resolution);
+  }
+  config->menu.quick_settings.push_back(std::move(resolution));
+  kept.push_back(std::move(resolution_kept));
+
+  // In steps of 10; a volume between two steps shows as the nearest.
+  QuickSetting volume{QuickSetting::Kind::GameVolume, {}, 0};
+  KeptSetting volume_kept{KeptSetting::Field::GameVolume, {}};
+  for (int step = 0; step <= 100; step += 10) {
+    volume.choices.push_back({std::to_string(step) + " %", {}, std::to_string(step)});
+    volume_kept.values.push_back(std::to_string(step));
+  }
+  volume.selected = static_cast<std::size_t>((frontend_config.game_volume + 5) / 10);
+  config->menu.quick_settings.push_back(std::move(volume));
+  kept.push_back(std::move(volume_kept));
+
+  // The border only matters when the game is 4:3. Random shows the border
+  // picked when the game opened.
+  if (frontend_config.aspect_ratio == "4:3" && !border_list.borders.empty()) {
+    const char *language =
+        moderngekko::frontend::LanguageCode(moderngekko::frontend::ActiveLanguage());
+    QuickSetting border{QuickSetting::Kind::Border, {}, 0};
+    KeptSetting border_kept{KeptSetting::Field::Border, {}};
+    border.choices.push_back(
+        {MODERNGEKKO_UI_TEXT("None"), MODERNGEKKO_UI_TEXT("Black bars beside the game."), {}});
+    border_kept.values.emplace_back("none");
+    if (frontend_config.game_border == "random")
+      border.selected = border.choices.size();
+    border.choices.push_back({MODERNGEKKO_UI_TEXT("Random"),
+                              MODERNGEKKO_UI_TEXT("One picked at random each time the game opens."),
+                              config->graphics.border_id});
+    border_kept.values.emplace_back("random");
+    for (const auto &item : border_list.borders) {
+      if (frontend_config.game_border == item.id)
+        border.selected = border.choices.size();
+      border.choices.push_back({item.Name(language), {}, item.id});
+      border_kept.values.push_back(item.id);
+    }
+    config->menu.quick_settings.push_back(std::move(border));
+    kept.push_back(std::move(border_kept));
+  }
+
+  config->menu.keep_quick_setting = [user_directory = config->user_directory,
+                                     kept = std::move(kept)](std::size_t row,
+                                                             std::size_t choice) {
+    if (row >= kept.size() || choice >= kept[row].values.size())
+      return;
+    // Read again: only the one setting changes in config.ini.
+    auto saved = moderngekko::frontend::LoadConfig(user_directory, false);
+    if (!saved) {
+      std::cerr << "quick setting not kept: config.ini: " << saved.error << '\n';
+      return;
+    }
+    const std::string &value = kept[row].values[choice];
+    switch (kept[row].field) {
+    case KeptSetting::Field::Effect:
+      saved.effect = value;
+      break;
+    case KeptSetting::Field::Resolution:
+      saved.resolution = value;
+      break;
+    case KeptSetting::Field::GameVolume:
+      saved.game_volume = std::stoi(value);
+      break;
+    case KeptSetting::Field::Border:
+      saved.game_border = value;
+      break;
+    }
+    std::string error;
+    if (!moderngekko::frontend::SaveConfig(user_directory, saved, &error))
+      std::cerr << "quick setting not kept: " << error << '\n';
+  };
 }
 
 void Usage() {
@@ -301,21 +422,27 @@ int RunMain(int argc, char **argv) {
   // The pictures beside a game that doesn't fill the window: the one
   // config.ini names, none, or for "random" one picked now, so each time the
   // game opens it may be another. Resources/borders is the build's
-  // (MODERNGEKKO_GAME_BORDERS); the runtime reports problems with it.
+  // (MODERNGEKKO_GAME_BORDERS); the runtime reports problems with it. The
+  // folder is given even without a border, for the in-game menu to show one.
+  const std::filesystem::path borders = executable_directory / "Resources" / "borders";
+  const moderngekko::frontend::GameBorderList border_list =
+      moderngekko::frontend::LoadGameBorders(borders);
+  if (!border_list.borders.empty())
+    config.graphics.border_folder = borders;
   {
-    const std::filesystem::path borders = executable_directory / "Resources" / "borders";
-    const moderngekko::frontend::GameBorderList list =
-        moderngekko::frontend::LoadGameBorders(borders);
     const std::uint64_t random_number =
         (static_cast<std::uint64_t>(std::random_device{}()) << 32) ^
         static_cast<std::uint64_t>(
             std::chrono::steady_clock::now().time_since_epoch().count());
     if (const auto *border = moderngekko::frontend::ChooseGameBorder(
-            list, frontend_config.game_border, random_number)) {
-      config.graphics.border_folder = borders;
+            border_list, frontend_config.game_border, random_number))
       config.graphics.border_id = border->id;
-    }
   }
+  // The picture effect and the game's volume. An effect this build lacks is
+  // none.
+  if (const auto *effect = moderngekko::frontend::FindEffect(frontend_config.effect))
+    config.graphics.post_processing_shader = effect->shader;
+  config.audio.volume = frontend_config.game_volume;
 
   // The menu over the game (M, or Guide on a pad), in the launcher's language:
   // config.ini's, or the system's. It answers to the first controller.
@@ -332,8 +459,11 @@ int RunMain(int argc, char **argv) {
     config.menu.back_keys = std::move(keys.back);
     config.menu.up_keys = std::move(keys.up);
     config.menu.down_keys = std::move(keys.down);
+    config.menu.left_keys = std::move(keys.left);
+    config.menu.right_keys = std::move(keys.right);
     config.menu.open_fallback = std::move(keys.open_fallback);
     config.menu.release_directory = executable_directory;
+    AddQuickSettings(&config, frontend_config, border_list);
   }
 
 #if defined(__linux__)

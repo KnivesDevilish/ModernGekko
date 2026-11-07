@@ -29,6 +29,17 @@ struct AspectRatioOption {
   const char *description;
 };
 
+// A picture effect: a Dolphin post-processing shader drawn over the game
+// (the fork's shaders/, copied to Sys/Shaders/ModernGekko, or Dolphin's
+// FXAA). The name and the line saying what it does are English, which the
+// launcher and the in-game menu translate; value is config.ini's.
+struct EffectOption {
+  const char *text;
+  const char *value;
+  const char *shader;  // empty for none
+  const char *description;
+};
+
 struct ConfigResult {
   int dolphin_scale = 0;
   std::string resolution;
@@ -46,6 +57,10 @@ struct ConfigResult {
   // picked each time the game opens) or the id of a border in
   // Resources/borders/borders.txt (tools/game_borders.hpp).
   std::string game_border = "random";
+  // The picture effect: one of SupportedEffects()' values.
+  std::string effect = "none";
+  // The game's volume, 0 (silent) to 100.
+  int game_volume = 100;
   // The launcher's language: "auto" (the system's), "en", "es" or "ja".
   std::string language = "auto";
   // Volume of the launcher's and the Netplay lobby's music, 0 (off) to 100.
@@ -72,6 +87,10 @@ const std::vector<ResolutionOption> &SupportedResolutions();
 const std::vector<GraphicsBackendOption> &SupportedGraphicsBackends();
 const std::vector<CpuCoreOption> &SupportedCpuCores();
 const std::vector<AspectRatioOption> &SupportedAspectRatios();
+// The first entry, none, is the default.
+const std::vector<EffectOption> &SupportedEffects();
+// The effect of config.ini's value; nullptr for one this build doesn't have.
+const EffectOption *FindEffect(std::string_view value);
 ConfigResult LoadConfig(const std::filesystem::path &user_directory,
                         bool create_if_missing);
 bool SaveConfig(const std::filesystem::path &user_directory,
@@ -107,6 +126,8 @@ struct GameMenuKeys {
   std::vector<std::string> back;
   std::vector<std::string> up;
   std::vector<std::string> down;
+  std::vector<std::string> left;
+  std::vector<std::string> right;
   // The menu button of a profile written before it had one.
   std::string open_fallback;
 };

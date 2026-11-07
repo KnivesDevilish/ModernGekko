@@ -1,5 +1,5 @@
-# Copies one optional folder into an executable's Resources/ folder, at build
-# time: cmake -DSOURCE=<folder> -DDESTINATION=<folder>/Resources/<name> -P this.
+# Copies one optional folder next to an executable, at build time, such as
+# into its Resources/: cmake -DSOURCE=<folder> -DDESTINATION=<folder> -P this.
 # The copy follows the folder: a changed file is copied again and a file no
 # longer in it is removed from the copy. A missing folder only warns, since
 # what uses it works without it.
