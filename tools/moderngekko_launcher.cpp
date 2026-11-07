@@ -6,6 +6,7 @@
 #include "launcher_text.hpp"
 #include "launcher_music.hpp"
 #include "launcher_patch_notes.hpp"
+#include "launcher_save.hpp"
 #include "launcher_ui.hpp"
 #include "launcher_update.hpp"
 #include "moderngekko/game.hpp"
@@ -2513,6 +2514,26 @@ int main(int argc, char** argv)
   // see tools/game_borders.hpp); Settings offers them when there are any.
   const moderngekko::frontend::GameBorderList game_borders =
       moderngekko::frontend::LoadGameBorders(release_directory / "Resources" / "borders");
+#ifdef MODERNGEKKO_REQUIRED_DISC_ID
+  // A complete save this build brings (Resources/complete-save, see
+  // tools/launcher_save.hpp), which Game Files can install over the player's.
+  const fs::path complete_save_folder = release_directory / "Resources" / "complete-save";
+  const bool has_complete_save =
+      !moderngekko::frontend::CompleteSaveFiles(complete_save_folder).empty();
+  const fs::path game_save_folder =
+      moderngekko::frontend::WiiSaveFolder(user_directory, MODERNGEKKO_REQUIRED_DISC_ID);
+  const fs::path save_backups_folder =
+      moderngekko::frontend::SaveBackupsFolder(user_directory, MODERNGEKKO_REQUIRED_DISC_ID);
+  // What the page shows, looked at again every second rather than each frame.
+  bool game_save_exists = false;
+  std::optional<fs::path> latest_save_backup;
+  Uint64 save_checked_at = 0;
+  // What the last install or restore did, kept as its English text and path
+  // so it follows the language.
+  const char* save_message = nullptr;
+  std::string save_message_detail;
+  bool save_message_error = false;
+#endif
   // The runner gives MODERNGEKKO_STATICRECOMP priority over config.ini and
   // inherits this process' environment, so say so when it is set.
   const char* cpu_core_environment_value = std::getenv("MODERNGEKKO_STATICRECOMP");
@@ -3594,25 +3615,6 @@ int main(int argc, char** argv)
     }
     ImGui::SetItemTooltip("%s", Tr("Drawn over the game's picture. Light enough for integrated "
                                    "graphics."));
-    ImGui::Spacing();
-    // The game's own volume (also in the in-game menu's Quick settings),
-    // written when the slider is let go.
-    ImGui::TextUnformatted(Tr("Game volume"));
-    ImGui::SetNextItemWidth(-1.0f);
-    ImGui::SliderInt("##game_volume", &config.game_volume, 0, 100, "%d %%",
-                     ImGuiSliderFlags_AlwaysClamp);
-    if (ImGui::IsItemDeactivatedAfterEdit())
-    {
-      config.resolution = resolutions[resolution_index].text;
-      config.show_fps_in_title = show_fps_in_title;
-      config.controller = selected_controller;
-      std::string error;
-      if (!moderngekko::frontend::SaveConfig(user_directory, config, &error))
-      {
-        std::lock_guard lock(dialog.mutex);
-        dialog.error = std::move(error);
-      }
-    }
     EndSection();
     BeginSection("##settings_display", Tr("DISPLAY"));
     // The section's labels share a column, so the lists next to them line up.
@@ -3823,6 +3825,28 @@ int main(int argc, char** argv)
       }
     }
     EndSection();
+    BeginSection("##settings_audio", Tr("AUDIO"));
+    // The game's own volume (also in the in-game menu's Quick settings),
+    // written when the slider is let go. The launcher's music has its own,
+    // in the sidebar.
+    ImGui::TextUnformatted(Tr("Game volume"));
+    ImGui::SetNextItemWidth(-1.0f);
+    ImGui::SliderInt("##game_volume", &config.game_volume, 0, 100, "%d %%",
+                     ImGuiSliderFlags_AlwaysClamp);
+    if (ImGui::IsItemDeactivatedAfterEdit())
+    {
+      config.resolution = resolutions[resolution_index].text;
+      config.show_fps_in_title = show_fps_in_title;
+      config.controller = selected_controller;
+      std::string error;
+      if (!moderngekko::frontend::SaveConfig(user_directory, config, &error))
+      {
+        std::lock_guard lock(dialog.mutex);
+        dialog.error = std::move(error);
+      }
+    }
+    ImGui::TextDisabled("%s", Tr("Also in the in-game menu's Quick settings."));
+    EndSection();
     }
       if (current_page == LauncherPage::Controls)
       {
@@ -3991,6 +4015,127 @@ int main(int argc, char** argv)
         ImGui::TextColored(ImVec4(1.0f, 0.35f, 0.3f, 1.0f), "%s", extraction.error.c_str());
     }
     EndSection();
+#ifdef MODERNGEKKO_REQUIRED_DISC_ID
+    if (has_complete_save)
+    {
+      BeginSection("##files_complete_save", Tr("COMPLETE SAVE"));
+      if (save_checked_at == 0 || SDL_GetTicks() - save_checked_at >= 1000)
+      {
+        game_save_exists = moderngekko::frontend::HasGameSave(game_save_folder);
+        latest_save_backup = moderngekko::frontend::LatestSaveBackup(save_backups_folder);
+        save_checked_at = std::max<Uint64>(SDL_GetTicks(), 1);
+      }
+      ImGui::PushTextWrapPos(0.0f);
+      ImGui::TextUnformatted(Tr("The whole game completed, with everything unlocked. Your own "
+                                "save is kept, and Restore my save brings it back."));
+      if (!game_save_exists)
+        ImGui::TextDisabled("%s",
+                            Tr("Play once, until the game makes its save, then come back."));
+      ImGui::PopTextWrapPos();
+      ImGui::Spacing();
+      ImGui::BeginDisabled(!game_save_exists);
+      if (ImGui::Button(Tr("Install complete save")))
+        ImGui::OpenPopup("##install_complete_save");
+      ImGui::EndDisabled();
+      if (latest_save_backup)
+      {
+        ImGui::SameLine();
+        if (ImGui::Button(Tr("Restore my save")))
+          ImGui::OpenPopup("##restore_save");
+      }
+      if (save_message)
+      {
+        const std::string text = Format(Tr(save_message), save_message_detail.c_str());
+        ImGui::PushTextWrapPos(0.0f);
+        if (save_message_error)
+          ImGui::TextColored(ImVec4(1.0f, 0.35f, 0.3f, 1.0f), "%s", text.c_str());
+        else
+          ImGui::TextDisabled("%s", text.c_str());
+        ImGui::PopTextWrapPos();
+      }
+      // Both ask first: one replaces the player's progress, the other the
+      // complete save.
+      const auto confirm = [&](const char* id, const char* heading, const char* body,
+                               const char* action) {
+        ImGui::SetNextWindowPos(ImGui::GetMainViewport()->GetCenter(), ImGuiCond_Appearing,
+                                ImVec2(0.5f, 0.5f));
+        ImGui::SetNextWindowSize(ImVec2(460 * scale, 0.0f));
+        bool confirmed = false;
+        if (ImGui::BeginPopupModal(id, nullptr,
+                                   ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoTitleBar))
+        {
+          ImGui::PushFont(fonts.bold, 0.0f);
+          ImGui::TextUnformatted(heading);
+          ImGui::PopFont();
+          ImGui::Spacing();
+          ImGui::PushTextWrapPos(0.0f);
+          ImGui::TextUnformatted(body);
+          ImGui::PopTextWrapPos();
+          ImGui::Spacing();
+          if (ImGui::Button(action))
+          {
+            confirmed = true;
+            ImGui::CloseCurrentPopup();
+          }
+          ImGui::SameLine();
+          if (ImGui::Button(Tr("Cancel")))
+            ImGui::CloseCurrentPopup();
+          ImGui::EndPopup();
+        }
+        return confirmed;
+      };
+      if (confirm("##install_complete_save", Tr("Install the complete save?"),
+                  Tr("Your progress is replaced by the complete save. A copy of your save is "
+                     "kept first, and Restore my save brings it back."),
+                  Tr("Install")))
+      {
+        const SDL_Time now_ns = [] {
+          SDL_Time now = 0;
+          SDL_GetCurrentTime(&now);
+          return now;
+        }();
+        SDL_DateTime now{};
+        SDL_TimeToDateTime(now_ns, &now, true);
+        char stamp[32];
+        std::snprintf(stamp, sizeof(stamp), "%04d-%02d-%02d_%02d-%02d-%02d", now.year, now.month,
+                      now.day, now.hour, now.minute, now.second);
+        const moderngekko::frontend::SaveResult result = moderngekko::frontend::InstallCompleteSave(
+            complete_save_folder, game_save_folder, save_backups_folder, stamp);
+        save_message_error = !result;
+        switch (result.error)
+        {
+        case moderngekko::frontend::SaveError::None:
+          save_message = MODERNGEKKO_UI_TEXT("Complete save installed. Your own save is kept in %s.");
+          save_message_detail = result.backup.string();
+          break;
+        case moderngekko::frontend::SaveError::Backup:
+          save_message = MODERNGEKKO_UI_TEXT("Your save couldn't be copied, so nothing changed: %s");
+          save_message_detail = result.detail;
+          break;
+        default:
+          save_message = MODERNGEKKO_UI_TEXT("Couldn't write the save: %s");
+          save_message_detail = result.detail;
+          break;
+        }
+        save_checked_at = 0;
+      }
+      if (confirm("##restore_save", Tr("Bring your save back?"),
+                  Tr("Your save from before the complete save comes back, in place of the "
+                     "current one."),
+                  Tr("Restore")) &&
+          latest_save_backup)
+      {
+        const moderngekko::frontend::SaveResult result =
+            moderngekko::frontend::RestoreSaveBackup(*latest_save_backup, game_save_folder);
+        save_message_error = !result;
+        save_message = result ? MODERNGEKKO_UI_TEXT("Your save is back.") :
+                                MODERNGEKKO_UI_TEXT("Couldn't write the save: %s");
+        save_message_detail = result.detail;
+        save_checked_at = 0;
+      }
+      EndSection();
+    }
+#endif
     }
       if (current_page == LauncherPage::Credits)
       {

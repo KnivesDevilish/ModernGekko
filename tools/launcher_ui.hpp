@@ -386,8 +386,8 @@ inline void DrawPageHeader(const char* title, const char* subtitle, ImFont* bold
 // Every BeginSection() needs a matching EndSection().
 inline void BeginSection(const char* id, const char* heading)
 {
-  // A little less vertical padding than other panels, so that a page with
-  // three sections (Settings) still fits the default window without scrolling.
+  // A little less vertical padding than other panels, so that a page of
+  // several sections (Settings) needs less scrolling.
   const ImVec2 padding = ImGui::GetStyle().WindowPadding;
   ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(padding.x, padding.y * 0.75f));
   ImGui::BeginChild(id, ImVec2(0.0f, 0.0f),

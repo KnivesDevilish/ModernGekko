@@ -85,6 +85,12 @@ set(MODERNGEKKO_LAUNCHER_PATCH_NOTES "" CACHE FILEPATH
 # 4:3 game on a wide screen.
 set(MODERNGEKKO_GAME_BORDERS "" CACHE PATH
     "Optional folder with the pictures shown beside a 4:3 game")
+# A folder with a Wii game's save files, the game finished at 100%, without
+# the save's banner.bin, which is the game's own art (tools/launcher_save.hpp):
+# the launcher's Game Files page installs them over the player's save, keeping
+# a copy of it. Needs MODERNGEKKO_REQUIRED_DISC_ID.
+set(MODERNGEKKO_COMPLETE_SAVE "" CACHE PATH
+    "Optional folder with a complete save the launcher can install")
 # With both set, the launcher shows its version and looks on GitHub for a
 # newer published release (tools/launcher_update.hpp).
 set(MODERNGEKKO_FRONTEND_VERSION "" CACHE STRING
@@ -790,6 +796,9 @@ if(MODERNGEKKO_ENABLE_DOLPHIN_RUNTIME)
     # (format in tools/launcher_patch_notes.hpp).
     moderngekko_add_resource(moderngekko-launcher "${MODERNGEKKO_LAUNCHER_PATCH_NOTES}"
                              patch-notes.txt)
+    # Resources/complete-save: the save Game Files can install.
+    moderngekko_add_resource_folder(moderngekko-launcher "${MODERNGEKKO_COMPLETE_SAVE}"
+                                    complete-save)
     # The launcher embeds the Noto Sans CJK glyphs of its Japanese texts
     # (tools/launcher_cjk_font.inc); the font's license travels with every build.
     add_custom_command(TARGET moderngekko-launcher POST_BUILD
@@ -950,6 +959,15 @@ if(BUILD_TESTING)
              COMMAND moderngekko_launcher_update_test)
 
     # Header-only: the light format of the PATCH NOTES panel.
+    # Header-only: installing a complete save and bringing the player's back.
+    add_executable(moderngekko_launcher_save_test
+        tests/launcher_save_test.cpp)
+    target_include_directories(moderngekko_launcher_save_test PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/tools")
+    target_compile_features(moderngekko_launcher_save_test PRIVATE cxx_std_23)
+    add_test(NAME moderngekko.launcher_save
+             COMMAND moderngekko_launcher_save_test)
+
     add_executable(moderngekko_launcher_patch_notes_test
         tests/launcher_patch_notes_test.cpp)
     target_include_directories(moderngekko_launcher_patch_notes_test PRIVATE
