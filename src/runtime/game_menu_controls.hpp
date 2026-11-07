@@ -5,6 +5,8 @@
 // the player's profile (GCPadNew.ini or WiimoteNew.ini) the way the launcher's
 // tester reads it. Apart from Dolphin, so tests/game_menu_controls_test.cpp
 // can check it. The names are English; the menu translates them as it draws.
+// The hints at the bottom of the menu come from here too: a binding split
+// into its gamepad and keyboard inputs, and the button each hint draws.
 
 #include "ui_text.hpp"
 
@@ -62,27 +64,43 @@ inline bool HasPlayStationFaces(std::string_view device)
   });
 }
 
+// A Nintendo pad prints its letters in other places: B at the bottom, A on
+// the right, Y on the left and X at the top.
+inline bool IsNintendoPad(std::string_view device)
+{
+  constexpr std::array<std::string_view, 4> names = {"Nintendo", "Switch", "Pro Controller",
+                                                     "Joy-Con"};
+  return std::ranges::any_of(names, [&](std::string_view name) {
+    return device.find(name) != std::string_view::npos;
+  });
+}
+
+// The face buttons as Dolphin's SDL backend names them, by place: bottom,
+// right, left, top. Its XInput-style names (the generated profile's) and its
+// SDL position names.
+inline constexpr std::array<std::array<std::string_view, 2>, 4> FACE_BUTTONS = {{
+    {"Button A", "Button S"},
+    {"Button B", "Button E"},
+    {"Button X", "Button W"},
+    {"Button Y", "Button N"},
+}};
+
 // A gamepad input as Dolphin's SDL backend names it; nothing for a name that
 // isn't one. whole: the row covers several directions, so a stick or the
-// D-pad is named once ("Left stick") instead of by direction.
-inline std::optional<std::string> PadName(std::string_view name, bool whole, bool playstation)
+// D-pad is named once ("Left stick") instead of by direction. playstation and
+// nintendo: the pad's face buttons are named as that pad prints them.
+inline std::optional<std::string> PadName(std::string_view name, bool whole, bool playstation,
+                                          bool nintendo = false)
 {
-  // Face buttons: Dolphin's XInput-style names (the generated profile's) and
-  // its SDL position names.
-  constexpr std::array<std::array<std::string_view, 2>, 4> faces = {{
-      {"Button A", "Button S"},
-      {"Button B", "Button E"},
-      {"Button X", "Button W"},
-      {"Button Y", "Button N"},
-  }};
   constexpr std::array<const char*, 4> letters = {"A", "B", "X", "Y"};
+  constexpr std::array<const char*, 4> nintendo_letters = {"B", "A", "Y", "X"};
   constexpr std::array<const char*, 4> symbols = {
       MODERNGEKKO_UI_TEXT("Cross"), MODERNGEKKO_UI_TEXT("Circle"), MODERNGEKKO_UI_TEXT("Square"),
       MODERNGEKKO_UI_TEXT("Triangle")};
-  for (std::size_t i = 0; i < faces.size(); ++i)
+  for (std::size_t i = 0; i < FACE_BUTTONS.size(); ++i)
   {
-    if (name == faces[i][0] || name == faces[i][1])
-      return playstation ? symbols[i] : letters[i];
+    if (name == FACE_BUTTONS[i][0] || name == FACE_BUTTONS[i][1])
+      return playstation ? symbols[i] : nintendo ? nintendo_letters[i] : letters[i];
   }
   constexpr std::array<std::pair<std::string_view, const char*>, 9> buttons = {{
       {"Trigger L", MODERNGEKKO_UI_TEXT("L trigger")},
@@ -203,16 +221,12 @@ inline void AddOnce(std::vector<std::string>& names, std::string name)
   if (!name.empty() && std::ranges::find(names, name) == names.end())
     names.push_back(std::move(name));
 }
-}  // namespace game_menu_controls
 
-// Adds the inputs of one binding of the profile to row: input names joined by
-// "|", such as "`Button A` | `XInput2/0/Virtual core pointer:S`". A name may
-// carry its device; names without one belong to the profile's device.
-// Anything else marks the row custom.
-inline void AddBinding(std::string_view expression, std::string_view device, bool whole,
-                       ControlsRow& row)
+// The terms of a binding joined by "|", such as "`Button A`" and
+// "`XInput2/0/Virtual core pointer:S`"; nothing for one written by hand with
+// more than "|" (Dolphin's "&", "!", functions...).
+inline std::optional<std::vector<std::string_view>> BindingTerms(std::string_view expression)
 {
-  using namespace game_menu_controls;
   std::vector<std::string_view> terms;
   bool quoted = false;
   std::size_t start = 0;
@@ -226,47 +240,152 @@ inline void AddBinding(std::string_view expression, std::string_view device, boo
     }
     if (quoted || std::isalnum(static_cast<unsigned char>(c)) || c == ' ' || c == '\t')
       continue;
-    if (c == '|')
-    {
-      terms.push_back(expression.substr(start, i - start));
-      start = i + 1;
-      continue;
-    }
-    row.custom = true;
-    return;
+    if (c != '|')
+      return std::nullopt;
+    terms.push_back(expression.substr(start, i - start));
+    start = i + 1;
   }
   if (quoted)
+    return std::nullopt;
+  terms.push_back(expression.substr(start));
+  return terms;
+}
+
+// A term's input and its device: the device it names before ":", or the
+// profile's.
+struct TermInput
+{
+  std::string input;
+  std::string device;
+};
+
+inline TermInput InputOfTerm(std::string_view term, std::string_view profile_device)
+{
+  std::string name;
+  for (const char c : term)
+  {
+    if (c != '`')
+      name += c;
+  }
+  std::string_view input = Trim(name);
+  std::string_view device = profile_device;
+  if (const std::size_t colon = input.rfind(':'); colon != std::string_view::npos)
+  {
+    device = Trim(input.substr(0, colon));
+    input = Trim(input.substr(colon + 1));
+  }
+  return {std::string(input), std::string(Trim(device))};
+}
+}  // namespace game_menu_controls
+
+// Adds the inputs of one binding of the profile to row: input names joined by
+// "|", such as "`Button A` | `XInput2/0/Virtual core pointer:S`". A name may
+// carry its device; names without one belong to the profile's device.
+// Anything else marks the row custom.
+inline void AddBinding(std::string_view expression, std::string_view device, bool whole,
+                       ControlsRow& row)
+{
+  using namespace game_menu_controls;
+  const std::optional<std::vector<std::string_view>> terms = BindingTerms(expression);
+  if (!terms)
   {
     row.custom = true;
     return;
   }
-  terms.push_back(expression.substr(start));
-  for (std::string_view term : terms)
+  for (std::string_view term : *terms)
   {
-    std::string name;
-    for (const char c : term)
-    {
-      if (c != '`')
-        name += c;
-    }
-    std::string_view input = Trim(name);
-    if (input.empty())
+    const TermInput input = InputOfTerm(term, device);
+    if (input.input.empty())
       continue;
-    std::string_view input_device = device;
-    if (const std::size_t colon = input.rfind(':'); colon != std::string_view::npos)
-    {
-      input_device = Trim(input.substr(0, colon));
-      input = Trim(input.substr(colon + 1));
-    }
     const std::optional<std::string> pad_name =
-        PadName(input, whole, HasPlayStationFaces(input_device));
-    if (IsPadDevice(input_device))
-      AddOnce(row.pad, pad_name.value_or(std::string(input)));
+        PadName(input.input, whole, HasPlayStationFaces(input.device),
+                IsNintendoPad(input.device));
+    if (IsPadDevice(input.device))
+      AddOnce(row.pad, pad_name.value_or(input.input));
     // The generated profile also names the pad's buttons on a profile whose
     // device is the keyboard (no pad was connected): those are no keys.
     else if (!pad_name)
-      AddOnce(row.keys, KeyName(input, whole));
+      AddOnce(row.keys, KeyName(input.input, whole));
   }
+}
+
+// A binding of the profile split by device: its gamepad terms and its
+// keyboard terms, each joined again by "|" so the menu can tell which of the
+// two pressed one of its buttons, and the first input of each, for the hints
+// at the bottom of the menu. All empty for a binding written by hand with
+// more than "|".
+struct DeviceBinding
+{
+  std::string pad_expression;
+  std::string keys_expression;
+  std::string first_pad;   // as Dolphin names it: "Button A"
+  std::string pad_device;  // first_pad's: "SDL/0/PS4 Controller"
+  std::string first_key;   // as the menu names it: "S", "Enter"
+};
+
+inline DeviceBinding SplitBinding(std::string_view expression, std::string_view device)
+{
+  using namespace game_menu_controls;
+  DeviceBinding split;
+  const std::optional<std::vector<std::string_view>> terms = BindingTerms(expression);
+  if (!terms)
+    return split;
+  const auto add = [](std::string& joined, std::string_view term) {
+    if (!joined.empty())
+      joined += " | ";
+    joined += Trim(term);
+  };
+  for (std::string_view term : *terms)
+  {
+    const TermInput input = InputOfTerm(term, device);
+    if (input.input.empty())
+      continue;
+    if (IsPadDevice(input.device))
+    {
+      add(split.pad_expression, term);
+      if (split.first_pad.empty())
+      {
+        split.first_pad = input.input;
+        split.pad_device = input.device;
+      }
+    }
+    else if (!PadName(input.input, false, false))
+    {
+      add(split.keys_expression, term);
+      if (split.first_key.empty())
+        split.first_key = KeyName(input.input, false);
+    }
+  }
+  return split;
+}
+
+// What the menu's hints draw for a gamepad input: a face button or a
+// shoulder by its place, or anything else (Start, a trigger...) by its name.
+struct PadHint
+{
+  enum class Kind
+  {
+    Face,
+    Shoulder,
+    Name,
+  };
+  Kind kind = Kind::Face;
+  // Face: 0 bottom, 1 right, 2 left, 3 top. Shoulder: 0 left, 1 right.
+  int place = 0;
+  std::string name;  // Kind::Name: English, translated when drawn
+};
+
+inline PadHint PadHintOf(std::string_view input)
+{
+  using namespace game_menu_controls;
+  for (std::size_t i = 0; i < FACE_BUTTONS.size(); ++i)
+  {
+    if (input == FACE_BUTTONS[i][0] || input == FACE_BUTTONS[i][1])
+      return {PadHint::Kind::Face, static_cast<int>(i), {}};
+  }
+  if (input == "Shoulder L" || input == "Shoulder R")
+    return {PadHint::Kind::Shoulder, input == "Shoulder L" ? 0 : 1, {}};
+  return {PadHint::Kind::Name, 0, PadName(input, false, false).value_or(std::string(input))};
 }
 
 // The rows of the page: for each button the frontend lists (its label and

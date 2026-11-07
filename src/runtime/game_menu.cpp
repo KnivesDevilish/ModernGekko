@@ -35,6 +35,7 @@
 #include <mutex>
 #include <optional>
 #include <stop_token>
+#include <string>
 #include <string_view>
 #include <thread>
 #include <utility>
@@ -142,6 +143,8 @@ struct View
   GameMenuNotice notice;
   bool notice_lasting = false;
   Clock::time_point notice_until;
+  // The keyboard was used last, not the pad: the hints show its keys.
+  bool keys = false;
 
   bool NoticeShown(Clock::time_point now) const
   {
@@ -218,6 +221,9 @@ struct GameMenu::Impl
   // read, by the video thread too).
   std::vector<ControlsRow> controls;
   std::string controller_name;
+  // The hints at the bottom of the menu, read from the profile too; which of
+  // the pad and the keyboard was used last is the view's.
+  GameMenuHints hints;
 
   // The menu thread's, apart from view.
   MenuController controller;
@@ -228,6 +234,12 @@ struct GameMenu::Impl
   std::vector<ControllerEmu::Control*> down_controls;
   std::vector<ControllerEmu::Control*> left_controls;
   std::vector<ControllerEmu::Control*> right_controls;
+  // The menu's buttons again, only their pad's inputs and only their keys,
+  // to tell which of the two was used last.
+  std::vector<ControllerEmu::Control*> pad_controls;
+  std::vector<ControllerEmu::Control*> key_controls;
+  bool pad_was_held = false;
+  bool keys_were_held = false;
   Common::EventHook devices_hook;
   MenuButtonRepeat repeat;
   bool resume_pending = false;
@@ -276,16 +288,94 @@ struct GameMenu::Impl
         device);
     controller_name = PadDeviceName(device);
     // An older profile may have no menu button: the fallback's, then.
+    bool uses_fallback = false;
     if (!HasInput(open_controls) && !settings.open_fallback.empty())
     {
       ControllerEmu::Control* fallback = controller.ControlOf("Fallback", "Menu");
       fallback->control_ref->SetExpression(settings.open_fallback);
       open_controls.push_back(fallback);
+      uses_fallback = true;
     }
+    LoadHints(*section, device, uses_fallback);
     controller.UpdateReferences(g_controller_interface);
     // A pad plugged in or out later is found again, as for the game.
     devices_hook = g_controller_interface.RegisterDevicesChangedCallback(
         [this] { controller.UpdateReferences(g_controller_interface); });
+  }
+
+  // The hints' buttons: the first pad input and the first key that accept
+  // and that go back, and the pad's look. And a control for each menu
+  // button's pad inputs and one for its keys, telling which of the two was
+  // used last; before any is, the profile's device says.
+  void LoadHints(const Common::IniFile::Section& section, const std::string& device,
+                 bool uses_fallback)
+  {
+    std::string pad_device;
+    const auto first_of = [&](const std::vector<std::string>& keys, std::optional<PadHint>& pad,
+                              std::string& key) {
+      for (const std::string& name : keys)
+      {
+        std::string value;
+        if (!section.Get(name, &value))
+          continue;
+        const DeviceBinding split = SplitBinding(value, device);
+        if (!pad && !split.first_pad.empty())
+        {
+          pad = PadHintOf(split.first_pad);
+          if (pad_device.empty())
+            pad_device = split.pad_device;
+        }
+        if (key.empty())
+          key = split.first_key;
+      }
+    };
+    first_of(settings.accept_keys, hints.accept_pad, hints.accept_key);
+    first_of(settings.back_keys, hints.back_pad, hints.back_key);
+    if (pad_device.empty())
+      pad_device = device;
+    hints.style = game_menu_controls::HasPlayStationFaces(pad_device) ?
+                      frontend::ui::PadStyle::PlayStation :
+                  game_menu_controls::IsNintendoPad(pad_device) ? frontend::ui::PadStyle::Nintendo :
+                                                                  frontend::ui::PadStyle::Xbox;
+
+    std::size_t count = 0;
+    const auto add = [&](std::string_view expression) {
+      const DeviceBinding split = SplitBinding(expression, device);
+      const std::string name = std::to_string(count++);
+      if (!split.pad_expression.empty())
+      {
+        ControllerEmu::Control* control = controller.ControlOf("Pad used", name);
+        control->control_ref->SetExpression(split.pad_expression);
+        pad_controls.push_back(control);
+      }
+      if (!split.keys_expression.empty())
+      {
+        ControllerEmu::Control* control = controller.ControlOf("Keys used", name);
+        control->control_ref->SetExpression(split.keys_expression);
+        key_controls.push_back(control);
+      }
+    };
+    for (const std::vector<std::string>* keys :
+         {&settings.open_keys, &settings.accept_keys, &settings.back_keys, &settings.up_keys,
+          &settings.down_keys, &settings.left_keys, &settings.right_keys})
+    {
+      for (const std::string& name : *keys)
+      {
+        std::string value;
+        if (section.Get(name, &value))
+          add(value);
+      }
+    }
+    if (uses_fallback)
+      add(settings.open_fallback);
+    view.keys = !game_menu_controls::IsPadDevice(device);
+  }
+
+  // Whether any of the menu's buttons is held on the pad, and on the keyboard.
+  std::pair<bool, bool> DevicesHeld()
+  {
+    const auto lock = ControllerEmu::EmulatedController::GetStateLock();
+    return {AnyHeld(pad_controls), AnyHeld(key_controls)};
   }
 
   MenuButtons Held()
@@ -385,6 +475,16 @@ struct GameMenu::Impl
                                      Host_RendererHasFocus());
       g_controller_interface.UpdateInput();
       const MenuButtons held = Held();
+      // A button just pressed on the pad or the keyboard: the hints show that
+      // one's buttons.
+      const auto [pad_held, keys_held] = DevicesHeld();
+      std::optional<bool> used_keys;
+      if (pad_held && !pad_was_held)
+        used_keys = false;
+      if (keys_held && !keys_were_held)
+        used_keys = true;
+      pad_was_held = pad_held;
+      keys_were_held = keys_held;
       const Clock::time_point now = Clock::now();
       const MenuButtons pressed = repeat.Update(held, now);
       const Core::State core_state = Core::GetState(system);
@@ -410,8 +510,14 @@ struct GameMenu::Impl
       std::size_t changed_row = 0;
       std::size_t changed_choice = 0;
       bool notice_shown = false;
+      bool hints_changed = false;
       {
         std::lock_guard lock(view_mutex);
+        if (used_keys && *used_keys != view.keys)
+        {
+          view.keys = *used_keys;
+          hints_changed = true;
+        }
         if (in_game && !leaving && !screenshot_busy)
         {
           event = view.state.Press(pressed);
@@ -476,7 +582,7 @@ struct GameMenu::Impl
                                  (notice_shown && now - last_redraw >= REDRAW_INTERVAL);
       notice_was_shown = notice_shown;
       if (core_state == Core::State::Paused && !leaving &&
-          (version != drawn_version || notice_redraw ||
+          (version != drawn_version || notice_redraw || (open && hints_changed) ||
            (open && (now - opened_at < FADE_TIME || now - last_redraw >= REDRAW_INTERVAL))))
       {
         drawn_version = version;
@@ -544,6 +650,8 @@ struct GameMenu::Impl
       content.controls = controls;
       content.controller_name = controller_name;
       content.netplay = netplay;
+      content.hints = hints;
+      content.hints.keys = shown.keys;
       DrawGameMenu(list, display, fonts, shown.state, content, eased);
     }
     if (notice)

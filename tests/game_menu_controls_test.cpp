@@ -1,8 +1,10 @@
 // The in-game menu's Controls page (src/runtime/game_menu_controls.hpp): the
 // profile's bindings become readable names, the gamepad's apart from the
 // keyboard's; rows of several directions name whole sticks; a PlayStation
-// pad's face buttons are its symbols; bindings written by hand beyond "|"
-// are reported as such.
+// pad's face buttons are its symbols and a Nintendo pad's its own letters;
+// bindings written by hand beyond "|" are reported as such. The hints at the
+// bottom of the menu: a binding split into its gamepad and keyboard inputs,
+// and the button each hint draws.
 #include "runtime/game_menu_controls.hpp"
 
 #include <cstdio>
@@ -14,8 +16,12 @@
 namespace
 {
 using moderngekko::detail::ControlsRow;
+using moderngekko::detail::DeviceBinding;
 using moderngekko::detail::PadDeviceName;
+using moderngekko::detail::PadHint;
+using moderngekko::detail::PadHintOf;
 using moderngekko::detail::ReadControls;
+using moderngekko::detail::SplitBinding;
 
 struct Control
 {
@@ -144,6 +150,62 @@ int main()
       PadDeviceName(" SDL/12/8BitDo Pro 2 ") != "8BitDo Pro 2" ||
       !PadDeviceName(KEYBOARD).empty() || !PadDeviceName("").empty())
     return 72;
+  {
+    // A Nintendo pad: its letters where it prints them (B at the bottom).
+    const std::map<std::string, std::string> nintendo = {
+        {"Buttons/A", "`Button A` | " + k + "S`"}, {"Buttons/B", "`Button E`"},
+        {"Buttons/X", "`Button W`"}, {"Buttons/Y", "`Button Y`"}};
+    const auto rows = Read(nintendo,
+                           {{"A", {"Buttons/A"}},
+                            {"B", {"Buttons/B"}},
+                            {"X", {"Buttons/X"}},
+                            {"Y", {"Buttons/Y"}}},
+                           "SDL/0/Nintendo Switch Pro Controller");
+    if (!Is(rows[0].pad, {"B"}) || !Is(rows[0].keys, {"S"}) || !Is(rows[1].pad, {"A"}) ||
+        !Is(rows[2].pad, {"Y"}) || !Is(rows[3].pad, {"X"}))
+      return 133;
+  }
+  {
+    // A binding split by device, for the hints: each side joined again, and
+    // its first input.
+    const DeviceBinding pad = SplitBinding(profile.at("Buttons/A"), "SDL/0/PS4 Controller");
+    if (pad.pad_expression != "`Button A`" || pad.keys_expression != k + "S`" ||
+        pad.first_pad != "Button A" || pad.pad_device != "SDL/0/PS4 Controller" ||
+        pad.first_key != "S")
+      return 134;
+    // Several of each, and a pad named by its own device.
+    const DeviceBinding many =
+        SplitBinding("Start | " + k + "Return` | `SDL/1/Xbox Controller:Button B` | " + k + "Up`",
+                     "SDL/0/PS5 Controller");
+    if (many.pad_expression != "Start | `SDL/1/Xbox Controller:Button B`" ||
+        many.keys_expression != k + "Return` | " + k + "Up`" || many.first_pad != "Start" ||
+        many.pad_device != "SDL/0/PS5 Controller" || many.first_key != "Enter")
+      return 135;
+    // On a profile whose device is the keyboard, the pad names are no keys;
+    // written by hand beyond "|", nothing.
+    const DeviceBinding keyboard = SplitBinding(profile.at("Buttons/A"), KEYBOARD);
+    const DeviceBinding edited = SplitBinding("`Button A` & `Button B`", "SDL/0/Xbox Controller");
+    if (!keyboard.pad_expression.empty() || !keyboard.first_pad.empty() ||
+        keyboard.keys_expression != k + "S`" || keyboard.first_key != "S" ||
+        !edited.pad_expression.empty() || !edited.keys_expression.empty())
+      return 136;
+  }
+  {
+    // What a hint draws: face buttons and shoulders by their place, anything
+    // else by its name.
+    const PadHint south = PadHintOf("Button A");
+    const PadHint east = PadHintOf("Button E");
+    const PadHint north = PadHintOf("Button Y");
+    const PadHint shoulder = PadHintOf("Shoulder R");
+    const PadHint start = PadHintOf("Start");
+    const PadHint trigger = PadHintOf("Trigger L");
+    if (south.kind != PadHint::Kind::Face || south.place != 0 ||
+        east.kind != PadHint::Kind::Face || east.place != 1 || north.place != 3 ||
+        shoulder.kind != PadHint::Kind::Shoulder || shoulder.place != 1 ||
+        start.kind != PadHint::Kind::Name || start.name != "Start" ||
+        trigger.kind != PadHint::Kind::Name || trigger.name != "L trigger")
+      return 137;
+  }
   std::puts("game menu controls: ok");
   return 0;
 }

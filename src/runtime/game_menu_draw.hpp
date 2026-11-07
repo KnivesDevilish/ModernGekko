@@ -5,6 +5,7 @@
 // Dolphin's on-screen interface (game_menu.cpp draws it on the game's frames).
 // The texts are the launcher's translations (tools/launcher_text.hpp).
 
+#include "button_glyphs.hpp"
 #include "game_menu_controls.hpp"
 #include "game_menu_state.hpp"
 #include "launcher_look.hpp"
@@ -14,9 +15,11 @@
 #include <imgui.h>
 
 #include <algorithm>
+#include <array>
 #include <cfloat>
 #include <cmath>
 #include <cstddef>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -27,6 +30,21 @@ struct GameMenuFonts
 {
   ImFont* regular = nullptr;  // ImGui's current font when null
   ImFont* bold = nullptr;     // the regular font when null
+};
+
+// The buttons the hints at the bottom of the menu show for accepting and
+// going back: the profile's, as the controller prints them or as keyboard
+// keys, whichever of the two was used last.
+struct GameMenuHints
+{
+  bool keys = false;  // the keyboard was used last
+  frontend::ui::PadStyle style = frontend::ui::PadStyle::Xbox;
+  // Nothing when the profile gives the pad (or the keyboard) none; the
+  // other's is drawn then, or the controller's usual A and B.
+  std::optional<PadHint> accept_pad;
+  std::optional<PadHint> back_pad;
+  std::string accept_key;  // English, as KeyName names it: "S", "Enter"
+  std::string back_key;
 };
 
 // What the pages show besides their rows.
@@ -42,6 +60,7 @@ struct GameMenuContent
   // In Netplay the game keeps running behind the menu, and leaving goes back
   // to the lobby instead of the launcher.
   bool netplay = false;
+  GameMenuHints hints;
 };
 
 // A line at the bottom of the screen saying how a screenshot went, shown
@@ -131,15 +150,31 @@ inline const char* SettingHint(const QuickSetting& setting, std::size_t chosen)
   return nullptr;
 }
 
-// A round button face, as on the controller, with its letter in the middle.
-inline void DrawBadge(ImDrawList* list, ImFont* font, ImVec2 centre, float radius,
-                      const char* letter, ImU32 fill, ImU32 text)
+// Draws a hint's button with its top left corner at min: the key when the
+// keyboard was used last (or the pad has none), else the pad's button as the
+// controller prints it, else fallback. Returns its width.
+inline float DrawHintButton(ImDrawList* list, ImFont* font, ImVec2 min, float height,
+                            const GameMenuHints& hints, const std::optional<PadHint>& pad,
+                            const std::string& key, frontend::ui::PadButton fallback, float alpha)
 {
-  list->AddCircleFilled(centre, radius, fill, 24);
-  const float size = radius * 1.25f;
-  const ImVec2 extent = font->CalcTextSizeA(size, FLT_MAX, 0.0f, letter);
-  list->AddText(font, size, ImVec2(centre.x - extent.x * 0.5f, centre.y - extent.y * 0.5f), text,
-                letter);
+  using moderngekko::frontend::Tr;
+  namespace ui = frontend::ui;
+  if (!key.empty() && (hints.keys || !pad))
+    return ui::DrawKeyCap(list, font, min, height, Tr(key), alpha);
+  if (pad && pad->kind == PadHint::Kind::Name)
+    return ui::DrawPadLabel(list, font, min, height, Tr(pad->name.c_str()), alpha);
+  ui::PadButton button = fallback;
+  if (pad && pad->kind == PadHint::Kind::Face)
+  {
+    constexpr std::array<ui::PadButton, 4> faces = {ui::PadButton::South, ui::PadButton::East,
+                                                    ui::PadButton::West, ui::PadButton::North};
+    button = faces[static_cast<std::size_t>(std::clamp(pad->place, 0, 3))];
+  }
+  else if (pad)
+  {
+    button = pad->place == 0 ? ui::PadButton::LeftShoulder : ui::PadButton::RightShoulder;
+  }
+  return ui::DrawPadButton(list, font, min, height, hints.style, button, alpha);
 }
 
 // The names of a Controls row's inputs, translated and joined; what the page
@@ -448,8 +483,10 @@ inline void DrawGameMenu(ImDrawList* list, ImVec2 display, const GameMenuFonts& 
   }
   y += 24.0f * s;
 
-  // The buttons that work here, as the controller draws them: A green, B red,
-  // and the D-pad's left and right on the settings.
+  // The buttons that work here: accepting and going back with the profile's
+  // buttons, as the controller prints them (Xbox's green A, PlayStation's
+  // cross...) or as keyboard keys, whichever was used last; the D-pad's left
+  // and right on the settings.
   list->AddLine(ImVec2(x, y), ImVec2(x + inner, y), Colour(0.157f, 0.157f, 0.169f, fade),
                 std::max(1.0f, s));
   y += 1.0f + 16.0f * s;
@@ -460,10 +497,11 @@ inline void DrawGameMenu(ImDrawList* list, ImVec2 display, const GameMenuFonts& 
                   dim_text_colour, text);
     hint_x += extent.x + 22.0f * s;
   };
-  const auto hint = [&](const char* letter, ImU32 fill, ImU32 letter_colour, const char* text) {
-    DrawBadge(list, bold, ImVec2(hint_x + badge_radius, y + badge_radius), badge_radius, letter,
-              fill, letter_colour);
-    hint_x += badge_radius * 2.0f + 8.0f * s;
+  const auto hint = [&](const std::optional<PadHint>& pad, const std::string& key,
+                        frontend::ui::PadButton fallback, const char* text) {
+    hint_x += DrawHintButton(list, bold, ImVec2(hint_x, y), badge_radius * 2.0f, content.hints,
+                             pad, key, fallback, fade) +
+              8.0f * s;
     hint_text(text);
   };
   if (settings_page)
@@ -477,9 +515,11 @@ inline void DrawGameMenu(ImDrawList* list, ImVec2 display, const GameMenuFonts& 
   }
   else if (!controls_page)
   {
-    hint("A", Colour(0.16f, 0.72f, 0.45f, fade), Colour(0.03f, 0.08f, 0.05f, fade), Tr("Accept"));
+    hint(content.hints.accept_pad, content.hints.accept_key, frontend::ui::PadButton::South,
+         Tr("Accept"));
   }
-  hint("B", Colour(0.86f, 0.25f, 0.24f, fade), Colour(1.0f, 1.0f, 1.0f, fade), Tr("Go back"));
+  hint(content.hints.back_pad, content.hints.back_key, frontend::ui::PadButton::East,
+       Tr("Go back"));
 }
 }  // namespace moderngekko::detail
 
