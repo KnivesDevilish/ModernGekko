@@ -1,6 +1,6 @@
 // borders.txt (tools/game_borders.hpp): borders, their pictures and parts,
-// grid motion, broken entries left out, choosing one, and where a side goes
-// in its bar.
+// grid motion, fit and backdrops, broken entries left out, choosing one, and
+// where a side goes in its bar.
 #include "game_borders.hpp"
 
 #include <cmath>
@@ -10,6 +10,7 @@
 
 namespace
 {
+using moderngekko::frontend::BorderFit;
 using moderngekko::frontend::BorderMotion;
 using moderngekko::frontend::BorderRect;
 using moderngekko::frontend::ChooseGameBorder;
@@ -165,19 +166,77 @@ int main()
   if (PlaceBorder({0, 0, 0.5f, 1080}, strip, true) || PlaceBorder({0, 0, 240, 1080}, {}, true))
     return 16;
 
-  // Loading from a folder: a border whose picture is missing is left out.
+  // Loading from a folder: a border whose picture or backdrop is missing is
+  // left out.
   const auto folder = std::filesystem::temp_directory_path() / "moderngekko_game_borders_test";
   std::filesystem::remove_all(folder);
   std::filesystem::create_directories(folder);
   std::ofstream(folder / "borders.txt") << "[a]\nleft = a.png\nright = a.png\n"
-                                           "[b]\nleft = a.png\nright = missing.png\n";
+                                           "[b]\nleft = a.png\nright = missing.png\n"
+                                           "[c]\nleft = a.png\nright = a.png\n"
+                                           "fit = contain\nright_backdrop = gone.png\n";
   std::ofstream(folder / "a.png") << "png";
   const auto loaded = LoadGameBorders(folder);
   const bool loaded_ok = loaded.borders.size() == 1 && loaded.borders[0].id == "a" &&
-                         loaded.problems.size() == 1 &&
+                         loaded.problems.size() == 2 &&
                          LoadGameBorders(folder / "nothing").borders.empty();
   std::filesystem::remove_all(folder);
   if (!loaded_ok)
     return 17;
+
+  // fit and backdrops: cover unless the border says contain; a backdrop with
+  // or without a part; any other fit is a problem.
+  const auto fitted = ParseGameBorders("[sonic]\n"
+                                       "left = Sonic.png 0 0 240 1080\n"
+                                       "right = Sonic.png 240 0 480 1080\n"
+                                       "fit = Contain\n"
+                                       "left_backdrop = Sonic Backdrop.png 0 0 120 540\n"
+                                       "right_backdrop = Sonic Backdrop.png\n"
+                                       "[bad-fit]\n"
+                                       "left = a.png\n"
+                                       "right = b.png\n"
+                                       "fit = stretch\n");
+  if (fitted.borders.size() != 1 || fitted.problems.size() != 1 ||
+      fitted.borders[0].fit != BorderFit::Contain || list.borders[0].fit != BorderFit::Cover)
+    return 18;
+  const auto& fitted_left = fitted.borders[0].left;
+  const auto& fitted_right = fitted.borders[0].right;
+  if (fitted_left.backdrop != "Sonic Backdrop.png" || !fitted_left.backdrop_part ||
+      !SameRect(*fitted_left.backdrop_part, 0, 0, 120, 540) ||
+      fitted_right.backdrop != "Sonic Backdrop.png" || fitted_right.backdrop_part ||
+      !list.borders[0].left.backdrop.empty())
+    return 19;
+
+  // contain: the whole part, against the game, centred up and down.
+  // A 16:9 screen and a game of exactly 4:3: the bar itself.
+  const auto contain_exact = PlaceBorder({0, 0, 240, 1080}, strip, true, BorderFit::Contain);
+  if (!contain_exact || !SameRect(contain_exact->screen, 0, 0, 240, 1080) ||
+      !SameRect(contain_exact->picture, 0, 0, 240, 1080))
+    return 20;
+  // A game a little narrower than 4:3 leaves 250-pixel bars: the part keeps
+  // its size next to the game and the outer 10 pixels are the backdrop's.
+  const auto narrow_left = PlaceBorder({0, 0, 250, 1080}, strip, true, BorderFit::Contain);
+  const auto narrow_right = PlaceBorder({1670, 0, 1920, 1080}, strip, false, BorderFit::Contain);
+  if (!narrow_left || !SameRect(narrow_left->screen, 10, 0, 250, 1080) ||
+      !SameRect(narrow_left->picture, 0, 0, 240, 1080) || !narrow_right ||
+      !SameRect(narrow_right->screen, 1670, 0, 1910, 1080))
+    return 21;
+  // A little wider than 4:3, 230-pixel bars: smaller, with even bands above
+  // and below.
+  const auto wide_game = PlaceBorder({0, 0, 230, 1080}, strip, true, BorderFit::Contain);
+  if (!wide_game || !SameRect(wide_game->screen, 0, 22.5f, 230, 1057.5f) ||
+      !SameRect(wide_game->picture, 0, 0, 240, 1080))
+    return 22;
+  // 16:10 (140 x 1050 bars) and ultrawide (560 x 1080): never cut.
+  const auto sixteen_ten = PlaceBorder({0, 0, 140, 1050}, strip, true, BorderFit::Contain);
+  const auto ultrawide = PlaceBorder({2000, 0, 2560, 1080}, strip, false, BorderFit::Contain);
+  if (!sixteen_ten || !SameRect(sixteen_ten->screen, 0, 210, 140, 840) || !ultrawide ||
+      !SameRect(ultrawide->screen, 2000, 0, 2240, 1080) ||
+      !SameRect(ultrawide->picture, 0, 0, 240, 1080))
+    return 23;
+  // 1366x768: a third of a pixel short of the bar still fills it.
+  const auto laptop = PlaceBorder({1195, 0, 1366, 768}, strip, false, BorderFit::Contain);
+  if (!laptop || !SameRect(laptop->screen, 1195, 0, 1366, 768))
+    return 24;
   return 0;
 }

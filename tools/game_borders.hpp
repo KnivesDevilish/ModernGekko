@@ -20,9 +20,25 @@
 //
 // left and right name a PNG in the same folder and, optionally, the part of
 // it to show: x0 y0 x1 y1, in the picture's pixels (all of it without them).
-// The part fills the bar's height, and the side away from the game is cut
-// when the bar is narrower than that: a part of 2:9 (240 x 1080 beside a 4:3
-// game on a 1920 x 1080 screen) fits a 16:9 screen exactly.
+// A part of 2:9 (240 x 1080) fits the bar beside a 4:3 game on a 16:9 screen.
+//
+// A bar seldom has exactly that shape: the window may have any size, a screen
+// may not be 16:9, and the game itself is a little narrower or wider than 4:3
+// (the Wii's video signal sets its width). fit says what happens then:
+//
+//   fit = cover     the default: the part fills the bar's height and the side
+//                   away from the game is cut, or, in a bar wider than that,
+//                   it fills the width and its top and bottom are cut. Right
+//                   for a grid, where a cut doesn't show.
+//   fit = contain   the whole part shows, as large as the bar allows, next to
+//                   the game and centred up and down. Right for a picture of
+//                   characters, which must not lose a hand or a logo.
+//
+// What contain leaves of a bar shows the side's backdrop, which fills it as
+// cover does (a blurred copy of the picture, say), or stays black:
+//
+//   left_backdrop = Sonic Backdrop.png 0 0 120 540
+//   right_backdrop = Sonic Backdrop.png 120 0 240 540
 //
 // <side>_motion makes a grid in the picture slide, one cell every few
 // seconds: up, down, left or right, then the first and last rows (when it
@@ -84,6 +100,13 @@ struct BorderMotion
   double Period(double i) const { return a + b * i; }
 };
 
+// How a side's part fills a bar of another shape (see the top of this file).
+enum class BorderFit
+{
+  Cover,
+  Contain,
+};
+
 struct BorderSide
 {
   // A file in the borders' folder.
@@ -91,6 +114,10 @@ struct BorderSide
   // The part of the picture to show; all of it when there is none.
   std::optional<BorderRect> part;
   BorderMotion motion;
+  // Behind the part, filling what fit = contain leaves of the bar: a file in
+  // the borders' folder (none when empty) and the part of it to show.
+  std::string backdrop;
+  std::optional<BorderRect> backdrop_part;
 };
 
 struct GameBorder
@@ -101,6 +128,7 @@ struct GameBorder
   std::vector<std::pair<std::string, std::string>> names;
   BorderSide left;
   BorderSide right;
+  BorderFit fit = BorderFit::Cover;
 
   // The name in a launcher language ("es"), or the plain one.
   const std::string& Name(std::string_view language) const
@@ -404,6 +432,27 @@ inline GameBorderList ParseGameBorders(std::string_view text)
       ok = ParseMotion(value, &border.left.motion, &problem);
     else if (key == "right_motion")
       ok = ParseMotion(value, &border.right.motion, &problem);
+    else if (key == "left_backdrop" || key == "right_backdrop")
+    {
+      BorderSide backdrop;
+      ok = ParseSide(value, &backdrop, &problem);
+      BorderSide& side = key == "left_backdrop" ? border.left : border.right;
+      side.backdrop = std::move(backdrop.picture);
+      side.backdrop_part = backdrop.part;
+    }
+    else if (key == "fit")
+    {
+      const std::string fit = Lower(value);
+      if (fit == "cover")
+        border.fit = BorderFit::Cover;
+      else if (fit == "contain")
+        border.fit = BorderFit::Contain;
+      else
+      {
+        ok = false;
+        problem = "fit must be cover or contain";
+      }
+    }
     else
     {
       ok = false;
@@ -431,11 +480,14 @@ inline GameBorderList LoadGameBorders(const std::filesystem::path& folder)
   std::erase_if(list.borders, [&](const GameBorder& border) {
     for (const BorderSide* side : {&border.left, &border.right})
     {
-      std::error_code ec;
-      if (!std::filesystem::is_regular_file(folder / side->picture, ec))
+      for (const std::string* picture : {&side->picture, &side->backdrop})
       {
-        list.problems.push_back("[" + border.id + "] " + side->picture + " is missing");
-        return true;
+        std::error_code ec;
+        if (!picture->empty() && !std::filesystem::is_regular_file(folder / *picture, ec))
+        {
+          list.problems.push_back("[" + border.id + "] " + *picture + " is missing");
+          return true;
+        }
       }
     }
     return false;
@@ -464,10 +516,13 @@ inline const GameBorder* ChooseGameBorder(const GameBorderList& list, std::strin
 
 // Where one side of a border goes. bar: the black bar beside the game, in the
 // window's pixels; part: the part of the picture to show, in its pixels;
-// left_of_game: the bar is on the game's left. The part fills the bar's
-// height, keeping its shape; when that is wider than the bar, the side away
-// from the game is cut, and when it is narrower, the part fills the bar's
-// width instead and its top and bottom are cut evenly.
+// left_of_game: the bar is on the game's left. Either way the part keeps its
+// shape.
+//   cover: the part fills the bar's height; when that is wider than the bar,
+//     the side away from the game is cut, and when it is narrower, the part
+//     fills the bar's width instead and its top and bottom are cut evenly.
+//   contain: the whole part, as large as the bar allows, against the game's
+//     side of the bar and centred up and down.
 struct BorderPlacement
 {
   // Where it is drawn, in the window's pixels.
@@ -480,12 +535,30 @@ struct BorderPlacement
 };
 
 inline std::optional<BorderPlacement> PlaceBorder(const BorderRect& bar, const BorderRect& part,
-                                                  bool left_of_game)
+                                                  bool left_of_game,
+                                                  BorderFit fit = BorderFit::Cover)
 {
   // A bar narrower than a pixel is no bar.
   if (bar.Width() < 1.0f || bar.Height() < 1.0f || part.Empty())
     return std::nullopt;
   BorderPlacement placement{bar, part};
+  if (fit == BorderFit::Contain)
+  {
+    const float scale = std::min(bar.Width() / part.Width(), bar.Height() / part.Height());
+    float width = part.Width() * scale;
+    float height = part.Height() * scale;
+    // Up to two pixels short of the bar still fills it, a hair off the part's
+    // shape, rather than leaving a line of backdrop beside it.
+    if (bar.Width() - width <= 2.0f)
+      width = bar.Width();
+    if (bar.Height() - height <= 2.0f)
+      height = bar.Height();
+    placement.screen.x0 = left_of_game ? bar.x1 - width : bar.x0;
+    placement.screen.x1 = placement.screen.x0 + width;
+    placement.screen.y0 = bar.y0 + (bar.Height() - height) * 0.5f;
+    placement.screen.y1 = placement.screen.y0 + height;
+    return placement;
+  }
   float scale = bar.Height() / part.Height();
   // Up to two pixels short of the bar still fills it, a hair wider than its
   // shape: 1366x768 has 171-pixel bars for a 2:9 part 170.7 pixels wide.

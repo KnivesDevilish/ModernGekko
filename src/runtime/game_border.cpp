@@ -39,6 +39,9 @@ constexpr double SECONDS_PER_CELL = 2.5;
 // diagonal lines of a floor straight: a wider band moves all its rows by the
 // repeat of its middle one, and the lines would show steps.
 constexpr float BAND_PIXELS = 1.0f;
+// The shadow around a picture shown whole over its backdrop, as a share of
+// the picture's width.
+constexpr float SHADOW_SIZE = 0.08f;
 
 struct Picture
 {
@@ -184,6 +187,37 @@ void DrawSide(ImDrawList* list, const Side& side, const BorderPlacement& placeme
     }
   }
 }
+
+// A soft shadow on the backdrop around a picture shown whole, on the sides
+// where the backdrop shows, so the picture doesn't end in a hard line.
+void DrawShadow(ImDrawList* list, const BorderRect& bar, const BorderRect& shown)
+{
+  const float size = SHADOW_SIZE * shown.Width();
+  const ImU32 dark = IM_COL32(0, 0, 0, 170);
+  const ImU32 clear = IM_COL32(0, 0, 0, 0);
+  if (shown.x0 > bar.x0 + 0.5f)
+  {
+    list->AddRectFilledMultiColor(ImVec2(std::max(bar.x0, shown.x0 - size), shown.y0),
+                                  ImVec2(shown.x0, shown.y1), clear, dark, dark, clear);
+  }
+  if (shown.x1 < bar.x1 - 0.5f)
+  {
+    list->AddRectFilledMultiColor(ImVec2(shown.x1, shown.y0),
+                                  ImVec2(std::min(bar.x1, shown.x1 + size), shown.y1), dark,
+                                  clear, clear, dark);
+  }
+  if (shown.y0 > bar.y0 + 0.5f)
+  {
+    list->AddRectFilledMultiColor(ImVec2(shown.x0, std::max(bar.y0, shown.y0 - size)),
+                                  ImVec2(shown.x1, shown.y0), clear, clear, dark, dark);
+  }
+  if (shown.y1 < bar.y1 - 0.5f)
+  {
+    list->AddRectFilledMultiColor(ImVec2(shown.x0, shown.y1),
+                                  ImVec2(shown.x1, std::min(bar.y1, shown.y1 + size)), dark,
+                                  dark, clear, clear);
+  }
+}
 }  // namespace
 
 struct GameBorderOverlay::Impl
@@ -192,6 +226,11 @@ struct GameBorderOverlay::Impl
   std::map<std::string, Picture> pictures;
   Side left;
   Side right;
+  // What shows behind each side where fit = contain leaves part of the bar;
+  // without a picture the bar stays black there.
+  Side left_backdrop;
+  Side right_backdrop;
+  frontend::BorderFit fit = frontend::BorderFit::Cover;
   std::chrono::steady_clock::time_point start = std::chrono::steady_clock::now();
   int last_frame = -1;
 };
@@ -211,12 +250,12 @@ std::unique_ptr<GameBorderOverlay> GameBorderOverlay::Create(const std::filesyst
   }
 
   auto impl = std::make_unique<Impl>();
-  const auto make_side = [&](const frontend::BorderSide& from, Side* side) {
-    auto [entry, added] = impl->pictures.try_emplace(from.picture);
-    if (added && !ReadPicture(folder / from.picture, &entry->second))
+  const auto make_side = [&](const std::string& name, const std::optional<BorderRect>& part,
+                             const BorderMotion& motion, Side* side) {
+    auto [entry, added] = impl->pictures.try_emplace(name);
+    if (added && !ReadPicture(folder / name, &entry->second))
     {
-      std::fprintf(stderr, "4:3 border: can't read %s\n",
-                   (folder / from.picture).string().c_str());
+      std::fprintf(stderr, "4:3 border: can't read %s\n", (folder / name).string().c_str());
       return false;
     }
     if (entry->second.pixels.empty())
@@ -224,20 +263,28 @@ std::unique_ptr<GameBorderOverlay> GameBorderOverlay::Create(const std::filesyst
     side->picture = &entry->second;
     const float width = static_cast<float>(entry->second.width);
     const float height = static_cast<float>(entry->second.height);
-    side->part = from.part.value_or(BorderRect{0.0f, 0.0f, width, height});
+    side->part = part.value_or(BorderRect{0.0f, 0.0f, width, height});
     side->part.x1 = std::min(side->part.x1, width);
     side->part.y1 = std::min(side->part.y1, height);
     if (side->part.Empty())
     {
-      std::fprintf(stderr, "4:3 border: the part of %s is outside the picture\n",
-                   from.picture.c_str());
+      std::fprintf(stderr, "4:3 border: the part of %s is outside the picture\n", name.c_str());
       return false;
     }
-    side->motion = from.motion;
+    side->motion = motion;
     return true;
   };
-  if (!make_side(border->left, &impl->left) || !make_side(border->right, &impl->right))
+  const auto make_backdrop = [&](const frontend::BorderSide& from, Side* side) {
+    return from.backdrop.empty() ||
+           make_side(from.backdrop, from.backdrop_part, BorderMotion{}, side);
+  };
+  if (!make_side(border->left.picture, border->left.part, border->left.motion, &impl->left) ||
+      !make_side(border->right.picture, border->right.part, border->right.motion,
+                 &impl->right) ||
+      !make_backdrop(border->left, &impl->left_backdrop) ||
+      !make_backdrop(border->right, &impl->right_backdrop))
     return nullptr;
+  impl->fit = border->fit;
   std::fprintf(stderr, "4:3 border: %s\n", id.c_str());
   return std::unique_ptr<GameBorderOverlay>(new GameBorderOverlay(std::move(impl)));
 }
@@ -270,13 +317,45 @@ void GameBorderOverlay::AddToFrame()
   const auto& game = g_presenter->GetTargetRectangle();
   const float width = static_cast<float>(g_presenter->GetBackbufferWidth());
   const float height = static_cast<float>(g_presenter->GetBackbufferHeight());
-  const std::optional<BorderPlacement> left = frontend::PlaceBorder(
-      BorderRect{0.0f, 0.0f, static_cast<float>(game.left), height}, m_impl->left.part, true);
-  const std::optional<BorderPlacement> right = frontend::PlaceBorder(
-      BorderRect{static_cast<float>(game.right), 0.0f, width, height}, m_impl->right.part, false);
-  const bool draw_left = left && HasTexture(*m_impl->left.picture);
-  const bool draw_right = right && HasTexture(*m_impl->right.picture);
-  if (!draw_left && !draw_right)
+  const BorderRect bars[2] = {{0.0f, 0.0f, static_cast<float>(game.left), height},
+                              {static_cast<float>(game.right), 0.0f, width, height}};
+  const Side* sides[2] = {&m_impl->left, &m_impl->right};
+  const Side* backdrops[2] = {&m_impl->left_backdrop, &m_impl->right_backdrop};
+
+  // What each bar shows: its side, placed by the border's fit, and, where the
+  // side leaves part of the bar, the backdrop behind it with a shadow.
+  struct Drawing
+  {
+    BorderRect bar;
+    const Side* side;
+    BorderPlacement placement;
+    const Side* backdrop = nullptr;
+    BorderPlacement behind{};
+  };
+  std::vector<Drawing> drawings;
+  for (int i = 0; i < 2; ++i)
+  {
+    const bool left_of_game = i == 0;
+    const std::optional<BorderPlacement> placement =
+        frontend::PlaceBorder(bars[i], sides[i]->part, left_of_game, m_impl->fit);
+    if (!placement || !HasTexture(*sides[i]->picture))
+      continue;
+    Drawing drawing{bars[i], sides[i], *placement};
+    const BorderRect& shown = placement->screen;
+    const BorderRect& bar = bars[i];
+    const bool leaves_room = shown.x0 > bar.x0 + 0.5f || shown.x1 < bar.x1 - 0.5f ||
+                             shown.y0 > bar.y0 + 0.5f || shown.y1 < bar.y1 - 0.5f;
+    if (leaves_room && backdrops[i]->picture && HasTexture(*backdrops[i]->picture))
+    {
+      if (const auto behind = frontend::PlaceBorder(bar, backdrops[i]->part, left_of_game))
+      {
+        drawing.backdrop = backdrops[i];
+        drawing.behind = *behind;
+      }
+    }
+    drawings.push_back(drawing);
+  }
+  if (drawings.empty())
     return;
 
   const double cells =
@@ -285,10 +364,15 @@ void GameBorderOverlay::AddToFrame()
   const float progress = static_cast<float>(cells - std::floor(cells));
   ImDrawList* list = ImGui::GetBackgroundDrawList();
   list->AddCallback(UseLinearSampling, nullptr);
-  if (draw_left)
-    DrawSide(list, m_impl->left, *left, progress);
-  if (draw_right)
-    DrawSide(list, m_impl->right, *right, progress);
+  for (const Drawing& drawing : drawings)
+  {
+    if (drawing.backdrop)
+    {
+      DrawSide(list, *drawing.backdrop, drawing.behind, progress);
+      DrawShadow(list, drawing.bar, drawing.placement.screen);
+    }
+    DrawSide(list, *drawing.side, drawing.placement, progress);
+  }
   list->AddCallback(UsePointSampling, nullptr);
 }
 }  // namespace moderngekko::detail
