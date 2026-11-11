@@ -32,6 +32,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <iostream>
 #include <mutex>
 #include <optional>
 #include <stop_token>
@@ -238,6 +239,8 @@ struct GameMenu::Impl
   // to tell which of the two was used last.
   std::vector<ControllerEmu::Control*> pad_controls;
   std::vector<ControllerEmu::Control*> key_controls;
+  // The profile's Device, for the log (LogDevices).
+  std::string profile_device;
   bool pad_was_held = false;
   bool keys_were_held = false;
   Common::EventHook devices_hook;
@@ -297,10 +300,33 @@ struct GameMenu::Impl
       uses_fallback = true;
     }
     LoadHints(*section, device, uses_fallback);
+    profile_device = device;
     controller.UpdateReferences(g_controller_interface);
     // A pad plugged in or out later is found again, as for the game.
-    devices_hook = g_controller_interface.RegisterDevicesChangedCallback(
-        [this] { controller.UpdateReferences(g_controller_interface); });
+    devices_hook = g_controller_interface.RegisterDevicesChangedCallback([this] {
+      controller.UpdateReferences(g_controller_interface);
+      LogDevices();
+    });
+    LogDevices();
+  }
+
+  // For a report, in the log: the controllers the game sees now, and whether
+  // the profile's is one of them (the game reads no other).
+  void LogDevices() const
+  {
+    const std::vector<std::string> devices = g_controller_interface.GetAllDeviceStrings();
+    std::string line = "input devices:";
+    for (std::size_t i = 0; i < devices.size(); ++i)
+      line += (i == 0 ? " " : ", ") + devices[i];
+    if (devices.empty())
+      line += " none";
+    if (!profile_device.empty())
+    {
+      line += "\ninput: the profile's device " + profile_device +
+              (std::ranges::contains(devices, profile_device) ? " is connected" :
+                                                                 " is not connected");
+    }
+    std::cout << line << std::endl;
   }
 
   // The hints' buttons: the first pad input and the first key that accept

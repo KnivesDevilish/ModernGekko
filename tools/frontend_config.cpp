@@ -60,6 +60,20 @@ std::string NormalizeGraphicsBackend(std::string value) {
     return "Vulkan";
   if (lower == "opengl" || lower == "ogl")
     return "OGL";
+  // Direct3D, on Windows only; the runtime names them D3D and D3D12. A
+  // config.ini brought from Windows plays with Vulkan elsewhere.
+  const bool d3d11 =
+      lower == "d3d" || lower == "d3d11" || lower == "direct3d 11" || lower == "direct3d11";
+  const bool d3d12 = lower == "d3d12" || lower == "direct3d 12" || lower == "direct3d12";
+#if defined(_WIN32)
+  if (d3d11)
+    return "D3D";
+  if (d3d12)
+    return "D3D12";
+#else
+  if (d3d11 || d3d12)
+    return "Vulkan";
+#endif
   return {};
 }
 
@@ -80,6 +94,8 @@ std::string NormalizeAspectRatio(std::string value) {
     return "4:3";
   if (lower == "stretch" || lower == "stretched")
     return "stretch";
+  if (lower == "ultrawide")
+    return "ultrawide";
   return {};
 }
 
@@ -198,6 +214,12 @@ const std::vector<GraphicsBackendOption> &SupportedGraphicsBackends() {
   static const std::vector<GraphicsBackendOption> backends = {
       {"Vulkan", "Vulkan"},
       {"OpenGL", "OGL"},
+#if defined(_WIN32)
+      // For a graphics card or driver without Vulkan, as many older ones on
+      // Windows.
+      {"Direct3D 11", "D3D"},
+      {"Direct3D 12", "D3D12"},
+#endif
   };
   return backends;
 }
@@ -329,6 +351,10 @@ const std::vector<AspectRatioOption> &SupportedAspectRatios() {
        MODERNGEKKO_UI_TEXT("The widescreen picture stretched to fill the "
                            "window, whatever its shape. On a 16:9 screen it "
                            "looks the same as 16:9.")},
+      {MODERNGEKKO_UI_TEXT("Ultrawide (experimental)"), "ultrawide",
+       MODERNGEKKO_UI_TEXT("For 21:9 and wider screens: the race is shown wider "
+                           "instead of stretched. Menus and the HUD may still "
+                           "look stretched.")},
   };
   return ratios;
 }
@@ -366,7 +392,11 @@ ConfigResult LoadConfig(const fs::path &user_directory,
     else if (key == "backend" || key == "graphics_backend") {
       config.graphics_backend = NormalizeGraphicsBackend(raw_value);
       if (config.graphics_backend.empty())
+#if defined(_WIN32)
+        return {.error = "graphics backend must be Vulkan, OpenGL, Direct3D 11 or Direct3D 12"};
+#else
         return {.error = "graphics backend must be Vulkan or OpenGL"};
+#endif
     }
     else if (key == "cpu_core") {
       config.cpu_core = NormalizeCpuCore(raw_value);
@@ -390,7 +420,7 @@ ConfigResult LoadConfig(const fs::path &user_directory,
     } else if (key == "aspect_ratio") {
       config.aspect_ratio = NormalizeAspectRatio(raw_value);
       if (config.aspect_ratio.empty())
-        return {.error = "aspect_ratio must be 16:9, 4:3 or stretch"};
+        return {.error = "aspect_ratio must be 16:9, 4:3, stretch or ultrawide"};
     } else if (key == "border") {
       // Any id is kept: a border the build doesn't have just shows none.
       config.game_border = NormalizeBorderSetting(raw_value);
@@ -557,7 +587,7 @@ bool SaveConfig(const fs::path &user_directory, const ConfigResult &config,
   const std::string aspect_ratio = NormalizeAspectRatio(config.aspect_ratio);
   if (aspect_ratio.empty()) {
     if (error)
-      *error = "aspect_ratio must be 16:9, 4:3 or stretch";
+      *error = "aspect_ratio must be 16:9, 4:3, stretch or ultrawide";
     return false;
   }
   const std::string game_border = NormalizeBorderSetting(config.game_border);
@@ -923,18 +953,21 @@ bool EnsureControllerConfig(const fs::path &user_directory,
 GameMenuKeys GameMenuProfileKeys() {
   GameMenuKeys keys;
 #ifdef MODERNGEKKO_GAMECUBE_CONTROLLERS
-  // Extra/Menu is Guide, and M on the keyboard; A accepts, B goes back, and
-  // the D-pad or the control stick moves (the arrows on the keyboard).
+  // Extra/Menu is Guide, and M on the keyboard; Extra/Select (Back: Select,
+  // Share, View, − or the Steam Deck's ⧉; Backspace on the keyboard) opens it
+  // too, as Guide is often taken before the game sees it (Steam, the Xbox Game
+  // Bar, the Steam Deck). A accepts, B goes back, and the D-pad or the
+  // control stick moves (the arrows on the keyboard).
   keys.profile_file = "GCPadNew.ini";
   keys.profile_section = "GCPad1";
-  keys.open = {"Extra/Menu"};
+  keys.open = {"Extra/Menu", "Extra/Select"};
   keys.accept = {"Buttons/A"};
   keys.back = {"Buttons/B"};
   keys.up = {"D-Pad/Up", "Main Stick/Up"};
   keys.down = {"D-Pad/Down", "Main Stick/Down"};
   keys.left = {"D-Pad/Left", "Main Stick/Left"};
   keys.right = {"D-Pad/Right", "Main Stick/Right"};
-  keys.open_fallback = "Guide | `" + std::string(KEYBOARD_DEVICE) + ":M`";
+  keys.open_fallback = "Guide | Back | `" + std::string(KEYBOARD_DEVICE) + ":M`";
 #else
   // HOME is Guide. The sideways Wii Remote's 2 and 1 sit where a pad's south
   // and west buttons are, and its D-pad also follows the left stick.
@@ -971,7 +1004,7 @@ GameMenuControlsLegend GameMenuControls() {
        {"Main Stick/Up", "Main Stick/Down", "Main Stick/Left",
         "Main Stick/Right", "D-Pad/Up", "D-Pad/Down", "D-Pad/Left",
         "D-Pad/Right"}},
-      {MODERNGEKKO_UI_TEXT("Menu"), {"Extra/Menu"}},
+      {MODERNGEKKO_UI_TEXT("Menu"), {"Extra/Menu", "Extra/Select"}},
   };
 #else
   legend.title = "Wii Remote";

@@ -56,6 +56,10 @@ option(MODERNGEKKO_GAMECUBE_CONTROLLERS
 # runner's --load-state and the automation's savestates stay, for testing.
 option(MODERNGEKKO_SAVESTATES
        "Savestate keys in the game window and the launcher's savestate choice" ON)
+# OFF takes the File and View menu bar off the Windows game window
+# (src/platform/PlatformWin32.cpp); its keys (F10, F11, Alt+Enter) stay.
+option(MODERNGEKKO_WINDOW_MENU
+       "File and View menu bar on the Windows game window" ON)
 set(MODERNGEKKO_LOG_FILENAME "ModernGekko.log" CACHE STRING
     "Runner log filename")
 set(MODERNGEKKO_DISC_PREPARER_OUTPUT_NAME "" CACHE STRING
@@ -76,6 +80,10 @@ set(MODERNGEKKO_LAUNCHER_MODS_ART "" CACHE FILEPATH
     "Optional PNG shown in the EXPANSIONS panel of the launcher's Mods & expansions page")
 set(MODERNGEKKO_LOBBY_ART "" CACHE FILEPATH
     "Optional portrait PNG shown on the left of the Netplay lobby")
+set(MODERNGEKKO_APP_ICON "" CACHE FILEPATH
+    "Optional square PNG: the icon of the launcher's, the lobby's and the game's windows")
+set(MODERNGEKKO_APP_ICON_ICO "" CACHE FILEPATH
+    "Optional .ico built into the Windows executables (their icon in Explorer and the taskbar)")
 set(MODERNGEKKO_LAUNCHER_BACKGROUND "" CACHE FILEPATH
     "Optional picture behind the launcher's pages")
 set(MODERNGEKKO_LAUNCHER_MUSIC "" CACHE FILEPATH
@@ -368,7 +376,8 @@ if(MODERNGEKKO_ENABLE_DOLPHIN_RUNTIME)
     # The game windows of Windows, X11 and Wayland are this fork's copies
     # (src/platform/), which keep the savestate keys only with this ON.
     target_compile_definitions(moderngekko PRIVATE
-        MODERNGEKKO_SAVESTATES=$<BOOL:${MODERNGEKKO_SAVESTATES}>)
+        MODERNGEKKO_SAVESTATES=$<BOOL:${MODERNGEKKO_SAVESTATES}>
+        MODERNGEKKO_WINDOW_MENU=$<BOOL:${MODERNGEKKO_WINDOW_MENU}>)
     if(APPLE AND NOT MODERNGEKKO_SAVESTATES)
         message(WARNING "MODERNGEKKO_SAVESTATES is OFF, but the macOS game window "
                         "(vendor/dolphin's PlatformMacos.mm) keeps its savestate menu")
@@ -670,6 +679,9 @@ if(MODERNGEKKO_ENABLE_DOLPHIN_RUNTIME)
     # The Netplay lobby (run by moderngekko-run) draws Resources/lobby-art.png
     # next to itself on its left; without it the lobby is text only.
     moderngekko_add_resource(moderngekko-run "${MODERNGEKKO_LOBBY_ART}" lobby-art.png)
+    # Resources/app-icon.png: the icon of the lobby's and the game's windows
+    # (the launcher copies it too).
+    moderngekko_add_resource(moderngekko-run "${MODERNGEKKO_APP_ICON}" app-icon.png)
     # Resources/lobby-background.png fills the lobby behind its panels; a
     # grid floor in it slides as in the launcher (tools/moving_background.hpp).
     moderngekko_add_resource(moderngekko-run "${MODERNGEKKO_LOBBY_BACKGROUND}"
@@ -798,6 +810,8 @@ if(MODERNGEKKO_ENABLE_DOLPHIN_RUNTIME)
     # EXPANSIONS panel. Without it the panel is text only.
     moderngekko_add_resource(moderngekko-launcher "${MODERNGEKKO_LAUNCHER_MODS_ART}"
                              launcher-mods.png)
+    # Resources/app-icon.png: the launcher window's icon.
+    moderngekko_add_resource(moderngekko-launcher "${MODERNGEKKO_APP_ICON}" app-icon.png)
     # Resources/launcher-background.png fills the window behind the pages (a
     # grid floor in it slides, see tools/moving_background.hpp), and
     # Resources/launcher-music.mp3 loops while the launcher is open.
@@ -901,6 +915,21 @@ if(WIN32)
             endif()
         endif()
     endforeach()
+    # The program's icon, built into both executables as icon 101: Explorer
+    # and the taskbar show it, and the game's window takes it
+    # (src/platform/PlatformWin32.cpp, IDI_ICON1).
+    if(MODERNGEKKO_APP_ICON_ICO)
+        enable_language(RC)
+        file(TO_NATIVE_PATH "${MODERNGEKKO_APP_ICON_ICO}" _moderngekko_icon_path)
+        string(REPLACE "\\" "\\\\" _moderngekko_icon_path "${_moderngekko_icon_path}")
+        set(_moderngekko_icon_rc "${CMAKE_CURRENT_BINARY_DIR}/moderngekko_app_icon.rc")
+        file(WRITE "${_moderngekko_icon_rc}" "101 ICON \"${_moderngekko_icon_path}\"\n")
+        foreach(_moderngekko_window_program moderngekko-launcher moderngekko-run)
+            if(TARGET ${_moderngekko_window_program})
+                target_sources(${_moderngekko_window_program} PRIVATE "${_moderngekko_icon_rc}")
+            endif()
+        endforeach()
+    endif()
 endif()
 
 if(BUILD_TESTING)

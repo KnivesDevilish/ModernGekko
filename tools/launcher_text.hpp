@@ -150,6 +150,12 @@ inline constexpr Translation SPANISH_TEXTS[] = {
     {"Aspect ratio", "Relación de aspecto"},
     {"16:9 (Widescreen)", "16:9 (Panorámica)"},
     {"Stretch", "Estirada"},
+    {"Ultrawide", "Ultrapanorámica"},
+    {"Ultrawide (experimental)", "Ultrapanorámica (experimental)"},
+    {"For 21:9 and wider screens: the race is shown wider instead of stretched. Menus and the "
+     "HUD may still look stretched.",
+     "Para pantallas 21:9 y más anchas: la carrera se ve más ancha en vez de estirada. Los menús "
+     "y el HUD pueden seguir viéndose estirados."},
     {"The game draws in widescreen. Best for most monitors and TVs.",
      "El juego se dibuja en panorámico. Lo mejor para la mayoría de monitores y televisores."},
     {"The original 4:3 picture, with bars on the sides of a wide window.",
@@ -361,6 +367,12 @@ inline constexpr Translation SPANISH_TEXTS[] = {
     {"Could not create the netplay session. Check the UDP port and firewall settings.",
      "No se pudo crear la sesión de Netplay. Revisa el puerto UDP y el firewall."},
     {"The game process exited with code %d.", "El proceso del juego terminó con el código %d."},
+    {"The graphics backend (%s) could not start: your graphics card or its driver may not "
+     "support it. Choose another one in Settings, under GRAPHICS, and press PLAY again.",
+     "No se pudo iniciar el motor gráfico (%s): puede que tu tarjeta gráfica o su driver no lo "
+     "soporten. Elige otro en Ajustes, en GRÁFICOS, y pulsa JUGAR otra vez."},
+    {"On Windows, Direct3D 11 works on almost every PC.",
+     "En Windows, Direct3D 11 funciona en casi cualquier PC."},
     {"\n\nDetails were written to:\n%s", "\n\nLos detalles se guardaron en:\n%s"},
     {"Session failed", "La sesión falló"},
 
@@ -643,6 +655,12 @@ inline constexpr Translation JAPANESE_TEXTS[] = {
     {"Aspect ratio", "アスペクト比"},
     {"16:9 (Widescreen)", "16:9（ワイド）"},
     {"Stretch", "引き伸ばし"},
+    {"Ultrawide", "ウルトラワイド"},
+    {"Ultrawide (experimental)", "ウルトラワイド（試験的）"},
+    {"For 21:9 and wider screens: the race is shown wider instead of stretched. Menus and the "
+     "HUD may still look stretched.",
+     "21:9以上の画面向け：レースを引き伸ばさずに広く表示します。メニューやHUDは引き伸ばされて"
+     "見えることがあります。"},
     {"The game draws in widescreen. Best for most monitors and TVs.",
      "ゲームをワイド画面で描画します。ほとんどのモニターやテレビに最適です。"},
     {"The original 4:3 picture, with bars on the sides of a wide window.",
@@ -838,6 +856,13 @@ inline constexpr Translation JAPANESE_TEXTS[] = {
      "ネットプレイのセッションを作成できませんでした。UDPポートとファイアウォールの"
      "設定を確認してください。"},
     {"The game process exited with code %d.", "ゲームのプロセスがコード %d で終了しました。"},
+    {"The graphics backend (%s) could not start: your graphics card or its driver may not "
+     "support it. Choose another one in Settings, under GRAPHICS, and press PLAY again.",
+     "グラフィックバックエンド（%s）を開始できませんでした。お使いのグラフィックカードまたはドライバーが"
+     "対応していない可能性があります。設定の「グラフィック」で別のものを選び、もう一度「プレイ」を押して"
+     "ください。"},
+    {"On Windows, Direct3D 11 works on almost every PC.",
+     "Windowsでは、Direct3D 11はほとんどのPCで動作します。"},
     {"\n\nDetails were written to:\n%s", "\n\n詳細の保存先：\n%s"},
     {"Session failed", "セッションに失敗しました"},
     // Netplay lobby, top to bottom

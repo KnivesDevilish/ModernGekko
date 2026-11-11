@@ -562,9 +562,11 @@ void ApplyAspectRatio(AspectRatio aspect_ratio) {
   // host's, and Auto keeps every player's picture in the right shape.
   Config::SetBase(Config::SYSCONF_WIDESCREEN,
                   aspect_ratio != AspectRatio::Standard);
-  Config::SetBase(Config::GFX_ASPECT_RATIO, aspect_ratio == AspectRatio::Stretch
-                                                ? AspectMode::Stretch
-                                                : AspectMode::Auto);
+  const bool fill = aspect_ratio == AspectRatio::Stretch || aspect_ratio == AspectRatio::Ultrawide;
+  Config::SetBase(Config::GFX_ASPECT_RATIO, fill ? AspectMode::Stretch : AspectMode::Auto);
+  // Ultrawide: the 3D view takes the window's width (Dolphin's widescreen
+  // hack, which only changes what is drawn, so Netplay is unaffected).
+  Config::SetBase(Config::GFX_WIDESCREEN_HACK, aspect_ratio == AspectRatio::Ultrawide);
 }
 
 PowerPC::CPUCore SelectedCPUCore() { return SelectCPUCore(); }

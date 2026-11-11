@@ -838,7 +838,7 @@ struct PlaySummary
   // GameCube mode: the first controller also answers to the keyboard, so the
   // game is playable while the pad is unplugged.
   bool keys_without_pad = false;
-  std::string_view aspect_ratio;  // "16:9", "4:3" or "stretch"
+  std::string_view aspect_ratio;  // "16:9", "4:3", "stretch" or "ultrawide"
   bool fullscreen = false;
   int installed_mods = 0;
   std::string mods_folder;
@@ -869,9 +869,10 @@ std::array<SummaryTile, 4> BuildPlaySummaryTiles(const PlaySummary& summary)
     controls.warning = true;
   }
 
-  const std::string aspect = summary.aspect_ratio == "stretch" ? Tr("Stretch")
-                             : summary.aspect_ratio.empty()   ? std::string("16:9")
-                                                              : std::string(summary.aspect_ratio);
+  const std::string aspect = summary.aspect_ratio == "stretch"     ? Tr("Stretch")
+                             : summary.aspect_ratio == "ultrawide" ? Tr("Ultrawide")
+                             : summary.aspect_ratio.empty()       ? std::string("16:9")
+                                                                  : std::string(summary.aspect_ratio);
   tiles[2] = {"##summary_display", Tr("DISPLAY"),
               summary.fullscreen ? Format(Tr("%s \xC2\xB7 Fullscreen"), aspect.c_str())
                                  : Format(Tr("%s \xC2\xB7 Window"), aspect.c_str()),
@@ -2546,6 +2547,7 @@ int main(int argc, char** argv)
     SDL_Quit();
     return 1;
   }
+  SetWindowIcon(window, release_directory);
   SDL_Renderer* renderer = SDL_CreateRenderer(window, "vulkan");
   if (!renderer)
     renderer = SDL_CreateRenderer(window, nullptr);
@@ -3144,6 +3146,18 @@ int main(int argc, char** argv)
           {
             launch_error = Tr("Could not create the netplay session. Check the UDP port "
                               "and firewall settings.");
+          }
+          else if (exit_code == moderngekko::frontend::RUNNER_EXIT_GRAPHICS)
+          {
+            // The graphics backend couldn't start: another one may.
+            launch_error = Format(Tr("The graphics backend (%s) could not start: your graphics "
+                                     "card or its driver may not support it. Choose another one "
+                                     "in Settings, under GRAPHICS, and press PLAY again."),
+                                  graphics_backends[graphics_backend_index].text);
+#if defined(_WIN32)
+            launch_error += "\n\n";
+            launch_error += Tr("On Windows, Direct3D 11 works on almost every PC.");
+#endif
           }
           else
           {

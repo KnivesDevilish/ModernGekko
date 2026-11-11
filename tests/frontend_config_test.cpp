@@ -268,6 +268,11 @@ int main() {
     aspect_config.aspect_ratio = "21:9";
     if (moderngekko::frontend::SaveConfig(aspect, aspect_config, &error))
       return 21;
+    // The experimental ultrawide picture, by its name.
+    aspect_config.aspect_ratio = "Ultrawide";
+    if (!moderngekko::frontend::SaveConfig(aspect, aspect_config, &error) ||
+        moderngekko::frontend::LoadConfig(aspect, false).aspect_ratio != "ultrawide")
+      return 109;
     {
       std::ofstream file(aspect / "config.ini", std::ios::trunc);
       file << "[Video]\nresolution=1920x1080\naspect_ratio = Stretch\n";

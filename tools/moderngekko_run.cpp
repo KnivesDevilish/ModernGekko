@@ -10,10 +10,14 @@
 #include "runner_exit_code.hpp"
 #include "ui_text.hpp"
 
+#include "Common/MsgHandler.h"
 #include "Common/StringUtil.h"
 
 #include <SDL3/SDL.h>
 
+#include <algorithm>
+#include <atomic>
+#include <cctype>
 #include <charconv>
 #include <chrono>
 #include <csignal>
@@ -49,6 +53,49 @@ namespace {
 volatile std::sig_atomic_t s_stop_requested = 0;
 
 void HandleStopSignal(int) { s_stop_requested = 1; }
+
+// Set when the runtime's graphics backend couldn't start ("Failed to
+// initialize video backend!", only when the game starts): the runner then
+// exits with RUNNER_EXIT_GRAPHICS.
+std::atomic<bool> s_graphics_failed = false;
+
+// The runtime's alerts ("panic alerts"): each is written to the log. Those
+// about the graphics backend (Vulkan, Direct3D, OpenGL) aren't shown, as the
+// launcher explains a backend that can't start in the player's language; on
+// Windows the others are still shown in a message box, as before. Questions
+// are answered no, as on Linux.
+bool HandleAlert(const char *caption, const char *text, bool yes_no,
+                 Common::MsgType style) {
+  const std::string message = text ? text : "";
+  std::cout << "alert: " << (caption ? caption : "") << ": " << message
+            << std::endl;
+  std::string lower = message;
+  std::ranges::transform(lower, lower.begin(), [](unsigned char c) {
+    return static_cast<char>(std::tolower(c));
+  });
+  if (lower.find("video backend") != std::string::npos)
+    s_graphics_failed = true;
+  constexpr std::string_view graphics[] = {"video backend", "vulkan",
+                                           "direct3d", "d3d", "opengl"};
+  if (std::ranges::any_of(graphics, [&](std::string_view word) {
+        return lower.find(word) != std::string::npos;
+      }))
+    return false;
+#if defined(_WIN32)
+  UINT icon = MB_ICONINFORMATION;
+  if (style == Common::MsgType::Question)
+    icon = MB_ICONQUESTION;
+  else if (style == Common::MsgType::Warning)
+    icon = MB_ICONWARNING;
+  return MessageBoxW(nullptr, UTF8ToWString(message).c_str(),
+                     UTF8ToWString(caption ? caption : "").c_str(),
+                     icon | (yes_no ? MB_YESNO : MB_OK)) == IDYES;
+#else
+  (void)yes_no;
+  (void)style;
+  return false;
+#endif
+}
 
 // The system's first preferred language, such as "es" (as in the launcher).
 std::string SystemLanguageCode() {
@@ -268,6 +315,7 @@ std::filesystem::path ExecutableDirectory(const char *argv0) {
 } // namespace
 
 int RunMain(int argc, char **argv) {
+  Common::RegisterMsgAlertHandler(HandleAlert);
 #if defined(_WIN32)
   if (!std::getenv("SDL_GAMECONTROLLER_ALLOW_STEAM_VIRTUAL_GAMEPAD"))
     _putenv_s("SDL_GAMECONTROLLER_ALLOW_STEAM_VIRTUAL_GAMEPAD", "1");
@@ -417,10 +465,27 @@ int RunMain(int argc, char **argv) {
     config.window_height = window.height;
   }
   config.show_fps_in_title = frontend_config.show_fps_in_title;
+#if defined(__linux__)
+  // Inside gamescope (the Steam Deck's Game Mode, Steam's Big Picture
+  // sessions) the game's window may never be told it has the focus, and
+  // without it the game reads no controller. gamescope shows one window at a
+  // time, so there the controllers count with or without the focus.
+  {
+    const char *gamescope = std::getenv("GAMESCOPE_WAYLAND_DISPLAY");
+    const char *desktop = std::getenv("XDG_CURRENT_DESKTOP");
+    if ((gamescope && *gamescope) ||
+        (desktop && std::string_view(desktop).find("gamescope") != std::string_view::npos)) {
+      config.input.background_input = true;
+      std::cout << "input: inside gamescope, controllers are read with or without the focus\n";
+    }
+  }
+#endif
   if (frontend_config.aspect_ratio == "4:3")
     config.graphics.aspect_ratio = moderngekko::AspectRatio::Standard;
   else if (frontend_config.aspect_ratio == "stretch")
     config.graphics.aspect_ratio = moderngekko::AspectRatio::Stretch;
+  else if (frontend_config.aspect_ratio == "ultrawide")
+    config.graphics.aspect_ratio = moderngekko::AspectRatio::Ultrawide;
   else
     config.graphics.aspect_ratio = moderngekko::AspectRatio::Widescreen;
 
@@ -712,7 +777,7 @@ int RunMain(int argc, char **argv) {
   auto created = moderngekko::Runtime::Create(std::move(config));
   if (!created) {
     std::cerr << "initialization failed: " << created.error->message << '\n';
-    return 1;
+    return s_graphics_failed ? moderngekko::frontend::RUNNER_EXIT_GRAPHICS : 1;
   }
   std::cout << "audio backend: " << created.runtime->GetConfig().audio.backend
             << '\n';
@@ -731,6 +796,11 @@ int RunMain(int argc, char **argv) {
   });
   const moderngekko::RuntimeRunResult result = created.runtime->Run();
   signal_watcher.request_stop();
+  if (s_graphics_failed) {
+    std::cerr << "graphics backend: " << created.runtime->GetConfig().graphics.backend
+              << " could not start\n";
+    return moderngekko::frontend::RUNNER_EXIT_GRAPHICS;
+  }
   if (result.error) {
     std::cerr << "runtime failed: " << result.error->message << '\n';
     return 1;

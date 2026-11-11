@@ -38,6 +38,9 @@ enum class AspectRatio
   Widescreen, // the game draws 16:9
   Standard,   // the game draws 4:3, with bars on a wide window
   Stretch,    // the game draws 16:9 stretched to fill the window
+  // Experimental: the game's 3D view widened to the window's shape (21:9 on
+  // an ultrawide screen) instead of stretched; its 2D parts still stretch.
+  Ultrawide,
 };
 
 struct GraphicsSettings

@@ -418,6 +418,7 @@ public:
                                 SDL_WINDOW_HIGH_PIXEL_DENSITY);
     if (!m_window)
       return false;
+    ui::SetWindowIcon(m_window, ExecutableDirectory());
     m_renderer = SDL_CreateRenderer(m_window, "vulkan");
     if (!m_renderer)
       m_renderer = SDL_CreateRenderer(m_window, nullptr);

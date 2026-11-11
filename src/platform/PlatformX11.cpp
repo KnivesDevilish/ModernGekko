@@ -8,7 +8,8 @@
 // screenshot, at the resolution chosen for screenshots
 // (src/runtime/screenshot_keys.hpp), and F10 (pause) waits while one is taken;
 // the window opens at the size chosen in the launcher, or one that fits the
-// primary monitor, in its middle (src/runtime/window_size.hpp). Alt+Enter
+// primary monitor, in its middle (src/runtime/window_size.hpp), with the
+// program's icon (Resources/app-icon.png, MODERNGEKKO_APP_ICON). Alt+Enter
 // (fullscreen) and Ctrl+Esc (quit) stay.
 
 // Without the CMake option (CMakeLists.txt always passes it), the window keeps
@@ -27,6 +28,9 @@ static constexpr auto X_None = None;
 
 #include "DolphinNoGUI/Platform.h"
 
+#include "Common/CommonTypes.h"
+#include "Common/FileUtil.h"
+#include "Common/Image.h"
 #include "Common/MsgHandler.h"
 #include "Core/Config/MainSettings.h"
 #include "Core/Core.h"
@@ -37,8 +41,11 @@ static constexpr auto X_None = None;
 #include "../runtime/screenshot_keys.hpp"
 #include "../runtime/window_size.hpp"
 
+#include <algorithm>
 #include <cstring>
+#include <span>
 #include <thread>
+#include <vector>
 
 #include <X11/Xatom.h>
 #include <X11/Xlib.h>
@@ -54,6 +61,57 @@ static constexpr auto X_None = None;
 
 namespace
 {
+// The program's icon, Resources/app-icon.png beside the executable, as the
+// window's _NET_WM_ICON (its icon in the taskbar and the window list), at
+// 128, 64 and 32 pixels. Nothing without the file.
+void SetWindowIcon(Display* display, Window window)
+{
+  std::string file;
+  if (!File::ReadFileToString(File::GetExeDirectory() + "/Resources/app-icon.png", file))
+    return;
+  Common::UniqueBuffer<u8> rgba;
+  u32 width = 0;
+  u32 height = 0;
+  if (!Common::LoadPNG(std::span(reinterpret_cast<const u8*>(file.data()), file.size()), &rgba,
+                       &width, &height) ||
+      width == 0 || height == 0)
+    return;
+  // Each size: width, height, then a row-major ARGB pixel per long, each the
+  // average of the picture's pixels it covers.
+  std::vector<unsigned long> icon;
+  for (const u32 size : {128u, 64u, 32u})
+  {
+    icon.push_back(size);
+    icon.push_back(size);
+    for (u32 y = 0; y < size; ++y)
+    {
+      const u32 y0 = y * height / size;
+      const u32 y1 = std::max(y0 + 1, (y + 1) * height / size);
+      for (u32 x = 0; x < size; ++x)
+      {
+        const u32 x0 = x * width / size;
+        const u32 x1 = std::max(x0 + 1, (x + 1) * width / size);
+        unsigned long sum[4] = {};
+        for (u32 sy = y0; sy < y1; ++sy)
+        {
+          for (u32 sx = x0; sx < x1; ++sx)
+          {
+            const u8* pixel = rgba.data() + (static_cast<std::size_t>(sy) * width + sx) * 4;
+            for (int channel = 0; channel < 4; ++channel)
+              sum[channel] += pixel[channel];
+          }
+        }
+        const unsigned long count = static_cast<unsigned long>(y1 - y0) * (x1 - x0);
+        icon.push_back(((sum[3] / count) << 24) | ((sum[0] / count) << 16) |
+                       ((sum[1] / count) << 8) | (sum[2] / count));
+      }
+    }
+  }
+  XChangeProperty(display, window, XInternAtom(display, "_NET_WM_ICON", False), XA_CARDINAL, 32,
+                  PropModeReplace, reinterpret_cast<unsigned char*>(icon.data()),
+                  static_cast<int>(icon.size()));
+}
+
 class PlatformX11 : public Platform
 {
 public:
@@ -181,6 +239,7 @@ bool PlatformX11::Init()
                                      strlen(host_name)};
     XSetWMClientMachine(m_display, m_window, &wmClientMachine);
   }
+  SetWindowIcon(m_display, m_window);
   XMapRaised(m_display, m_window);
   XFlush(m_display);
   XSync(m_display, True);

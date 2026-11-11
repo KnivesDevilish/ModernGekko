@@ -181,6 +181,21 @@ struct LauncherImage
   // Backgrounds only: the floor that slides (moving_background.hpp).
   ScrollingFloor floor;
 };
+// Gives the window the program's icon, Resources/app-icon.png beside it
+// (MODERNGEKKO_APP_ICON); without it the system's default icon stays.
+inline void SetWindowIcon(SDL_Window* window, const fs::path& release_directory)
+{
+  const fs::path path = release_directory / "Resources" / "app-icon.png";
+  std::error_code ec;
+  if (!window || !fs::is_regular_file(path, ec))
+    return;
+  if (SDL_Surface* icon = SDL_LoadPNG(path.string().c_str()))
+  {
+    SDL_SetWindowIcon(window, icon);
+    SDL_DestroySurface(icon);
+  }
+}
+
 // find_floor: for a background, also look for a floor that can slide.
 inline LauncherImage LoadLauncherImage(SDL_Renderer* renderer, const fs::path& release_directory,
                                        std::string_view file_name, std::string_view log_label,

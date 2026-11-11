@@ -70,7 +70,7 @@ struct ConfigResult {
   std::vector<std::string> controllers;
   bool show_fps_in_title = true;
   bool fullscreen = false;
-  // "16:9", "4:3" or "stretch" (see SupportedAspectRatios).
+  // "16:9", "4:3", "stretch" or "ultrawide" (see SupportedAspectRatios).
   std::string aspect_ratio = "16:9";
   // The pictures beside a 4:3 game on a wide screen: "none", "random" (one is
   // picked each time the game opens) or the id of a border in

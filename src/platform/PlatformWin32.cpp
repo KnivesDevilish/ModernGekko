@@ -15,7 +15,10 @@
 // launcher, or one that fits the primary monitor, in its middle
 // (src/runtime/window_size.hpp), and fullscreen when the launcher says so.
 // Whether it has the focus is known, so the game reads the controllers only
-// then, unless background input is on.
+// then, unless background input is on. The window has no sunken edge and a
+// black background (no white line around the picture, in a window or in
+// fullscreen), the program's icon (icon 101, MODERNGEKKO_APP_ICON_ICO), and
+// its File and View menu bar only with MODERNGEKKO_WINDOW_MENU.
 
 // Without the CMake option (CMakeLists.txt always passes it), the window keeps
 // its savestate key and menu entries, as before.
@@ -73,9 +76,11 @@ constexpr UINT ID_LOAD_STATE_LAST = 41199;
 constexpr float FAST_FORWARD_SPEED = 2.0f;
 #endif
 
-// The window's style, as CreateRenderWindow makes it.
+// The window's style, as CreateRenderWindow makes it: no sunken edge
+// (WS_EX_CLIENTEDGE), which drew a light line around the game's picture.
 constexpr DWORD WINDOW_STYLE = WS_OVERLAPPEDWINDOW;
-constexpr DWORD WINDOW_EX_STYLE = WS_EX_CLIENTEDGE;
+constexpr DWORD WINDOW_EX_STYLE = 0;
+constexpr BOOL WINDOW_HAS_MENU = MODERNGEKKO_WINDOW_MENU ? TRUE : FALSE;
 
 // Bit 30 of a key message's lParam: the key was already down, so this is the
 // keyboard's auto-repeat.
@@ -160,12 +165,17 @@ bool PlatformWin32::RegisterRenderWindowClass()
   wc.cbClsExtra = 0;
   wc.cbWndExtra = 0;
   wc.hInstance = GetModuleHandle(nullptr);
-  wc.hIcon = LoadIcon(nullptr, IDI_ICON1);
+  // The executable's own icon; nothing (the system's) when it has none.
+  wc.hIcon = LoadIcon(wc.hInstance, IDI_ICON1);
   wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
-  wc.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1);
+  // Black, as the game around its picture: the window is never white while
+  // it opens or changes size.
+  wc.hbrBackground = static_cast<HBRUSH>(GetStockObject(BLACK_BRUSH));
   wc.lpszMenuName = nullptr;
   wc.lpszClassName = WINDOW_CLASS_NAME;
-  wc.hIconSm = LoadIcon(nullptr, IDI_ICON1);
+  wc.hIconSm = static_cast<HICON>(LoadImage(wc.hInstance, IDI_ICON1, IMAGE_ICON,
+                                            GetSystemMetrics(SM_CXSMICON),
+                                            GetSystemMetrics(SM_CYSMICON), LR_DEFAULTCOLOR));
 
   if (!RegisterClassEx(&wc))
   {
@@ -180,8 +190,8 @@ bool PlatformWin32::CreateRenderWindow()
 {
   // The size chosen in the launcher, or one that fits the screen, in the
   // middle of the primary monitor's work area (the desktop without its
-  // taskbar). The size is the game's picture: the frame and the menu bar go
-  // around it, and the whole window is centred.
+  // taskbar). The size is the game's picture: the frame (and the menu bar,
+  // if any) goes around it, and the whole window is centred.
   moderngekko::detail::ScreenArea screen;
   MONITORINFO monitor{};
   monitor.cbSize = sizeof(monitor);
@@ -193,7 +203,7 @@ bool PlatformWin32::CreateRenderWindow()
   const moderngekko::detail::WindowPlace place =
       moderngekko::detail::PlaceWindow(moderngekko::detail::RequestedWindowSize(), screen);
   RECT outer{0, 0, place.width, place.height};
-  AdjustWindowRectEx(&outer, WINDOW_STYLE, TRUE, WINDOW_EX_STYLE);
+  AdjustWindowRectEx(&outer, WINDOW_STYLE, WINDOW_HAS_MENU, WINDOW_EX_STYLE);
   m_window_width = outer.right - outer.left;
   m_window_height = outer.bottom - outer.top;
   m_window_x = CW_USEDEFAULT;
@@ -356,8 +366,12 @@ void PlatformWin32::ToggleFullscreen()
 
 bool PlatformWin32::Init()
 {
-  if (!RegisterRenderWindowClass() || !CreateRenderWindow() || !CreateMenus())
+  if (!RegisterRenderWindowClass() || !CreateRenderWindow())
     return false;
+#if MODERNGEKKO_WINDOW_MENU
+  if (!CreateMenus())
+    return false;
+#endif
 
   // Fullscreen from the start when the launcher says so.
   if (Config::Get(Config::MAIN_FULLSCREEN))
