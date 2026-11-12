@@ -106,10 +106,18 @@ set(MODERNGEKKO_LAUNCHER_PATCH_NOTES "" CACHE FILEPATH
 # 4:3 game on a wide screen.
 set(MODERNGEKKO_GAME_BORDERS "" CACHE PATH
     "Optional folder with the pictures shown beside a 4:3 game")
+# The game selection screen that PLAY opens in a build with more than one
+# game (MODERNGEKKO_GAMES): a folder with its layout.txt, pictures and font
+# (tools/launcher_game_select_layout.hpp), copied to Resources/game-select.
+# Without it, PLAY asks with plain buttons.
+set(MODERNGEKKO_GAME_SELECT "" CACHE PATH
+    "Folder with the game selection screen's layout.txt, pictures and font")
 # A folder with a Wii game's save files, the game finished at 100%, without
 # the save's banner.bin, which is the game's own art (tools/launcher_save.hpp):
 # the launcher's Game Files page installs them over the player's save, keeping
-# a copy of it. Needs MODERNGEKKO_REQUIRED_DISC_ID.
+# a copy of it. Another game's complete save goes in a folder named after its
+# disc ID (a GameCube game's: its .gci files, the picture and icon blanked).
+# Needs MODERNGEKKO_REQUIRED_DISC_ID.
 set(MODERNGEKKO_COMPLETE_SAVE "" CACHE PATH
     "Optional folder with a complete save the launcher can install")
 # With both set, the launcher shows its version and looks on GitHub for a
@@ -843,6 +851,9 @@ if(MODERNGEKKO_ENABLE_DOLPHIN_RUNTIME)
     # Resources/complete-save: the save Game Files can install.
     moderngekko_add_resource_folder(moderngekko-launcher "${MODERNGEKKO_COMPLETE_SAVE}"
                                     complete-save)
+    # Resources/game-select: the game selection screen's art.
+    moderngekko_add_resource_folder(moderngekko-launcher "${MODERNGEKKO_GAME_SELECT}"
+                                    game-select)
     # The launcher embeds the Noto Sans CJK glyphs of its Japanese texts
     # (tools/launcher_cjk_font.inc); the font's license travels with every build.
     add_custom_command(TARGET moderngekko-launcher POST_BUILD
@@ -971,6 +982,14 @@ if(BUILD_TESTING)
         "${CMAKE_CURRENT_SOURCE_DIR}/tools")
     target_compile_features(moderngekko_launcher_games_test PRIVATE cxx_std_23)
     add_test(NAME moderngekko.launcher_games COMMAND moderngekko_launcher_games_test)
+
+    add_executable(moderngekko_launcher_game_select_test
+        tests/launcher_game_select_test.cpp)
+    target_include_directories(moderngekko_launcher_game_select_test PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/tools")
+    target_compile_features(moderngekko_launcher_game_select_test PRIVATE cxx_std_23)
+    add_test(NAME moderngekko.launcher_game_select
+             COMMAND moderngekko_launcher_game_select_test)
 
     # Header-only, so the test needs no companion translation unit.
     add_executable(moderngekko_launcher_savestates_test

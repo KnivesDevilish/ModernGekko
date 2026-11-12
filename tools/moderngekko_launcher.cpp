@@ -8,6 +8,7 @@
 #include "launcher_music.hpp"
 #include "launcher_patch_notes.hpp"
 #include "launcher_gallery.hpp"
+#include "launcher_game_select.hpp"
 #include "launcher_games.hpp"
 #include "launcher_save.hpp"
 #include "launcher_ui.hpp"
@@ -1206,7 +1207,7 @@ void DrawCreditsPage(ImFont* bold, const std::function<void()>& version_section 
       {"Dolphin", MODERNGEKKO_UI_TEXT("GNU GPL v2 or later")},
       {"SDL 3", MODERNGEKKO_UI_TEXT("zlib License")},
       {"Dear ImGui", MODERNGEKKO_UI_TEXT("MIT License")},
-      {"Noto Sans CJK", "SIL Open Font License 1.1"},
+      {"Noto Sans CJK, Teko", "SIL Open Font License 1.1"},
   }};
   if (bottom_columns)
     NextPageColumn();
@@ -1217,8 +1218,13 @@ void DrawCreditsPage(ImFont* bold, const std::function<void()>& version_section 
     EndPageColumns();
 
   ImGui::PushTextWrapPos(0.0f);
-  ImGui::TextDisabled("%s", Tr("Sonic Riders: Zero Gravity and its characters are trademarks "
-                               "of SEGA. Play with your own legally obtained copy of the game."));
+  if (moderngekko::frontend::PlaysSeveralGames())
+    ImGui::TextDisabled("%s", Tr("Sonic Riders, Sonic Riders: Zero Gravity and their characters "
+                                 "are trademarks of SEGA. Play with your own legally obtained "
+                                 "copies of the games."));
+  else
+    ImGui::TextDisabled("%s", Tr("Sonic Riders: Zero Gravity and its characters are trademarks "
+                                 "of SEGA. Play with your own legally obtained copy of the game."));
   ImGui::PopTextWrapPos();
 }
 
@@ -2661,6 +2667,14 @@ int main(int argc, char** argv)
   // ImGui sizes a font by its full line height. 18 px gives Noto Sans and Segoe
   // UI a comfortable reading size while the Play page still fits the window.
   const LauncherFonts fonts = LoadInterfaceFont(release_directory, 18.0f);
+  // The game selection screen's art and font (Resources/game-select), for a
+  // build that plays more than one game; its pictures load the first time
+  // PLAY opens it.
+  const fs::path game_select_folder = release_directory / "Resources" / "game-select";
+  ImFont* const game_select_font = moderngekko::frontend::PlaysSeveralGames() ?
+                                       LoadGameSelectFont(game_select_folder) :
+                                       nullptr;
+  GameSelectScreen game_select;
   ImGui_ImplSDL3_InitForSDLRenderer(window, renderer);
   ImGui_ImplSDL3_SetGamepadMode(ImGui_ImplSDL3_GamepadMode_AutoAll);
   ImGui_ImplSDLRenderer3_Init(renderer);
@@ -2758,6 +2772,36 @@ int main(int argc, char** argv)
   const auto choose_game = [&](const GameSlot& slot) {
     current_game = slot.root;
     current_metadata = slot.metadata;
+  };
+  const auto slot_of = [&](std::string_view disc_id) -> const GameSlot* {
+    for (const GameSlot& slot : game_slots)
+    {
+      if (slot.game.disc_id == disc_id)
+        return &slot;
+    }
+    return nullptr;
+  };
+  // PLAY with more than one game: the selection screen, on the game PLAY
+  // would start. False when the build has no art for it (or its art names
+  // other games): PLAY asks with plain buttons then.
+  const auto open_game_select = [&]() -> bool {
+    if (!game_select.Load(renderer, game_select_folder,
+                          ImGui::GetMainViewport()->Size.y *
+                              ImGui::GetIO().DisplayFramebufferScale.y))
+      return false;
+    const GameSlot* left = slot_of(game_select.Layout().left_game);
+    const GameSlot* right = slot_of(game_select.Layout().right_game);
+    if (!left || !right)
+      return false;
+    const std::string current = current_metadata ? current_metadata.metadata->disc_id : "";
+    const GameSelectSide start =
+        current == left->game.disc_id && left->metadata     ? GameSelectSide::Left :
+        current == right->game.disc_id && right->metadata   ? GameSelectSide::Right :
+        left->metadata                                      ? GameSelectSide::Left :
+                                                              GameSelectSide::Right;
+    game_select.Open(static_cast<bool>(left->metadata), static_cast<bool>(right->metadata), start,
+                     static_cast<double>(SDL_GetTicksNS()) / 1e9);
+    return true;
   };
   const auto& resolutions = moderngekko::frontend::SupportedResolutions();
   const auto& graphics_backends =
@@ -3438,11 +3482,12 @@ int main(int argc, char** argv)
     }
     page_by_shoulder = false;
     const bool testing_controls = current_page == LauncherPage::Controls && controls_testing;
-    if (testing_controls)
+    // The game selection screen reads the keys and buttons itself.
+    if (testing_controls || game_select.IsOpen())
       io.ConfigFlags &= ~ImGuiConfigFlags_NavEnableKeyboard;
     else
       io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
-    if (testing_controls || pad_waits_for_release)
+    if (testing_controls || pad_waits_for_release || game_select.IsOpen())
       io.ConfigFlags &= ~ImGuiConfigFlags_NavEnableGamepad;
     else
       io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;
@@ -3529,7 +3574,7 @@ int main(int argc, char** argv)
         pad_waits_for_release = true;
       }
     }
-    else if (!popup_was_open && !item_was_active && !viewer_was_open &&
+    else if (!popup_was_open && !item_was_active && !viewer_was_open && !game_select.IsOpen() &&
              !ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel))
     {
       // LB and RB, or Q and E on the keyboard: the page before or after this
@@ -3788,7 +3833,8 @@ int main(int argc, char** argv)
             // With more than one game, PLAY asks which one first.
             if (moderngekko::frontend::PlaysSeveralGames())
             {
-              ImGui::OpenPopup("##choose_game");
+              if (!open_game_select())
+                ImGui::OpenPopup("##choose_game");
             }
             else if (ensure_controller())
             {
@@ -5367,6 +5413,89 @@ int main(int argc, char** argv)
     viewer_was_open = current_page == LauncherPage::Screenshots && screenshot_gallery &&
                       screenshot_gallery->Viewing();
     ImGui::End();
+
+    // The game selection screen, over the whole window while it is open.
+    if (game_select.IsOpen())
+    {
+      const ImGuiViewport* viewport = ImGui::GetMainViewport();
+      const double now = static_cast<double>(SDL_GetTicksNS()) / 1e9;
+      ImGui::SetNextWindowPos(viewport->Pos);
+      ImGui::SetNextWindowSize(viewport->Size);
+      ImGui::SetNextWindowFocus();
+      ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
+      ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
+      ImGui::Begin("##game_select", nullptr,
+                   ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove |
+                       ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoBackground |
+                       ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoScrollWithMouse);
+      // Left and right, the arrow keys or the D-pad or the stick; choose with
+      // Enter, Space or A; back with Escape or B. A gamepad still held from
+      // before moves nothing.
+      const bool pads = !pad_waits_for_release;
+      const auto pressed = [&](std::initializer_list<ImGuiKey> keys, bool repeat) {
+        for (const ImGuiKey key : keys)
+        {
+          const bool is_pad = key >= ImGuiKey_GamepadStart && key <= ImGuiKey_GamepadRStickDown;
+          if ((!is_pad || pads) && ImGui::IsKeyPressed(key, repeat))
+            return true;
+        }
+        return false;
+      };
+      GameSelectInput input;
+      input.left = pressed({ImGuiKey_LeftArrow, ImGuiKey_A, ImGuiKey_GamepadDpadLeft,
+                            ImGuiKey_GamepadLStickLeft},
+                           true);
+      input.right = pressed({ImGuiKey_RightArrow, ImGuiKey_D, ImGuiKey_GamepadDpadRight,
+                             ImGuiKey_GamepadLStickRight},
+                            true);
+      input.choose = pressed({ImGuiKey_Enter, ImGuiKey_KeypadEnter, ImGuiKey_Space,
+                              ImGuiKey_GamepadFaceDown},
+                             false);
+      input.back = pressed({ImGuiKey_Escape, ImGuiKey_GamepadFaceRight}, false);
+      input.mouse = io.MousePos;
+      input.mouse_moved = io.MouseDelta.x != 0.0f || io.MouseDelta.y != 0.0f;
+      input.clicked = ImGui::IsMouseClicked(ImGuiMouseButton_Left);
+      game_select.Place(viewport->Pos, viewport->Size);
+      const GameSelectEvent event = game_select.Update(input, now);
+      GameSelectTexts texts;
+      texts.title = Tr("SELECT YOUR GAME");
+      texts.switch_games = Tr("Switch");
+      texts.choose = Tr("Choose");
+      texts.back = Tr("Go back");
+      texts.enter_key = Tr("Enter");
+      texts.not_installed = Tr("NOT INSTALLED");
+      const bool japanese =
+          moderngekko::frontend::ActiveLanguage() == moderngekko::frontend::Language::Japanese;
+      texts.vertical_title = japanese;
+      texts.small_hints = japanese;
+      game_select.Draw(ImGui::GetWindowDrawList(), viewport->Pos, viewport->Size, now,
+                       game_select_font, fonts.bold, texts, last_input != LastInput::Pad,
+                       pad_style);
+      ImGui::End();
+      ImGui::PopStyleVar(2);
+      if (event == GameSelectEvent::Chosen)
+      {
+        const GameSlot* slot = slot_of(game_select.Chosen() == GameSelectSide::Left ?
+                                           game_select.Layout().left_game :
+                                           game_select.Layout().right_game);
+        if (slot && slot->metadata)
+        {
+          choose_game(*slot);
+          summary_stale = true;
+          if (ensure_controller())
+          {
+            launch_mode = LaunchMode::Solo;
+            done = true;
+          }
+        }
+      }
+      else if (event == GameSelectEvent::Closed)
+      {
+        // Back on the PLAY page, as it was; a gamepad's B still held moves
+        // nothing there.
+        pad_waits_for_release = true;
+      }
+    }
 
     ImGui::Render();
     SDL_SetRenderScale(renderer, io.DisplayFramebufferScale.x, io.DisplayFramebufferScale.y);

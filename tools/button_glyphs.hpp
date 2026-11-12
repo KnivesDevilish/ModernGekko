@@ -240,6 +240,26 @@ inline float DrawArrowKeyCap(ImDrawList* list, ImVec2 min, float height, bool le
   return height;
 }
 
+// Draws one side of a gamepad's D-pad (left or right): a dark rounded square
+// with the arrow in it, without a key's outline. Returns its width.
+inline float DrawDpadArrow(ImDrawList* list, ImVec2 min, float height, bool left,
+                           float alpha = 1.0f)
+{
+  using namespace button_glyphs_detail;
+  const ImVec2 max(min.x + height, min.y + height);
+  list->AddRectFilled(min, max, Colour(0.15f, 0.16f, 0.19f, alpha), height * 0.18f);
+  const ImVec2 c((min.x + max.x) * 0.5f, (min.y + max.y) * 0.5f);
+  const float r = height * 0.2f;
+  const ImU32 white = Colour(0.96f, 0.96f, 0.96f, alpha);
+  if (left)
+    list->AddTriangleFilled(ImVec2(c.x - r, c.y), ImVec2(c.x + r * 0.8f, c.y - r),
+                            ImVec2(c.x + r * 0.8f, c.y + r), white);
+  else
+    list->AddTriangleFilled(ImVec2(c.x + r, c.y), ImVec2(c.x - r * 0.8f, c.y + r),
+                            ImVec2(c.x - r * 0.8f, c.y - r), white);
+  return height;
+}
+
 // What the player plays with, as a small picture: a gamepad in its maker's
 // colours (Xbox, PlayStation, Nintendo, or any other), or a keyboard.
 enum class DeviceIcon

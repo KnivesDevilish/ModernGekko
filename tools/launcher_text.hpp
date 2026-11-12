@@ -215,6 +215,10 @@ inline constexpr Translation SPANISH_TEXTS[] = {
      "legally obtained copy of the game.",
      "Sonic Riders: Zero Gravity y sus personajes son marcas de SEGA. Juega con tu propia copia "
      "del juego obtenida legalmente."},
+    {"Sonic Riders, Sonic Riders: Zero Gravity and their characters are trademarks of SEGA. Play "
+     "with your own legally obtained copies of the games.",
+     "Sonic Riders, Sonic Riders: Zero Gravity y sus personajes son marcas de SEGA. Juega con tus "
+     "propias copias de los juegos obtenidas legalmente."},
     {"Opened in your browser and copied to the clipboard",
      "Abierto en tu navegador y copiado al portapapeles"},
 
@@ -319,6 +323,10 @@ inline constexpr Translation SPANISH_TEXTS[] = {
     {"Not installed: extract it in Game Files.", "No instalado: extráelo en Archivos del juego."},
     {"Game", "Juego"},
     {"Everyone chooses the same game as the host.", "Todos eligen el mismo juego que el anfitrión."},
+    // The game selection screen
+    {"SELECT YOUR GAME", "ELIGE TU JUEGO"},
+    {"Switch", "Cambiar"},
+    {"Choose", "Elegir"},
     {"DISC IMAGE", "IMAGEN DE DISCO"},
     {"No ISO, WBFS, or RVZ selected", "No has elegido ningún ISO, WBFS o RVZ"},
     {"Browse for ISO / WBFS / RVZ", "Buscar ISO / WBFS / RVZ"},
@@ -767,6 +775,11 @@ inline constexpr Translation JAPANESE_TEXTS[] = {
      "Sonic Riders: Zero Gravity（ソニックライダーズ シュー"
      "ティングスターストーリー）とそのキャラクターはセガの商標です。正規に入手したご自"
      "身のゲームでプレイしてください。"},
+    {"Sonic Riders, Sonic Riders: Zero Gravity and their characters are trademarks of SEGA. Play "
+     "with your own legally obtained copies of the games.",
+     "Sonic Riders（ソニックライダーズ）、Sonic Riders: Zero Gravity（ソニックライダーズ シュー"
+     "ティングスターストーリー）とそのキャラクターはセガの商標です。正規に入手したご自"
+     "身のゲームでプレイしてください。"},
     {"Opened in your browser and copied to the clipboard", "ブラウザで開き、クリップボードにコピーしました"},
     // Check for updates: the Credits page's VERSION panel and the top bar
     {"VERSION", "バージョン"},
@@ -863,6 +876,10 @@ inline constexpr Translation JAPANESE_TEXTS[] = {
     {"Not installed: extract it in Game Files.", "未インストール：「ゲームファイル」で展開してください。"},
     {"Game", "ゲーム"},
     {"Everyone chooses the same game as the host.", "全員がホストと同じゲームを選んでください。"},
+    // The game selection screen
+    {"SELECT YOUR GAME", "ゲームセレクト"},
+    {"Switch", "切り替え"},
+    {"Choose", "決定"},
     {"DISC IMAGE", "ディスクイメージ"},
     {"No ISO, WBFS, or RVZ selected", "ISO、WBFS、RVZが選択されていません"},
     {"Browse for ISO / WBFS / RVZ", "ISO / WBFS / RVZを選ぶ"},
