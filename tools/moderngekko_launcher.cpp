@@ -8,6 +8,7 @@
 #include "launcher_music.hpp"
 #include "launcher_patch_notes.hpp"
 #include "launcher_gallery.hpp"
+#include "launcher_games.hpp"
 #include "launcher_save.hpp"
 #include "launcher_ui.hpp"
 #include "launcher_update.hpp"
@@ -128,11 +129,10 @@ struct ControllerOption
 
 std::string RequiredGameError(const moderngekko::GameMetadata& metadata)
 {
-#ifdef MODERNGEKKO_REQUIRED_DISC_ID
-  if (metadata.disc_id != MODERNGEKKO_REQUIRED_DISC_ID)
-    return Format(Tr("expected disc ID %s, found %s"), MODERNGEKKO_REQUIRED_DISC_ID,
-                  metadata.disc_id.c_str());
-#endif
+  // One of the build's games (tools/launcher_games.hpp), or any without them.
+  if (!moderngekko::frontend::AcceptsGame(metadata.disc_id))
+    return Format(Tr("expected disc ID %s, found %s"),
+                  moderngekko::frontend::KnownGameIds().c_str(), metadata.disc_id.c_str());
 #ifdef MODERNGEKKO_REQUIRED_DOL_SHA256
   if (metadata.dol_sha256 != MODERNGEKKO_REQUIRED_DOL_SHA256)
     return Tr("main DOL does not match the pinned release");
@@ -356,7 +356,7 @@ std::optional<fs::path> PrepareDisc(const fs::path& image, const fs::path& user_
   return image;
 #else
   const std::string source_id = source->GetGameID(source->GetGamePartition());
-  if (source_id == MODERNGEKKO_REQUIRED_DISC_ID)
+  if (moderngekko::frontend::AcceptsGame(source_id))
     return image;
 #endif
 #if defined(MODERNGEKKO_DISC_PREPARER_FILENAME) && \
@@ -439,11 +439,9 @@ bool ExtractDisc(const fs::path& image, const fs::path& user_directory,
   std::string disc_id = volume->GetGameID(partition);
   if (disc_id.size() != 6)
     return fail(Tr("the selected image has an invalid disc ID"));
-#ifdef MODERNGEKKO_REQUIRED_DISC_ID
-  if (disc_id != MODERNGEKKO_REQUIRED_DISC_ID)
+  if (!moderngekko::frontend::AcceptsGame(disc_id))
     return fail(Format(Tr("this frontend requires disc ID %s; selected %s"),
-                       MODERNGEKKO_REQUIRED_DISC_ID, disc_id.c_str()));
-#endif
+                       moderngekko::frontend::KnownGameIds().c_str(), disc_id.c_str()));
 #ifdef MODERNGEKKO_PORTABLE_DEFAULT_GAME
   const fs::path games_directory = release_directory;
   const fs::path output = games_directory / "Game";
@@ -2701,16 +2699,66 @@ int main(int argc, char** argv)
 
   std::vector<fs::path> images = FindDiscImages();
   std::optional<fs::path> selected_image = images.empty() ? std::nullopt : std::optional(images[0]);
+  // An extracted game as the launcher sees it: ready, or why not. The
+  // bundled DOL patch is the main game's, so only that one gets it.
+  const auto inspect_game = [&](const fs::path& root) {
+    const auto& games = moderngekko::frontend::KnownGames();
+    bool changed = false;
+    std::string patch_error;
+    const bool main_game = games.size() <= 1 || root.filename() == games.front().disc_id;
+    moderngekko::GameInspectResult result =
+        !main_game || ApplyBundledDolPatch(root, release_directory, &changed, &patch_error) ?
+            InspectForLauncher(root) :
+            moderngekko::GameInspectResult{{}, patch_error};
+    if (result && !RequiredGameError(*result.metadata).empty())
+      result = {{}, RequiredGameError(*result.metadata)};
+    return result;
+  };
+  // Each game of the build (tools/launcher_games.hpp) and its extraction,
+  // games/<disc ID>, or the last game played when it is that one. Looked at
+  // as the launcher opens and again after an extraction.
+  struct GameSlot
+  {
+    moderngekko::frontend::KnownGame game;
+    fs::path root;
+    moderngekko::GameInspectResult metadata;
+  };
+  std::vector<GameSlot> game_slots;
+  // The game PLAY and Netplay start: the last one played, else the first
+  // one ready. Without one ready, current_metadata says why.
   fs::path current_game = ReadDefaultGame(user_directory, release_directory);
-  bool current_dol_changed = false;
-  std::string current_dol_error;
-  auto current_metadata =
-      ApplyBundledDolPatch(current_game, release_directory, &current_dol_changed,
-                           &current_dol_error) ?
-          InspectForLauncher(current_game) :
-          moderngekko::GameInspectResult{{}, current_dol_error};
-  if (current_metadata && !RequiredGameError(*current_metadata.metadata).empty())
-    current_metadata = {{}, RequiredGameError(*current_metadata.metadata)};
+  auto current_metadata = inspect_game(current_game);
+  for (const moderngekko::frontend::KnownGame& game : moderngekko::frontend::KnownGames())
+  {
+    GameSlot slot{game, user_directory / "games" / game.disc_id, {}};
+    if (current_metadata && current_metadata.metadata->disc_id == game.disc_id)
+    {
+      slot.root = current_game;
+      slot.metadata = current_metadata;
+    }
+    else
+    {
+      slot.metadata = inspect_game(slot.root);
+    }
+    game_slots.push_back(std::move(slot));
+  }
+  if (!current_metadata)
+  {
+    for (const GameSlot& slot : game_slots)
+    {
+      if (slot.metadata)
+      {
+        current_game = slot.root;
+        current_metadata = slot.metadata;
+        break;
+      }
+    }
+  }
+  // PLAY or Netplay's game choice: this game is the one they start.
+  const auto choose_game = [&](const GameSlot& slot) {
+    current_game = slot.root;
+    current_metadata = slot.metadata;
+  };
   const auto& resolutions = moderngekko::frontend::SupportedResolutions();
   const auto& graphics_backends =
       moderngekko::frontend::SupportedGraphicsBackends();
@@ -2787,12 +2835,13 @@ int main(int argc, char** argv)
     if (!screenshot_gallery)
     {
 #ifdef MODERNGEKKO_REQUIRED_DISC_ID
-      screenshot_gallery.emplace(user_directory / "ScreenShots" / MODERNGEKKO_REQUIRED_DISC_ID,
-                                 user_directory / "Cache" / "ScreenshotThumbnails", false);
-#else
-      screenshot_gallery.emplace(user_directory / "ScreenShots",
-                                 user_directory / "Cache" / "ScreenshotThumbnails", true);
+      if (!moderngekko::frontend::PlaysSeveralGames())
+        screenshot_gallery.emplace(user_directory / "ScreenShots" / MODERNGEKKO_REQUIRED_DISC_ID,
+                                   user_directory / "Cache" / "ScreenshotThumbnails", false);
+      else
 #endif
+        screenshot_gallery.emplace(user_directory / "ScreenShots",
+                                   user_directory / "Cache" / "ScreenshotThumbnails", true);
     }
     screenshot_gallery->Draw(renderer, fonts.bold, scale);
   };
@@ -3099,6 +3148,16 @@ int main(int argc, char** argv)
       std::vector<std::string> argument_storage = {SiblingRunner(argv[0]).string(), "--game",
                                                    current_game.string(), "--user-dir",
                                                    user_directory.string()};
+      // With more than one game, the window takes the name of the one chosen.
+      if (moderngekko::frontend::PlaysSeveralGames() && current_metadata)
+      {
+        if (const moderngekko::frontend::KnownGame* game =
+                moderngekko::frontend::FindKnownGame(current_metadata.metadata->disc_id))
+        {
+          argument_storage.emplace_back("--title");
+          argument_storage.emplace_back(game->title);
+        }
+      }
       // Solo only: see the note by the dropdown.
       if (mode == LaunchMode::Solo && selected_savestate >= 0 &&
           static_cast<std::size_t>(selected_savestate) < launcher_savestates.size())
@@ -3368,9 +3427,15 @@ int main(int argc, char** argv)
       if (extraction.finished_game)
       {
         current_game = *extraction.finished_game;
-        current_metadata = InspectForLauncher(current_game);
-        if (current_metadata && !RequiredGameError(*current_metadata.metadata).empty())
-          current_metadata = {{}, RequiredGameError(*current_metadata.metadata)};
+        current_metadata = inspect_game(current_game);
+        for (GameSlot& slot : game_slots)
+        {
+          if (current_metadata && current_metadata.metadata->disc_id == slot.game.disc_id)
+          {
+            slot.root = current_game;
+            slot.metadata = current_metadata;
+          }
+        }
         extraction.finished_game.reset();
       }
     }
@@ -3648,18 +3713,102 @@ int main(int argc, char** argv)
             DrawLauncherBanner(banner, column_width);
             ImGui::Spacing();
           }
-          const std::string ready = Format(Tr("GAME READY \xC2\xB7 %s"),
-                                           current_metadata.metadata->disc_id.c_str());
-          DrawStatusPill(ready.c_str(), LAUNCHER_ACCENT, scale, false);
+          if (!moderngekko::frontend::PlaysSeveralGames())
+          {
+            const std::string ready = Format(Tr("GAME READY \xC2\xB7 %s"),
+                                             current_metadata.metadata->disc_id.c_str());
+            DrawStatusPill(ready.c_str(), LAUNCHER_ACCENT, scale, false);
+          }
+          else
+          {
+            // Each game's state, side by side while they fit the column.
+            float pills_x = 0.0f;
+            for (std::size_t i = 0; i < game_slots.size(); ++i)
+            {
+              const GameSlot& slot = game_slots[i];
+              const std::string text =
+                  slot.metadata ? Format(Tr("GAME READY \xC2\xB7 %s"), slot.game.disc_id.c_str())
+                                : Format(Tr("NOT INSTALLED \xC2\xB7 %s"),
+                                         slot.game.disc_id.c_str());
+              const float pill_width =
+                  ImGui::CalcTextSize(text.c_str()).x + 20.0f * scale;
+              if (i > 0 && pills_x + ImGui::GetStyle().ItemSpacing.x + pill_width <= column_width)
+              {
+                ImGui::SameLine();
+                pills_x += ImGui::GetStyle().ItemSpacing.x;
+              }
+              else
+              {
+                pills_x = 0.0f;
+              }
+              DrawStatusPill(text.c_str(),
+                             slot.metadata ? LAUNCHER_ACCENT : ImVec4(1.0f, 0.75f, 0.3f, 1.0f),
+                             scale, false);
+              ImGui::SetItemTooltip("%s", slot.game.title.c_str());
+              pills_x += pill_width;
+            }
+          }
           ImGui::Spacing();
           ImGui::Spacing();
           if (DrawPrimaryButton(Tr("PLAY"), fonts.bold, 42 * scale, column_width))
           {
-            if (ensure_controller())
+            // With more than one game, PLAY asks which one first.
+            if (moderngekko::frontend::PlaysSeveralGames())
+            {
+              ImGui::OpenPopup("##choose_game");
+            }
+            else if (ensure_controller())
             {
               launch_mode = LaunchMode::Solo;
               done = true;
             }
+          }
+          // Which game PLAY starts: one button each, the ones not extracted
+          // yet greyed out.
+          ImGui::SetNextWindowPos(ImGui::GetMainViewport()->GetCenter(), ImGuiCond_Always,
+                                  ImVec2(0.5f, 0.5f));
+          ImGui::SetNextWindowSize(ImVec2(460 * scale, 0.0f));
+          if (ImGui::BeginPopupModal("##choose_game", nullptr,
+                                     ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoTitleBar))
+          {
+            ImGui::PushFont(fonts.bold, 0.0f);
+            ImGui::TextUnformatted(Tr("Choose your game"));
+            ImGui::PopFont();
+            ImGui::Spacing();
+            const float choice_width = ImGui::GetContentRegionAvail().x;
+            for (const GameSlot& slot : game_slots)
+            {
+              ImGui::PushID(slot.game.disc_id.c_str());
+              ImGui::BeginDisabled(!slot.metadata);
+              const bool chosen = ImGui::Button(slot.game.title.c_str(),
+                                                ImVec2(choice_width, 46 * scale));
+              ImGui::EndDisabled();
+              ImGui::PushTextWrapPos(0.0f);
+              if (slot.metadata)
+                ImGui::TextDisabled("%s", slot.game.disc_id.c_str());
+              else
+                ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.3f, 1.0f), "%s",
+                                   Tr("Not installed: extract it in Game Files."));
+              ImGui::PopTextWrapPos();
+              ImGui::Spacing();
+              ImGui::PopID();
+              if (chosen)
+              {
+                choose_game(slot);
+                summary_stale = true;
+                ImGui::CloseCurrentPopup();
+                if (ensure_controller())
+                {
+                  launch_mode = LaunchMode::Solo;
+                  done = true;
+                }
+              }
+            }
+            ImGui::Separator();
+            ImGui::Spacing();
+            if (ImGui::Button(Tr("Cancel"), ImVec2(choice_width, 34 * scale)) || popup_cancel)
+              ImGui::CloseCurrentPopup();
+            ImGui::EndPopup();
           }
 
           // Under PLAY, the Netplay links: side by side when they fit the
@@ -3774,6 +3923,8 @@ int main(int argc, char** argv)
             }
             ImGui::TextDisabled("%s", Tr("Every player needs the same SR-ZGS release and game "
                                          "files. Everyone plays with the host's CPU core."));
+            if (moderngekko::frontend::PlaysSeveralGames())
+              ImGui::TextDisabled("%s", Tr("Everyone chooses the same game as the host."));
             ImGui::PopTextWrapPos();
             ImGui::Spacing();
             // A negative width of the widest label leaves room for all of them.
@@ -3782,7 +3933,34 @@ int main(int argc, char** argv)
                  {Tr("Nickname"), netplay_invite_mode ? Tr("Invite code") : Tr("Host / IP"),
                   Tr("UDP port"), Tr("Buffer frames")})
               netplay_label_width = std::max(netplay_label_width, ImGui::CalcTextSize(label).x);
+            if (moderngekko::frontend::PlaysSeveralGames())
+              netplay_label_width =
+                  std::max(netplay_label_width, ImGui::CalcTextSize(Tr("Game")).x);
             netplay_label_width += ImGui::GetStyle().ItemInnerSpacing.x;
+            // The game the session plays: the host's choice, which everyone
+            // who joins must also pick.
+            if (moderngekko::frontend::PlaysSeveralGames())
+            {
+              const moderngekko::frontend::KnownGame* shown =
+                  moderngekko::frontend::FindKnownGame(current_metadata.metadata->disc_id);
+              ImGui::SetNextItemWidth(-netplay_label_width);
+              if (ImGui::BeginCombo(Tr("Game"), shown ? shown->title.c_str()
+                                                      : current_metadata.metadata->disc_id.c_str()))
+              {
+                for (const GameSlot& slot : game_slots)
+                {
+                  if (!slot.metadata)
+                    continue;
+                  const bool selected =
+                      slot.game.disc_id == current_metadata.metadata->disc_id;
+                  if (ImGui::Selectable(slot.game.title.c_str(), selected))
+                    choose_game(slot);
+                  if (selected)
+                    ImGui::SetItemDefaultFocus();
+                }
+                ImGui::EndCombo();
+              }
+            }
             ImGui::SetNextItemWidth(-netplay_label_width);
             ImGui::InputText(Tr("Nickname"), netplay_nickname.data(), netplay_nickname.size());
             if (!hosting && netplay_invite_mode)
@@ -3946,8 +4124,18 @@ int main(int argc, char** argv)
           // been played and what the next PLAY will use.
           if (summary_stale)
           {
-            summary_time_played = moderngekko::frontend::ReadTimePlayed(
-                user_directory, current_metadata.metadata->disc_id);
+            summary_time_played = 0;
+            if (moderngekko::frontend::PlaysSeveralGames())
+            {
+              for (const GameSlot& slot : game_slots)
+                summary_time_played +=
+                    moderngekko::frontend::ReadTimePlayed(user_directory, slot.game.disc_id);
+            }
+            else
+            {
+              summary_time_played = moderngekko::frontend::ReadTimePlayed(
+                  user_directory, current_metadata.metadata->disc_id);
+            }
             summary_installed_mods = moderngekko::frontend::CountInstalledMods(mod_folders);
             summary_stale = false;
           }
@@ -4698,6 +4886,36 @@ int main(int argc, char** argv)
 #else
     const bool files_columns = false;
 #endif
+    if (moderngekko::frontend::PlaysSeveralGames())
+    {
+      // Each game of the build: ready with its folder, or not extracted yet.
+      // The disc image below is either one; the launcher sees which.
+      BeginSection("##files_installed", Tr("INSTALLED GAMES"));
+      for (std::size_t i = 0; i < game_slots.size(); ++i)
+      {
+        const GameSlot& slot = game_slots[i];
+        if (i > 0)
+          ImGui::Spacing();
+        ImGui::PushFont(fonts.bold, 0.0f);
+        ImGui::TextUnformatted(slot.game.title.c_str());
+        ImGui::PopFont();
+        const std::string state =
+            slot.metadata ? Format(Tr("GAME READY \xC2\xB7 %s"), slot.game.disc_id.c_str())
+                          : Format(Tr("NOT INSTALLED \xC2\xB7 %s"), slot.game.disc_id.c_str());
+        DrawStatusPill(state.c_str(),
+                       slot.metadata ? LAUNCHER_ACCENT : ImVec4(1.0f, 0.75f, 0.3f, 1.0f), scale,
+                       false);
+        ImGui::PushTextWrapPos(0.0f);
+        if (slot.metadata)
+          ImGui::TextDisabled("%s", slot.root.string().c_str());
+        else
+          ImGui::TextDisabled("%s", Tr("Select its disc image below and extract it."));
+        ImGui::PopTextWrapPos();
+      }
+      EndSection();
+    }
+    else
+    {
     BeginSection("##files_installed", Tr("INSTALLED GAME"));
     if (current_metadata)
     {
@@ -4717,6 +4935,7 @@ int main(int argc, char** argv)
       ImGui::TextDisabled("%s", Tr("Select a disc image below and extract it."));
     }
     EndSection();
+    }
     BeginSection("##files_image", Tr("DISC IMAGE"));
     if (selected_image)
       ImGui::TextWrapped("%s", selected_image->string().c_str());
@@ -4778,6 +4997,13 @@ int main(int argc, char** argv)
       if (files_columns)
         NextPageColumn();
       BeginSection("##files_complete_save", Tr("COMPLETE SAVE"));
+      // With more than one game, the one it is for: the main game.
+      if (moderngekko::frontend::PlaysSeveralGames())
+      {
+        ImGui::PushFont(fonts.bold, 0.0f);
+        ImGui::TextUnformatted(moderngekko::frontend::KnownGames().front().title.c_str());
+        ImGui::PopFont();
+      }
       if (save_checked_at == 0 || SDL_GetTicks() - save_checked_at >= 1000)
       {
         game_save_exists = moderngekko::frontend::HasGameSave(game_save_folder);

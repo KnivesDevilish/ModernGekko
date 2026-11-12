@@ -2,6 +2,7 @@
 #include "frontend_config.hpp"
 #include "dol_patch.hpp"
 #include "game_borders.hpp"
+#include "launcher_games.hpp"
 #include "launcher_text.hpp"
 #include "moderngekko/game.hpp"
 #include "moderngekko/runtime.hpp"
@@ -650,14 +651,13 @@ int RunMain(int argc, char **argv) {
     return 2;
   }
 
-#ifdef MODERNGEKKO_REQUIRED_DISC_ID
-  if (inspected.metadata->disc_id != MODERNGEKKO_REQUIRED_DISC_ID) {
+  // One of the build's games (tools/launcher_games.hpp), or any without them.
+  if (!moderngekko::frontend::AcceptsGame(inspected.metadata->disc_id)) {
     std::cerr << "unsupported disc ID: expected "
-              << MODERNGEKKO_REQUIRED_DISC_ID << ", got "
+              << moderngekko::frontend::KnownGameIds() << ", got "
               << inspected.metadata->disc_id << '\n';
     return 2;
   }
-#endif
 #ifdef MODERNGEKKO_REQUIRED_DOL_SHA256
   if (inspected.metadata->dol_sha256 != MODERNGEKKO_REQUIRED_DOL_SHA256) {
     std::cerr << "unsupported main DOL: this release requires its pinned game build\n";

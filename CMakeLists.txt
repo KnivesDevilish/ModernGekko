@@ -38,6 +38,13 @@ set(MODERNGEKKO_USER_DIRECTORY_NAME "moderngekko" CACHE STRING
     "Frontend user directory name")
 set(MODERNGEKKO_REQUIRED_DISC_ID "" CACHE STRING
     "Required six-character disc ID for branded builds")
+# A branded build that plays more than one game lists them all, the main one
+# (MODERNGEKKO_REQUIRED_DISC_ID) first, as ID=Title;ID=Title: Game Files
+# extracts any of them and PLAY asks which one to start, each window titled
+# after its game (tools/launcher_games.hpp). Empty: the required game alone.
+set(MODERNGEKKO_GAMES "" CACHE STRING
+    "Games a branded build plays, as ID=Title;ID=Title (main game first)")
+string(REPLACE ";" "|" MODERNGEKKO_GAMES_DEFINITION "${MODERNGEKKO_GAMES}")
 set(MODERNGEKKO_REQUIRED_DOL_SHA256 "" CACHE STRING
     "Required extracted main DOL SHA-256")
 set(MODERNGEKKO_REQUIRED_REL_SHA256 "" CACHE STRING
@@ -626,6 +633,10 @@ if(MODERNGEKKO_ENABLE_DOLPHIN_RUNTIME)
         target_compile_definitions(moderngekko-run PRIVATE
             MODERNGEKKO_REQUIRED_DISC_ID="${MODERNGEKKO_REQUIRED_DISC_ID}")
     endif()
+    if(MODERNGEKKO_GAMES)
+        target_compile_definitions(moderngekko-run PRIVATE
+            MODERNGEKKO_GAMES="${MODERNGEKKO_GAMES_DEFINITION}")
+    endif()
     if(MODERNGEKKO_REQUIRED_DOL_SHA256)
         target_compile_definitions(moderngekko-run PRIVATE
             MODERNGEKKO_REQUIRED_DOL_SHA256="${MODERNGEKKO_REQUIRED_DOL_SHA256}")
@@ -752,6 +763,10 @@ if(MODERNGEKKO_ENABLE_DOLPHIN_RUNTIME)
     if(MODERNGEKKO_REQUIRED_DISC_ID)
         target_compile_definitions(moderngekko-launcher PRIVATE
             MODERNGEKKO_REQUIRED_DISC_ID="${MODERNGEKKO_REQUIRED_DISC_ID}")
+    endif()
+    if(MODERNGEKKO_GAMES)
+        target_compile_definitions(moderngekko-launcher PRIVATE
+            MODERNGEKKO_GAMES="${MODERNGEKKO_GAMES_DEFINITION}")
     endif()
     if(MODERNGEKKO_REQUIRED_DOL_SHA256)
         target_compile_definitions(moderngekko-launcher PRIVATE
@@ -949,6 +964,13 @@ if(BUILD_TESTING)
         "${CMAKE_CURRENT_SOURCE_DIR}/tools")
     target_compile_features(moderngekko_frontend_config_test PRIVATE cxx_std_23)
     add_test(NAME moderngekko.frontend_config COMMAND moderngekko_frontend_config_test)
+
+    add_executable(moderngekko_launcher_games_test
+        tests/launcher_games_test.cpp)
+    target_include_directories(moderngekko_launcher_games_test PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/tools")
+    target_compile_features(moderngekko_launcher_games_test PRIVATE cxx_std_23)
+    add_test(NAME moderngekko.launcher_games COMMAND moderngekko_launcher_games_test)
 
     # Header-only, so the test needs no companion translation unit.
     add_executable(moderngekko_launcher_savestates_test
