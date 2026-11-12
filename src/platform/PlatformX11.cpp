@@ -8,9 +8,12 @@
 // screenshot, at the resolution chosen for screenshots
 // (src/runtime/screenshot_keys.hpp), and F10 (pause) waits while one is taken;
 // the window opens at the size chosen in the launcher, or one that fits the
-// primary monitor, in its middle (src/runtime/window_size.hpp), with the
-// program's icon (Resources/app-icon.png, MODERNGEKKO_APP_ICON). Alt+Enter
-// (fullscreen) and Ctrl+Esc (quit) stay.
+// primary monitor, in its middle (src/runtime/window_size.hpp), or in the
+// middle of the launcher's window, on its monitor, when the launcher names it
+// (RuntimeConfig::centre_on_window), with the program's icon
+// (Resources/app-icon.png, MODERNGEKKO_APP_ICON), and asks for the focus once
+// the launcher has stepped aside. Alt+Enter (fullscreen) and Ctrl+Esc (quit)
+// stay.
 
 // Without the CMake option (CMakeLists.txt always passes it), the window keeps
 // its savestate keys, as before.
@@ -42,9 +45,13 @@ static constexpr auto X_None = None;
 #include "../runtime/window_size.hpp"
 
 #include <algorithm>
+#include <chrono>
+#include <cstdint>
 #include <cstring>
+#include <optional>
 #include <span>
 #include <thread>
+#include <utility>
 #include <vector>
 
 #include <X11/Xatom.h>
@@ -127,6 +134,7 @@ private:
   void CloseDisplay();
   void UpdateWindowPosition();
   void ProcessEvents();
+  void FocusAfterLauncher();
 
   Display* m_display = nullptr;
   Window m_window = {};
@@ -138,6 +146,11 @@ private:
   int m_window_y = Config::Get(Config::MAIN_RENDER_WINDOW_YPOS);
   unsigned int m_window_width = Config::Get(Config::MAIN_RENDER_WINDOW_WIDTH);
   unsigned int m_window_height = Config::Get(Config::MAIN_RENDER_WINDOW_HEIGHT);
+  // Waiting for the launcher to step aside (FocusAfterLauncher), checked
+  // every so often until then.
+  bool m_focus_after_launcher = false;
+  std::chrono::steady_clock::time_point m_opened_at;
+  std::chrono::steady_clock::time_point m_next_launcher_check;
 };
 
 PlatformX11::~PlatformX11()
@@ -157,9 +170,11 @@ PlatformX11::~PlatformX11()
 
 namespace
 {
-// The primary monitor's place on the desktop (the first monitor when none is
-// primary), or the whole screen without XRandR 1.5.
-moderngekko::detail::ScreenArea PrimaryMonitor(Display* display)
+// The monitor with `point` on it, else the primary monitor (the first monitor
+// when none is primary): its place on the desktop, or the whole screen
+// without XRandR 1.5.
+moderngekko::detail::ScreenArea MonitorAt(Display* display,
+                                          std::optional<std::pair<int, int>> point)
 {
 #ifdef HAVE_XRANDR
   int event_base = 0;
@@ -174,12 +189,21 @@ moderngekko::detail::ScreenArea PrimaryMonitor(Display* display)
     if (XRRMonitorInfo* monitors =
             XRRGetMonitors(display, DefaultRootWindow(display), True, &count))
     {
+      bool primary_found = false;
       for (int i = 0; i < count; ++i)
       {
-        if (i == 0 || monitors[i].primary)
-          area = {monitors[i].x, monitors[i].y, monitors[i].width, monitors[i].height};
-        if (monitors[i].primary)
+        const XRRMonitorInfo& monitor = monitors[i];
+        if (point && point->first >= monitor.x && point->first < monitor.x + monitor.width &&
+            point->second >= monitor.y && point->second < monitor.y + monitor.height)
+        {
+          area = {monitor.x, monitor.y, monitor.width, monitor.height};
           break;
+        }
+        if (!primary_found && (i == 0 || monitor.primary))
+        {
+          area = {monitor.x, monitor.y, monitor.width, monitor.height};
+          primary_found = monitor.primary;
+        }
       }
       XRRFreeMonitors(monitors);
     }
@@ -189,6 +213,37 @@ moderngekko::detail::ScreenArea PrimaryMonitor(Display* display)
 #endif
   const int screen = DefaultScreen(display);
   return {0, 0, DisplayWidth(display, screen), DisplayHeight(display, screen)};
+}
+
+// Asked of a window that may have gone: an X error then, which by default
+// ends the program, so errors are ignored while it is asked.
+int IgnoreXError(Display*, XErrorEvent*)
+{
+  return 0;
+}
+
+// The middle of the window RuntimeConfig::centre_on_window names (the
+// launcher's), on the desktop; nothing without one, or when it has gone.
+std::optional<std::pair<int, int>> CentreOfWindowToCentreOn(Display* display)
+{
+  const std::uint64_t id = moderngekko::detail::WindowToCentreOn();
+  if (id == 0)
+    return std::nullopt;
+  const Window window = static_cast<Window>(id);
+  XSync(display, False);
+  const XErrorHandler previous = XSetErrorHandler(IgnoreXError);
+  XWindowAttributes attributes{};
+  int x = 0;
+  int y = 0;
+  Window child = 0;
+  const bool found = XGetWindowAttributes(display, window, &attributes) != 0 &&
+                     XTranslateCoordinates(display, window, DefaultRootWindow(display), 0, 0,
+                                           &x, &y, &child) != 0;
+  XSync(display, False);
+  XSetErrorHandler(previous);
+  if (!found || attributes.width <= 0 || attributes.height <= 0)
+    return std::nullopt;
+  return std::pair{x + attributes.width / 2, y + attributes.height / 2};
 }
 }  // namespace
 
@@ -203,9 +258,14 @@ bool PlatformX11::Init()
   }
 
   // The size chosen in the launcher, or one that fits the screen, in the
-  // middle of the primary monitor.
-  const moderngekko::detail::WindowPlace place = moderngekko::detail::PlaceWindow(
-      moderngekko::detail::RequestedWindowSize(), PrimaryMonitor(m_display));
+  // middle of the launcher's window, on its monitor, or of the primary
+  // monitor.
+  const std::optional<std::pair<int, int>> centre = CentreOfWindowToCentreOn(m_display);
+  const moderngekko::detail::ScreenArea screen = MonitorAt(m_display, centre);
+  const moderngekko::detail::WindowPlace place =
+      centre ? moderngekko::detail::PlaceWindowAt(moderngekko::detail::RequestedWindowSize(),
+                                                  screen, centre->first, centre->second) :
+               moderngekko::detail::PlaceWindow(moderngekko::detail::RequestedWindowSize(), screen);
   m_window_x = place.x;
   m_window_y = place.y;
   m_window_width = static_cast<unsigned int>(place.width);
@@ -241,6 +301,8 @@ bool PlatformX11::Init()
   }
   SetWindowIcon(m_display, m_window);
   XMapRaised(m_display, m_window);
+  m_focus_after_launcher = moderngekko::detail::WindowToCentreOn() != 0;
+  m_opened_at = std::chrono::steady_clock::now();
   XFlush(m_display);
   XSync(m_display, True);
   ProcessEvents();
@@ -291,6 +353,7 @@ void PlatformX11::MainLoop()
     Core::HostDispatchJobs(Core::System::GetInstance());
     ProcessEvents();
     UpdateWindowPosition();
+    FocusAfterLauncher();
 
     // TODO: Is this sleep appropriate?
     std::this_thread::sleep_for(std::chrono::milliseconds(1));
@@ -305,6 +368,53 @@ WindowSystemInfo PlatformX11::GetWindowSystemInfo() const
   wsi.render_window = reinterpret_cast<void*>(m_window);
   wsi.render_surface = reinterpret_cast<void*>(m_window);
   return wsi;
+}
+
+// The launcher stays over this window, with its loading screen, until the
+// game's first picture, and then hides. The window manager may not have given
+// this window the focus meanwhile, the launcher being the window in use, and
+// without the focus the game reads no controller: once the launcher is gone,
+// this window asks for it, as a task bar would when it is clicked.
+void PlatformX11::FocusAfterLauncher()
+{
+  if (!m_focus_after_launcher)
+    return;
+  const auto now = std::chrono::steady_clock::now();
+  if (now < m_next_launcher_check)
+    return;
+  m_next_launcher_check = now + std::chrono::milliseconds(100);
+  // The launcher steps aside 40 seconds at most after the game starts.
+  if (now - m_opened_at > std::chrono::minutes(2))
+  {
+    m_focus_after_launcher = false;
+    return;
+  }
+  const Window launcher = static_cast<Window>(moderngekko::detail::WindowToCentreOn());
+  XSync(m_display, False);
+  const XErrorHandler previous = XSetErrorHandler(IgnoreXError);
+  XWindowAttributes attributes{};
+  const bool shown = XGetWindowAttributes(m_display, launcher, &attributes) != 0 &&
+                     attributes.map_state == IsViewable;
+  XSync(m_display, False);
+  XSetErrorHandler(previous);
+  if (shown)
+    return;
+  m_focus_after_launcher = false;
+  Window focused = 0;
+  int revert_to = 0;
+  XGetInputFocus(m_display, &focused, &revert_to);
+  if (focused == m_window)
+    return;
+  XEvent event{};
+  event.xclient.type = ClientMessage;
+  event.xclient.window = m_window;
+  event.xclient.message_type = XInternAtom(m_display, "_NET_ACTIVE_WINDOW", False);
+  event.xclient.format = 32;
+  event.xclient.data.l[0] = 2;  // from a task bar or a pager
+  event.xclient.data.l[1] = CurrentTime;
+  XSendEvent(m_display, DefaultRootWindow(m_display), False,
+             SubstructureRedirectMask | SubstructureNotifyMask, &event);
+  XFlush(m_display);
 }
 
 void PlatformX11::UpdateWindowPosition()

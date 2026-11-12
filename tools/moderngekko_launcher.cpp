@@ -10,6 +10,8 @@
 #include "launcher_gallery.hpp"
 #include "launcher_game_select.hpp"
 #include "launcher_games.hpp"
+#include "launcher_loading.hpp"
+#include "launcher_transition.hpp"
 #include "launcher_save.hpp"
 #include "launcher_ui.hpp"
 #include "launcher_update.hpp"
@@ -561,6 +563,22 @@ fs::path SiblingRunner(const char* argv0)
 #endif
   const fs::path sibling = self.parent_path() / runner;
   return fs::is_regular_file(sibling) ? sibling : runner;
+}
+
+// The launcher's window as its window system names it, for the runner to
+// open the game's window centred on it (--launcher-window): the X11 window ID
+// or the Windows HWND. 0 elsewhere (Wayland, where windows can't place
+// themselves).
+std::uint64_t NativeWindowId(SDL_Window* window)
+{
+  const SDL_PropertiesID properties = SDL_GetWindowProperties(window);
+#if defined(_WIN32)
+  return static_cast<std::uint64_t>(reinterpret_cast<std::uintptr_t>(
+      SDL_GetPointerProperty(properties, SDL_PROP_WINDOW_WIN32_HWND_POINTER, nullptr)));
+#else
+  const Sint64 x11_window = SDL_GetNumberProperty(properties, SDL_PROP_WINDOW_X11_WINDOW_NUMBER, 0);
+  return x11_window > 0 ? static_cast<std::uint64_t>(x11_window) : 0;
+#endif
 }
 
 // The look shared with the Netplay lobby (theme, fonts, status pills, panels,
@@ -3164,6 +3182,8 @@ int main(int argc, char** argv)
   };
   bool done = false;
   LaunchMode launch_mode = LaunchMode::None;
+  // The game selection screen chose the game, and ended in black.
+  bool launch_from_black = false;
   LauncherPage current_page = LauncherPage::Play;
   // Moving through the launcher with a gamepad.
   // The Controls page tests the controller: while it does, the gamepad's
@@ -3227,227 +3247,294 @@ int main(int argc, char** argv)
   // Set when the player chose Quit game in the in-game menu: the launcher
   // closes instead of coming back.
   bool quit_from_game = false;
-  // Starts the game (PLAY, Host or Join) and waits for it. The launcher hides
-  // while the game runs and shows itself again when the game closes, with a
-  // message if it failed. Returns the launcher's exit code for that session.
-  const auto launch_game = [&](LaunchMode mode) -> int
+  // The game started by PLAY, Host or Join, while the launcher waits for it:
+  // its process, its log, and the file the runner creates once the game can
+  // be seen (launcher_handoff.hpp). Until then the launcher shows its loading
+  // screen over everything (launcher_transition.hpp); then it hides, where
+  // it was, until the game closes.
+  struct GameSession
   {
-    int session_result = 0;
+    SDL_Process* process = nullptr;
+    LaunchMode mode = LaunchMode::None;
+    fs::path log_path;
+    bool log_written = false;
+    fs::path ready_file;
+    bool hidden = false;
+    bool placed = false;  // where the launcher was, to come back there
+    int x = 0;
+    int y = 0;
+  };
+  GameSession session;
+  GameTransition transition;
+  // The loading screen's logo: the game's, when the build has the game
+  // selection screen's art.
+  LoadingLogo loading_logo;
+  // The music's volume as it fades out while the game starts.
+  int music_level = config.music_volume;
+  // Why the game didn't start or failed, shown once the launcher is back.
+  std::string session_error_title;
+  std::string session_error;
+  // Starts the game (PLAY, Host or Join). The launcher goes black, unless it
+  // is already (`from_black`: the game selection screen ends in black), and
+  // the main loop waits for the game. False, with a message for when the
+  // launcher is back, when it can't start.
+  const auto start_game = [&](LaunchMode mode, bool from_black) -> bool
+  {
+    const double now = static_cast<double>(SDL_GetTicksNS()) / 1e9;
+    transition.Start(now, from_black);
     std::string launch_error;
     if (!WriteDefaultGame(user_directory, release_directory, current_game,
                           &launch_error))
     {
-      SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, Tr("Launch failed"), launch_error.c_str(),
-                               window);
-      session_result = 1;
+      session_error_title = Tr("Launch failed");
+      session_error = launch_error;
+      transition.Back(now);
+      return false;
+    }
+    std::vector<std::string> argument_storage = {SiblingRunner(argv[0]).string(), "--game",
+                                                 current_game.string(), "--user-dir",
+                                                 user_directory.string()};
+    // With more than one game, the window takes the name of the one chosen.
+    if (moderngekko::frontend::PlaysSeveralGames() && current_metadata)
+    {
+      if (const moderngekko::frontend::KnownGame* game =
+              moderngekko::frontend::FindKnownGame(current_metadata.metadata->disc_id))
+      {
+        argument_storage.emplace_back("--title");
+        argument_storage.emplace_back(game->title);
+      }
+    }
+    // Solo only: see the note by the dropdown.
+    if (mode == LaunchMode::Solo && selected_savestate >= 0 &&
+        static_cast<std::size_t>(selected_savestate) < launcher_savestates.size())
+    {
+      argument_storage.emplace_back("--load-state");
+      argument_storage.emplace_back(
+          moderngekko::frontend::PathText(
+              launcher_savestates[static_cast<std::size_t>(selected_savestate)]));
+    }
+    const bool invite_code = config.netplay_connection == "code";
+    if (mode == LaunchMode::Host)
+    {
+      argument_storage.emplace_back("--netplay-host");
+      if (invite_code)
+        argument_storage.emplace_back("--invite-code");
+    }
+    else if (mode == LaunchMode::Join && invite_code)
+    {
+      argument_storage.emplace_back("--netplay-join-code");
+      argument_storage.emplace_back(netplay_join_code);
+    }
+    else if (mode == LaunchMode::Join)
+    {
+      argument_storage.emplace_back("--netplay-join");
+      argument_storage.emplace_back(config.netplay_address);
+    }
+    if (mode == LaunchMode::Host || mode == LaunchMode::Join)
+    {
+      argument_storage.emplace_back("--netplay-port");
+      argument_storage.emplace_back(std::to_string(config.netplay_port));
+      argument_storage.emplace_back("--nickname");
+      argument_storage.emplace_back(config.netplay_nickname);
+      argument_storage.emplace_back("--buffer");
+      argument_storage.emplace_back(config.netplay_buffer);
+      for (const std::string& controller : config.controllers)
+      {
+        argument_storage.emplace_back("--controller");
+        argument_storage.emplace_back(controller);
+      }
+    }
+    if (use_wayland)
+      argument_storage.emplace_back("--wayland");
+#if defined(__linux__)
+    else
+      argument_storage.emplace_back("-X11");
+#endif
+    // The game's window opens centred on the launcher's (X11, Windows; on
+    // Wayland the compositor places windows).
+    if (const std::uint64_t launcher_window = NativeWindowId(window))
+    {
+      argument_storage.emplace_back("--launcher-window");
+      argument_storage.emplace_back(std::to_string(launcher_window));
+    }
+    const std::filesystem::path log_path =
+        user_directory / "Logs" / MODERNGEKKO_LOG_FILENAME;
+    std::error_code log_error;
+    std::filesystem::create_directories(log_path.parent_path(), log_error);
+    // Created by the runner when the game can be seen. Without it (no Logs
+    // folder), the launcher steps aside as soon as it is black.
+    fs::path ready_file;
+    if (!log_error)
+    {
+      ready_file = log_path.parent_path() / "game-shown";
+      std::error_code ignored;
+      fs::remove(ready_file, ignored);
+      argument_storage.emplace_back("--launcher-ready-file");
+      argument_storage.emplace_back(moderngekko::frontend::PathText(ready_file));
+    }
+    std::vector<const char*> arguments;
+    arguments.reserve(argument_storage.size() + 1);
+    for (const std::string& argument : argument_storage)
+      arguments.push_back(argument.c_str());
+    arguments.push_back(nullptr);
+    SDL_IOStream* log_stream =
+        log_error ? nullptr : SDL_IOFromFile(log_path.string().c_str(), "w");
+    SDL_Process* process = nullptr;
+    std::string process_error;
+    if (log_stream)
+    {
+      // The log's first line says which release and system wrote it, for
+      // reports; the runner writes after it.
+#if defined(MODERNGEKKO_FRONTEND_VERSION)
+      SDL_IOprintf(log_stream, "%s %s (%s)\n", MODERNGEKKO_FRONTEND_NAME,
+                   MODERNGEKKO_FRONTEND_VERSION, SDL_GetPlatform());
+#else
+      SDL_IOprintf(log_stream, "%s (%s)\n", MODERNGEKKO_FRONTEND_NAME, SDL_GetPlatform());
+#endif
+      SDL_FlushIO(log_stream);
+      const SDL_PropertiesID properties = SDL_CreateProperties();
+      if (properties)
+      {
+        SDL_SetPointerProperty(properties, SDL_PROP_PROCESS_CREATE_ARGS_POINTER,
+                               arguments.data());
+        SDL_SetNumberProperty(properties, SDL_PROP_PROCESS_CREATE_STDOUT_NUMBER,
+                              SDL_PROCESS_STDIO_REDIRECT);
+        SDL_SetPointerProperty(properties, SDL_PROP_PROCESS_CREATE_STDOUT_POINTER, log_stream);
+        SDL_SetBooleanProperty(properties, SDL_PROP_PROCESS_CREATE_STDERR_TO_STDOUT_BOOLEAN,
+                               true);
+        process = SDL_CreateProcessWithProperties(properties);
+        SDL_DestroyProperties(properties);
+      }
+      if (!process)
+        process_error = SDL_GetError();
+      SDL_CloseIO(log_stream);
     }
     else
     {
-      std::vector<std::string> argument_storage = {SiblingRunner(argv[0]).string(), "--game",
-                                                   current_game.string(), "--user-dir",
-                                                   user_directory.string()};
-      // With more than one game, the window takes the name of the one chosen.
-      if (moderngekko::frontend::PlaysSeveralGames() && current_metadata)
-      {
-        if (const moderngekko::frontend::KnownGame* game =
-                moderngekko::frontend::FindKnownGame(current_metadata.metadata->disc_id))
-        {
-          argument_storage.emplace_back("--title");
-          argument_storage.emplace_back(game->title);
-        }
-      }
-      // Solo only: see the note by the dropdown.
-      if (mode == LaunchMode::Solo && selected_savestate >= 0 &&
-          static_cast<std::size_t>(selected_savestate) < launcher_savestates.size())
-      {
-        argument_storage.emplace_back("--load-state");
-        argument_storage.emplace_back(
-            moderngekko::frontend::PathText(
-                launcher_savestates[static_cast<std::size_t>(selected_savestate)]));
-      }
-      const bool invite_code = config.netplay_connection == "code";
-      if (mode == LaunchMode::Host)
-      {
-        argument_storage.emplace_back("--netplay-host");
-        if (invite_code)
-          argument_storage.emplace_back("--invite-code");
-      }
-      else if (mode == LaunchMode::Join && invite_code)
-      {
-        argument_storage.emplace_back("--netplay-join-code");
-        argument_storage.emplace_back(netplay_join_code);
-      }
-      else if (mode == LaunchMode::Join)
-      {
-        argument_storage.emplace_back("--netplay-join");
-        argument_storage.emplace_back(config.netplay_address);
-      }
-      if (mode == LaunchMode::Host || mode == LaunchMode::Join)
-      {
-        argument_storage.emplace_back("--netplay-port");
-        argument_storage.emplace_back(std::to_string(config.netplay_port));
-        argument_storage.emplace_back("--nickname");
-        argument_storage.emplace_back(config.netplay_nickname);
-        argument_storage.emplace_back("--buffer");
-        argument_storage.emplace_back(config.netplay_buffer);
-        for (const std::string& controller : config.controllers)
-        {
-          argument_storage.emplace_back("--controller");
-          argument_storage.emplace_back(controller);
-        }
-      }
-      if (use_wayland)
-        argument_storage.emplace_back("--wayland");
-#if defined(__linux__)
-      else
-        argument_storage.emplace_back("-X11");
-#endif
-      std::vector<const char*> arguments;
-      arguments.reserve(argument_storage.size() + 1);
-      for (const std::string& argument : argument_storage)
-        arguments.push_back(argument.c_str());
-      arguments.push_back(nullptr);
-      const std::filesystem::path log_path =
-          user_directory / "Logs" / MODERNGEKKO_LOG_FILENAME;
-      std::error_code log_error;
-      std::filesystem::create_directories(log_path.parent_path(), log_error);
-      SDL_IOStream* log_stream =
-          log_error ? nullptr : SDL_IOFromFile(log_path.string().c_str(), "w");
-      SDL_Process* process = nullptr;
-      std::string process_error;
-      if (log_stream)
-      {
-        // The log's first line says which release and system wrote it, for
-        // reports; the runner writes after it.
-#if defined(MODERNGEKKO_FRONTEND_VERSION)
-        SDL_IOprintf(log_stream, "%s %s (%s)\n", MODERNGEKKO_FRONTEND_NAME,
-                     MODERNGEKKO_FRONTEND_VERSION, SDL_GetPlatform());
-#else
-        SDL_IOprintf(log_stream, "%s (%s)\n", MODERNGEKKO_FRONTEND_NAME, SDL_GetPlatform());
-#endif
-        SDL_FlushIO(log_stream);
-        const SDL_PropertiesID properties = SDL_CreateProperties();
-        if (properties)
-        {
-          SDL_SetPointerProperty(properties, SDL_PROP_PROCESS_CREATE_ARGS_POINTER,
-                                 arguments.data());
-          SDL_SetNumberProperty(properties, SDL_PROP_PROCESS_CREATE_STDOUT_NUMBER,
-                                SDL_PROCESS_STDIO_REDIRECT);
-          SDL_SetPointerProperty(properties, SDL_PROP_PROCESS_CREATE_STDOUT_POINTER, log_stream);
-          SDL_SetBooleanProperty(properties, SDL_PROP_PROCESS_CREATE_STDERR_TO_STDOUT_BOOLEAN,
-                                 true);
-          process = SDL_CreateProcessWithProperties(properties);
-          SDL_DestroyProperties(properties);
-        }
-        if (!process)
-          process_error = SDL_GetError();
-        SDL_CloseIO(log_stream);
-      }
-      else
-      {
-        process = SDL_CreateProcess(arguments.data(), false);
-        if (!process)
-          process_error = SDL_GetError();
-      }
+      process = SDL_CreateProcess(arguments.data(), false);
       if (!process)
+        process_error = SDL_GetError();
+    }
+    if (!process)
+    {
+      session_error_title = Tr("Launch failed");
+      session_error = Format(Tr("Could not start %s: %s"), SiblingRunner(argv[0]).string().c_str(),
+                             process_error.c_str());
+      transition.Back(now);
+      return false;
+    }
+    session = {process, mode, log_path, !log_error, ready_file};
+    if (ready_file.empty())
+      transition.GameShown(now);
+    // Over the game's window, which opens behind it, until that has its
+    // first picture.
+    SDL_SetWindowAlwaysOnTop(window, true);
+    return true;
+  };
+  // The game has closed, or can't be followed: the launcher comes back from
+  // black, where it was, with a message when the game failed (shown once it
+  // is back). Quit game in the in-game menu closes the launcher instead.
+  const auto end_game = [&](bool waited, int exit_code)
+  {
+    const std::string wait_error = waited ? std::string() : std::string(SDL_GetError());
+    SDL_DestroyProcess(session.process);
+    std::error_code ignored;
+    if (!session.ready_file.empty())
+      fs::remove(session.ready_file, ignored);
+    const GameSession ended = session;
+    session = {};
+    if (waited && exit_code == moderngekko::frontend::RUNNER_EXIT_QUIT)
+    {
+      quit_from_game = true;
+      result = 0;
+      return;
+    }
+    if (ended.hidden)
+    {
+      SDL_ShowWindow(window);
+      if (ended.placed)
+        SDL_SetWindowPosition(window, ended.x, ended.y);
+      SDL_RaiseWindow(window);
+    }
+    SDL_SetWindowAlwaysOnTop(window, false);
+    transition.Back(static_cast<double>(SDL_GetTicksNS()) / 1e9);
+    result = 0;
+    if (waited && exit_code == 0)
+      return;
+    const LaunchMode mode = ended.mode;
+    std::string launch_error;
+    if (!waited)
+    {
+      launch_error = Format(Tr("The game process could not be monitored: %s"), wait_error.c_str());
+    }
+    else if (mode == LaunchMode::Join)
+    {
+      switch (static_cast<moderngekko::frontend::NetplayExitCode>(exit_code))
       {
-        launch_error = Format(Tr("Could not start %s: %s"), SiblingRunner(argv[0]).string().c_str(),
-                              process_error.c_str());
-        SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, Tr("Launch failed"), launch_error.c_str(),
-                                 window);
-        session_result = 1;
-      }
-      else
-      {
-        SDL_HideWindow(window);
-        int exit_code = 1;
-        const bool waited = SDL_WaitProcess(process, true, &exit_code);
-        SDL_DestroyProcess(process);
-        if (waited && exit_code == moderngekko::frontend::RUNNER_EXIT_QUIT)
-        {
-          quit_from_game = true;
-          return 0;
-        }
-        SDL_ShowWindow(window);
-        SDL_RaiseWindow(window);
-        if (!waited || exit_code != 0)
-        {
-          if (!waited)
-          {
-            launch_error = Format(Tr("The game process could not be monitored: %s"), SDL_GetError());
-          }
-          else if (mode == LaunchMode::Join)
-          {
-            switch (static_cast<moderngekko::frontend::NetplayExitCode>(exit_code))
-            {
-            case moderngekko::frontend::NetplayExitCode::VersionMismatch:
-              launch_error = Tr("The host is running an incompatible netplay build. Both "
-                                "players must use the same release.");
-              break;
-            case moderngekko::frontend::NetplayExitCode::CompatibilityMismatch:
-              launch_error = Tr("The extracted game or recomp module does not match the "
-                                "host. Both players need the same game revision and "
-                                "release.");
-              break;
-            case moderngekko::frontend::NetplayExitCode::RoomFull:
-              launch_error = Tr("All four controller slots are already occupied.");
-              break;
-            case moderngekko::frontend::NetplayExitCode::GameRunning:
-              launch_error = Tr("The host has already started the game.");
-              break;
-            case moderngekko::frontend::NetplayExitCode::ServerFull:
-              launch_error = Tr("The netplay server is full.");
-              break;
-            case moderngekko::frontend::NetplayExitCode::NicknameRejected:
-              launch_error = Tr("The nickname was rejected by the host.");
-              break;
-            case moderngekko::frontend::NetplayExitCode::InviteCodeFailed:
-              launch_error = Tr("No room answered to that invite code. Check that it is typed "
-                                "right and that the host's room is still open. In the same "
-                                "house, use Direct IP with the host's At home address: invite "
-                                "codes often fail there. If it keeps failing, your connection "
-                                "may not allow invite codes: try Direct IP with Tailscale.");
-              break;
-            default:
-              launch_error = Tr("Could not reach the host. Check the address and the UDP port: "
-                                "in the same house, use the address the host's lobby shows "
-                                "under At home. If they are right, the host's firewall is "
-                                "probably blocking the game: on Windows, the host can allow it "
-                                "in Host Netplay; on Linux, the host opens the UDP port (the "
-                                "README says how).");
-              break;
-            }
-          }
-          else if (mode == LaunchMode::Host)
-          {
-            launch_error = Tr("Could not create the netplay session. Check the UDP port "
-                              "and firewall settings.");
-          }
-          else if (exit_code == moderngekko::frontend::RUNNER_EXIT_GRAPHICS)
-          {
-            // The graphics backend couldn't start: another one may.
-            launch_error = Format(Tr("The graphics backend (%s) could not start: your graphics "
-                                     "card or its driver may not support it. Choose another one "
-                                     "in Settings, under GRAPHICS, and press PLAY again."),
-                                  graphics_backends[graphics_backend_index].text);
-#if defined(_WIN32)
-            launch_error += "\n\n";
-            launch_error += Tr("On Windows, Direct3D 11 works on almost every PC.");
-#endif
-          }
-          else
-          {
-            launch_error = Format(Tr("The game process exited with code %d."), exit_code);
-          }
-          if (!log_error)
-            launch_error += Format(Tr("\n\nDetails were written to:\n%s"), log_path.string().c_str());
-          SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, Tr("Session failed"), launch_error.c_str(),
-                                   window);
-          session_result = 1;
-        }
+      case moderngekko::frontend::NetplayExitCode::VersionMismatch:
+        launch_error = Tr("The host is running an incompatible netplay build. Both "
+                          "players must use the same release.");
+        break;
+      case moderngekko::frontend::NetplayExitCode::CompatibilityMismatch:
+        launch_error = Tr("The extracted game or recomp module does not match the "
+                          "host. Both players need the same game revision and "
+                          "release.");
+        break;
+      case moderngekko::frontend::NetplayExitCode::RoomFull:
+        launch_error = Tr("All four controller slots are already occupied.");
+        break;
+      case moderngekko::frontend::NetplayExitCode::GameRunning:
+        launch_error = Tr("The host has already started the game.");
+        break;
+      case moderngekko::frontend::NetplayExitCode::ServerFull:
+        launch_error = Tr("The netplay server is full.");
+        break;
+      case moderngekko::frontend::NetplayExitCode::NicknameRejected:
+        launch_error = Tr("The nickname was rejected by the host.");
+        break;
+      case moderngekko::frontend::NetplayExitCode::InviteCodeFailed:
+        launch_error = Tr("No room answered to that invite code. Check that it is typed "
+                          "right and that the host's room is still open. In the same "
+                          "house, use Direct IP with the host's At home address: invite "
+                          "codes often fail there. If it keeps failing, your connection "
+                          "may not allow invite codes: try Direct IP with Tailscale.");
+        break;
+      default:
+        launch_error = Tr("Could not reach the host. Check the address and the UDP port: "
+                          "in the same house, use the address the host's lobby shows "
+                          "under At home. If they are right, the host's firewall is "
+                          "probably blocking the game: on Windows, the host can allow it "
+                          "in Host Netplay; on Linux, the host opens the UDP port (the "
+                          "README says how).");
+        break;
       }
     }
-    return session_result;
+    else if (mode == LaunchMode::Host)
+    {
+      launch_error = Tr("Could not create the netplay session. Check the UDP port "
+                        "and firewall settings.");
+    }
+    else if (exit_code == moderngekko::frontend::RUNNER_EXIT_GRAPHICS)
+    {
+      // The graphics backend couldn't start: another one may.
+      launch_error = Format(Tr("The graphics backend (%s) could not start: your graphics "
+                               "card or its driver may not support it. Choose another one "
+                               "in Settings, under GRAPHICS, and press PLAY again."),
+                            graphics_backends[graphics_backend_index].text);
+#if defined(_WIN32)
+      launch_error += "\n\n";
+      launch_error += Tr("On Windows, Direct3D 11 works on almost every PC.");
+#endif
+    }
+    else
+    {
+      launch_error = Format(Tr("The game process exited with code %d."), exit_code);
+    }
+    if (ended.log_written)
+      launch_error += Format(Tr("\n\nDetails were written to:\n%s"), ended.log_path.string().c_str());
+    session_error_title = Tr("Session failed");
+    session_error = std::move(launch_error);
+    result = 1;
   };
   // Shows a page the way its sidebar item does, with what opening it reads
   // again.
@@ -3469,6 +3556,40 @@ int main(int argc, char** argv)
     }
     current_page = page;
   };
+  // Back on the PLAY page after the game: what changed while it ran is read
+  // again.
+  const auto after_game = [&] {
+    pad_waits_for_release = true;
+    // The music starts over from the beginning.
+    music.Stop();
+    if (has_music)
+      music.Play(music_path, config.music_volume);
+    music_level = config.music_volume;
+    done = false;
+    current_page = LauncherPage::Play;
+    // The in-game menu's Quick settings write config.ini while the game
+    // runs: what they change is read back, the rest stays as shown here.
+    if (const auto saved = moderngekko::frontend::LoadConfig(user_directory, false))
+    {
+      config.effect = saved.effect;
+      config.game_volume = saved.game_volume;
+      config.game_border = saved.game_border;
+      config.resolution = saved.resolution;
+      for (std::size_t i = 0; i < resolutions.size(); ++i)
+      {
+        if (saved.resolution == resolutions[i].text)
+          resolution_index = static_cast<int>(i);
+      }
+    }
+    // Time played and savestates changed while the game ran.
+    summary_stale = true;
+    launcher_savestates = PlaySavestates(user_directory);
+    selected_savestate = -1;
+    // Pad and key events from the game session waited in the queue while
+    // the launcher was hidden; they are not meant for it.
+    SDL_FlushEvents(SDL_EVENT_FIRST, SDL_EVENT_LAST);
+    refresh_controllers();
+  };
   while (!done)
   {
     bool controllers_changed = false;
@@ -3476,7 +3597,9 @@ int main(int argc, char** argv)
     while (SDL_PollEvent(&event))
     {
       ImGui_ImplSDL3_ProcessEvent(&event);
-      if (event.type == SDL_EVENT_QUIT || event.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED)
+      // While a game runs the launcher waits for it, as it always has.
+      if ((event.type == SDL_EVENT_QUIT || event.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED) &&
+          !session.process)
         done = true;
       if (event.type == SDL_EVENT_JOYSTICK_ADDED || event.type == SDL_EVENT_JOYSTICK_REMOVED ||
           event.type == SDL_EVENT_GAMEPAD_REMAPPED)
@@ -3488,6 +3611,77 @@ int main(int argc, char** argv)
     {
       refresh_controllers();
       read_pad_style();
+    }
+    // A game starting or running (start_game): the launcher shows its loading
+    // screen until the game can be seen, then steps aside where it is and
+    // waits for the game to close, as it always did.
+    if (session.process)
+    {
+      int exit_code = 1;
+      bool waited = true;
+      bool ended = SDL_WaitProcess(session.process, false, &exit_code);
+      const double now = static_cast<double>(SDL_GetTicksNS()) / 1e9;
+      std::error_code ignored;
+      if (!ended && !transition.IsGameShown() && fs::exists(session.ready_file, ignored))
+        transition.GameShown(now);
+      if (!ended && transition.TimeToHide(now))
+      {
+        music.Stop();
+        session.placed = SDL_GetWindowPosition(window, &session.x, &session.y);
+        SDL_SetWindowAlwaysOnTop(window, false);
+        SDL_HideWindow(window);
+        session.hidden = true;
+        waited = SDL_WaitProcess(session.process, true, &exit_code);
+        ended = true;
+      }
+      else if (!ended)
+      {
+        // The music fades out meanwhile.
+        const int level = static_cast<int>(
+            std::lround(config.music_volume * transition.MusicLevel(now)));
+        if (level != music_level)
+        {
+          music.SetVolume(level);
+          music_level = level;
+        }
+      }
+      if (ended)
+      {
+        end_game(waited, exit_code);
+        // Quit game in the in-game menu: the launcher closes, still hidden.
+        if (quit_from_game)
+          break;
+        after_game();
+      }
+    }
+    // Why the game failed, once the launcher is back.
+    if (!session.process && !session_error.empty() &&
+        !transition.Active(static_cast<double>(SDL_GetTicksNS()) / 1e9))
+    {
+      SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, session_error_title.c_str(),
+                               session_error.c_str(), window);
+      session_error.clear();
+      pad_waits_for_release = true;
+    }
+    // All black (the loading screen): the pages aren't drawn.
+    {
+      const double now = static_cast<double>(SDL_GetTicksNS()) / 1e9;
+      if (transition.CoversLauncher(now))
+      {
+        ImGui_ImplSDLRenderer3_NewFrame();
+        ImGui_ImplSDL3_NewFrame();
+        ImGui::NewFrame();
+        const ImGuiViewport* viewport = ImGui::GetMainViewport();
+        DrawLoadingScreen(ImGui::GetForegroundDrawList(), viewport->Pos, viewport->Size,
+                          transition, now, loading_logo, scale);
+        ImGui::Render();
+        SDL_SetRenderScale(renderer, io.DisplayFramebufferScale.x, io.DisplayFramebufferScale.y);
+        SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
+        SDL_RenderClear(renderer);
+        ImGui_ImplSDLRenderer3_RenderDrawData(ImGui::GetDrawData(), renderer);
+        SDL_RenderPresent(renderer);
+        continue;
+      }
     }
     UpdateControllerTester(controller_tester, current_page == LauncherPage::Controls,
                            controller_profile, controllers);
@@ -3503,12 +3697,19 @@ int main(int argc, char** argv)
     }
     page_by_shoulder = false;
     const bool testing_controls = current_page == LauncherPage::Controls && controls_testing;
+    // While the launcher goes to black or comes back from it, nothing in it
+    // answers.
+    const bool fading = transition.Active(static_cast<double>(SDL_GetTicksNS()) / 1e9);
+    if (fading)
+      io.ConfigFlags |= ImGuiConfigFlags_NoMouse;
+    else
+      io.ConfigFlags &= ~ImGuiConfigFlags_NoMouse;
     // The game selection screen reads the keys and buttons itself.
-    if (testing_controls || game_select.IsOpen())
+    if (testing_controls || game_select.IsOpen() || fading)
       io.ConfigFlags &= ~ImGuiConfigFlags_NavEnableKeyboard;
     else
       io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
-    if (testing_controls || pad_waits_for_release || game_select.IsOpen())
+    if (testing_controls || pad_waits_for_release || game_select.IsOpen() || fading)
       io.ConfigFlags &= ~ImGuiConfigFlags_NavEnableGamepad;
     else
       io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;
@@ -3596,6 +3797,7 @@ int main(int argc, char** argv)
       }
     }
     else if (!popup_was_open && !item_was_active && !viewer_was_open && !game_select.IsOpen() &&
+             !fading &&
              !ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel))
     {
       // LB and RB, or Q and E on the keyboard: the page before or after this
@@ -5512,6 +5714,7 @@ int main(int argc, char** argv)
           if (ensure_controller())
           {
             launch_mode = LaunchMode::Solo;
+            launch_from_black = true;
             done = true;
           }
         }
@@ -5524,6 +5727,14 @@ int main(int argc, char** argv)
       }
     }
 
+    // The launcher going to black before the game, or coming back after.
+    if (fading)
+    {
+      const ImGuiViewport* viewport = ImGui::GetMainViewport();
+      DrawLoadingScreen(ImGui::GetForegroundDrawList(), viewport->Pos, viewport->Size, transition,
+                        static_cast<double>(SDL_GetTicksNS()) / 1e9, loading_logo, scale);
+    }
+
     ImGui::Render();
     SDL_SetRenderScale(renderer, io.DisplayFramebufferScale.x, io.DisplayFramebufferScale.y);
     SDL_SetRenderDrawColor(renderer, 8, 8, 9, 255);  // ImGuiCol_WindowBg of the theme
@@ -5532,47 +5743,28 @@ int main(int argc, char** argv)
     ImGui_ImplSDLRenderer3_RenderDrawData(ImGui::GetDrawData(), renderer);
     SDL_RenderPresent(renderer);
 
-    // PLAY, Host or Join was clicked this frame: run the game, then carry on
-    // from the PLAY page when it closes.
+    // PLAY, Host or Join was chosen this frame: the game starts, and the
+    // launcher waits for it from the next frame (start_game).
     if (launch_mode != LaunchMode::None)
     {
       if (extraction_thread.joinable())
         extraction_thread.join();
-      // The music stops while the game (or the Netplay lobby, which has its
-      // own) runs, and starts over from the beginning back here.
-      music.Stop();
-      result = launch_game(launch_mode);
-      launch_mode = LaunchMode::None;
-      pad_waits_for_release = true;
-      // Quit game in the in-game menu: the launcher closes, still hidden.
-      if (quit_from_game)
-        break;
-      if (has_music)
-        music.Play(music_path, config.music_volume);
-      done = false;
-      current_page = LauncherPage::Play;
-      // The in-game menu's Quick settings write config.ini while the game
-      // runs: what they change is read back, the rest stays as shown here.
-      if (const auto saved = moderngekko::frontend::LoadConfig(user_directory, false))
+      // The loading screen shows the game's logo, as the game selection
+      // screen has it.
+      loading_logo = {};
+      if (moderngekko::frontend::PlaysSeveralGames() && current_metadata &&
+          game_select.Load(renderer, game_select_folder,
+                           ImGui::GetMainViewport()->Size.y *
+                               ImGui::GetIO().DisplayFramebufferScale.y))
       {
-        config.effect = saved.effect;
-        config.game_volume = saved.game_volume;
-        config.game_border = saved.game_border;
-        config.resolution = saved.resolution;
-        for (std::size_t i = 0; i < resolutions.size(); ++i)
-        {
-          if (saved.resolution == resolutions[i].text)
-            resolution_index = static_cast<int>(i);
-        }
+        loading_logo = game_select.LogoFor(current_metadata.metadata->disc_id,
+                                           ImGui::GetMainViewport()->Size.y);
       }
-      // Time played and savestates changed while the game ran.
-      summary_stale = true;
-      launcher_savestates = PlaySavestates(user_directory);
-      selected_savestate = -1;
-      // Pad and key events from the game session waited in the queue while
-      // the launcher was hidden; they are not meant for it.
-      SDL_FlushEvents(SDL_EVENT_FIRST, SDL_EVENT_LAST);
-      refresh_controllers();
+      if (!start_game(launch_mode, launch_from_black))
+        result = 1;
+      launch_mode = LaunchMode::None;
+      launch_from_black = false;
+      done = false;
     }
   }
 

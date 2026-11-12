@@ -13,7 +13,9 @@
 // to fullscreen and back (Escape leaves it); Ctrl+Escape closes the game,
 // Escape alone no longer does. The window opens at the size chosen in the
 // launcher, or one that fits the primary monitor, in its middle
-// (src/runtime/window_size.hpp), and fullscreen when the launcher says so.
+// (src/runtime/window_size.hpp), or in the middle of the launcher's window, on
+// its monitor, when the launcher names it (RuntimeConfig::centre_on_window),
+// and fullscreen when the launcher says so.
 // Whether it has the focus is known, so the game reads the controllers only
 // then, unless background input is on. The window has no sunken edge and a
 // black background (no white line around the picture, in a window or in
@@ -45,6 +47,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstdint>
 #include <ctime>
 #include <filesystem>
 #include <string>
@@ -189,13 +192,25 @@ bool PlatformWin32::RegisterRenderWindowClass()
 bool PlatformWin32::CreateRenderWindow()
 {
   // The size chosen in the launcher, or one that fits the screen, in the
-  // middle of the primary monitor's work area (the desktop without its
-  // taskbar). The size is the game's picture: the frame (and the menu bar,
-  // if any) goes around it, and the whole window is centred.
+  // middle of the launcher's window, on its monitor's work area (the desktop
+  // without its taskbar), or of the primary monitor's work area. The size is
+  // the game's picture: the frame (and the menu bar, if any) goes around it,
+  // and the whole window is centred. The launcher's window is asked here
+  // rather than told by the launcher: Windows gives its place as this program
+  // sees the desktop, which differs from the launcher's view when one of the
+  // two scales for the screen's DPI and the other doesn't.
+  const HWND launcher = reinterpret_cast<HWND>(
+      static_cast<std::uintptr_t>(moderngekko::detail::WindowToCentreOn()));
+  RECT launcher_rect{};
+  const bool near_launcher =
+      launcher && IsWindow(launcher) && GetWindowRect(launcher, &launcher_rect) &&
+      launcher_rect.right > launcher_rect.left && launcher_rect.bottom > launcher_rect.top;
   moderngekko::detail::ScreenArea screen;
   MONITORINFO monitor{};
   monitor.cbSize = sizeof(monitor);
-  if (GetMonitorInfo(MonitorFromPoint(POINT{0, 0}, MONITOR_DEFAULTTOPRIMARY), &monitor))
+  if (GetMonitorInfo(near_launcher ? MonitorFromWindow(launcher, MONITOR_DEFAULTTOPRIMARY) :
+                                     MonitorFromPoint(POINT{0, 0}, MONITOR_DEFAULTTOPRIMARY),
+                     &monitor))
   {
     screen = {monitor.rcWork.left, monitor.rcWork.top, monitor.rcWork.right - monitor.rcWork.left,
               monitor.rcWork.bottom - monitor.rcWork.top};
@@ -208,7 +223,14 @@ bool PlatformWin32::CreateRenderWindow()
   m_window_height = outer.bottom - outer.top;
   m_window_x = CW_USEDEFAULT;
   m_window_y = CW_USEDEFAULT;
-  if (screen.width > 0 && screen.height > 0)
+  if (screen.width > 0 && screen.height > 0 && near_launcher)
+  {
+    m_window_x = moderngekko::detail::CentredOn((launcher_rect.left + launcher_rect.right) / 2,
+                                                m_window_width, screen.x, screen.width);
+    m_window_y = moderngekko::detail::CentredOn((launcher_rect.top + launcher_rect.bottom) / 2,
+                                                m_window_height, screen.y, screen.height);
+  }
+  else if (screen.width > 0 && screen.height > 0)
   {
     m_window_x = screen.x + std::max(0, (screen.width - m_window_width) / 2);
     m_window_y = screen.y + std::max(0, (screen.height - m_window_height) / 2);

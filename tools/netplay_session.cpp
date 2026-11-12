@@ -1,6 +1,7 @@
 #include "netplay_session.hpp"
 
 #include "game_files_hash.hpp"
+#include "launcher_handoff.hpp"
 #include "launcher_music.hpp"
 #include "launcher_text.hpp"
 #include "launcher_ui.hpp"
@@ -601,6 +602,8 @@ public:
                          static_cast<double>(SDL_GetTicksNS()) / 1e9);
     ImGui_ImplSDLRenderer3_RenderDrawData(ImGui::GetDrawData(), m_renderer);
     SDL_RenderPresent(m_renderer);
+    // The lobby can be seen: the launcher steps aside.
+    TellLauncherGameShown();
   }
 
 private:

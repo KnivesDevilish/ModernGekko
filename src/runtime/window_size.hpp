@@ -1,7 +1,9 @@
 #pragma once
 
 // The game window's size and place when it opens: the size chosen in the
-// launcher (RuntimeConfig::window_width/height), or one that fits the screen.
+// launcher (RuntimeConfig::window_width/height), or one that fits the screen,
+// in the middle of the screen or of the launcher's window
+// (RuntimeConfig::centre_on_window).
 // The runtime sets it before the window opens, and the fork's copies of
 // Dolphin's windows (src/platform/) read it. Apart from Dolphin and the
 // window systems, so tests/window_size_test.cpp can check it; X11's headers,
@@ -9,6 +11,7 @@
 // are used here.
 
 #include <algorithm>
+#include <cstdint>
 
 namespace moderngekko::detail
 {
@@ -75,10 +78,40 @@ inline WindowPlace PlaceWindow(WindowSize asked, ScreenArea screen)
   return place;
 }
 
+// Where a window `length` long starts so its middle is at `centre`, kept
+// inside the screen's `start` to `start + screen_length` when it fits there
+// (else at `start`).
+inline int CentredOn(int centre, int length, int start, int screen_length)
+{
+  const int wanted = centre - length / 2;
+  if (screen_length <= 0)
+    return wanted;
+  return std::clamp(wanted, start, std::max(start, start + screen_length - length));
+}
+
+// As PlaceWindow, with the window's middle at (centre_x, centre_y) instead of
+// the screen's: the launcher's middle, so the game opens where it was. Kept
+// on the screen when it is known.
+inline WindowPlace PlaceWindowAt(WindowSize asked, ScreenArea screen, int centre_x, int centre_y)
+{
+  WindowPlace place = PlaceWindow(asked, screen);
+  place.x = CentredOn(centre_x, place.width, screen.x, screen.width);
+  place.y = CentredOn(centre_y, place.height, screen.y, screen.height);
+  return place;
+}
+
 // Set by the runtime before the window opens (one thread, so no lock).
 inline WindowSize& RequestedWindowSize()
 {
   static WindowSize size;
   return size;
+}
+
+// RuntimeConfig::centre_on_window, set by the runtime with the size: the
+// window the game window opens centred on (the launcher's), or 0.
+inline std::uint64_t& WindowToCentreOn()
+{
+  static std::uint64_t window = 0;
+  return window;
 }
 }  // namespace moderngekko::detail

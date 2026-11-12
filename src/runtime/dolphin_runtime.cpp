@@ -632,6 +632,8 @@ struct Runtime::Impl {
   std::atomic<bool> running{false};
   RuntimeAutomationState automation_state;
   Common::EventHook present_hook;
+  // config.first_picture_shown has been called (once, for the first frame).
+  std::atomic<bool> first_picture_told{false};
   bool automation_registered = false;
   std::jthread automation_thread;
   // The pictures beside a game that doesn't fill the window, added to every
@@ -791,6 +793,7 @@ RuntimeCreateResult Runtime::Create(RuntimeConfig config) {
   Config::SetBase(Config::MAIN_FULLSCREEN, impl->config.fullscreen);
   // Read by the fork's windows (src/platform/) as they open.
   detail::RequestedWindowSize() = {impl->config.window_width, impl->config.window_height};
+  detail::WindowToCentreOn() = impl->config.centre_on_window;
 
   if (impl->config.headless)
     impl->platform = Platform::CreateHeadlessPlatform();
@@ -1080,6 +1083,10 @@ RuntimeRunResult Runtime::Run() {
                                                    std::memory_order_relaxed);
         m_impl->automation_state.present_count.store(info.present_count,
                                                      std::memory_order_relaxed);
+        // The window has its first picture: the launcher can step aside.
+        if (m_impl->config.first_picture_shown &&
+            !m_impl->first_picture_told.exchange(true, std::memory_order_relaxed))
+          m_impl->config.first_picture_shown();
       });
   if (!m_impl->config.automation.directory.empty()) {
     m_impl->automation_thread =

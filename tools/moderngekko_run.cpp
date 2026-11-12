@@ -3,6 +3,7 @@
 #include "dol_patch.hpp"
 #include "game_borders.hpp"
 #include "launcher_games.hpp"
+#include "launcher_handoff.hpp"
 #include "launcher_text.hpp"
 #include "moderngekko/game.hpp"
 #include "moderngekko/runtime.hpp"
@@ -23,6 +24,7 @@
 #include <charconv>
 #include <chrono>
 #include <csignal>
+#include <cstdint>
 #include <cstdlib>
 #include <exception>
 #include <filesystem>
@@ -65,8 +67,9 @@ std::atomic<bool> s_graphics_failed = false;
 // about the graphics backend (Vulkan, Direct3D, OpenGL) aren't shown, as the
 // launcher explains a backend that can't start in the player's language, nor
 // any while QuietAlerts() is set (a Netplay connection attempt); on Windows
-// the others are still shown in a message box, as before. Questions are
-// answered no, as on Linux.
+// the others are still shown in a message box, as before, once the launcher
+// has stepped aside (it may still be over everything with its loading
+// screen). Questions are answered no, as on Linux.
 bool HandleAlert(const char *caption, const char *text, bool yes_no,
                  Common::MsgType style) {
   const std::string message = text ? text : "";
@@ -87,6 +90,7 @@ bool HandleAlert(const char *caption, const char *text, bool yes_no,
       }))
     return false;
 #if defined(_WIN32)
+  moderngekko::frontend::TellLauncherGameShown();
   UINT icon = MB_ICONINFORMATION;
   if (style == Common::MsgType::Question)
     icon = MB_ICONQUESTION;
@@ -236,6 +240,7 @@ void Usage() {
   std::cerr << "usage: " MODERNGEKKO_RUNNER_NAME
                " [--game <extracted-root>] [--module <path>]\n"
                "       [--user-dir <path>] [--title <text>] [--load-state <path>]\n"
+               "       [--launcher-window <id>] [--launcher-ready-file <path>]\n"
                "       [--graphics <backend>] [--audio <backend>]\n"
                "       [--mods <directory>] [--no-mods]\n"
                "       [--wayland] [-X11] [--headless] [--allow-interpreter]\n"
@@ -361,6 +366,20 @@ int RunMain(int argc, char **argv) {
       config.user_directory = value("--user-dir");
     else if (arg == "--title")
       config.window_title = value("--title");
+    // The launcher's window, as its window system names it (an X11 window
+    // ID, a Windows HWND), in decimal: the game window opens centred on it.
+    else if (arg == "--launcher-window") {
+      const std::string_view id = value("--launcher-window");
+      std::uint64_t window = 0;
+      const auto parsed = std::from_chars(id.data(), id.data() + id.size(), window);
+      if (parsed.ec == std::errc{} && parsed.ptr == id.data() + id.size())
+        config.centre_on_window = window;
+      else
+        std::cerr << "--launcher-window takes a window ID; ignored\n";
+    }
+    // Created when the game can be seen (launcher_handoff.hpp).
+    else if (arg == "--launcher-ready-file")
+      moderngekko::frontend::LauncherReadyFile() = StringToPath(value("--launcher-ready-file"));
     else if (arg == "--load-state")
     {
       // Checked here rather than left to the boot path: a state that is not
@@ -470,6 +489,9 @@ int RunMain(int argc, char **argv) {
     config.window_height = window.height;
   }
   config.show_fps_in_title = frontend_config.show_fps_in_title;
+  // The launcher waits with its loading screen until the game can be seen.
+  if (!moderngekko::frontend::LauncherReadyFile().empty())
+    config.first_picture_shown = moderngekko::frontend::TellLauncherGameShown;
 #if defined(__linux__)
   // Inside gamescope (the Steam Deck's Game Mode, Steam's Big Picture
   // sessions) the game's window may never be told it has the focus, and

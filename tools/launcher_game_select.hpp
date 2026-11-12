@@ -19,6 +19,7 @@
 
 #include "button_glyphs.hpp"
 #include "launcher_game_select_layout.hpp"
+#include "launcher_loading.hpp"
 #include "launcher_look.hpp"
 #include "launcher_preview_video.hpp"
 #include "launcher_sound.hpp"
@@ -203,6 +204,20 @@ public:
   }
   bool IsOpen() const { return m_open; }
   GameSelectSide Chosen() const { return m_selected; }
+
+  // A game's logo for the loading screen that follows (launcher_loading.hpp),
+  // the size it has here in a window `height` tall. None before Load, or for
+  // a game this screen doesn't show.
+  LoadingLogo LogoFor(std::string_view disc_id, float height) const
+  {
+    const int side = disc_id == m_layout.left_game ? 0 : disc_id == m_layout.right_game ? 1 : -1;
+    if (!m_loaded || side < 0 || m_layout.height <= 0.0f || !m_half[side].logo.texture)
+      return {};
+    const Picture& logo = m_half[side].logo;
+    const float s = height / m_layout.height;
+    return {static_cast<ImTextureID>(reinterpret_cast<std::uintptr_t>(logo.texture)),
+            logo.width * s, logo.height * s};
+  }
 
   // Opens the screen on `start`; a half whose game isn't ready is grey. The
   // folders are the games' (games/<disc ID>), where their intros are.

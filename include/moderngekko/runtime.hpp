@@ -4,6 +4,7 @@
 #include "moderngekko/module_abi.h"
 
 #include <cstddef>
+#include <cstdint>
 #include <filesystem>
 #include <functional>
 #include <memory>
@@ -191,6 +192,14 @@ struct RuntimeConfig
   // the screen (src/runtime/window_size.hpp).
   int window_width = 0;
   int window_height = 0;
+  // A window the game window opens centred on, on its monitor, as its
+  // window system names it (an X11 window ID, a Windows HWND): the
+  // launcher's. 0, or a window that has gone: the middle of the primary
+  // monitor.
+  std::uint64_t centre_on_window = 0;
+  // Called once, from the video thread, when the game window shows its
+  // first picture: the launcher waits for it before stepping aside.
+  std::function<void()> first_picture_shown;
   bool allow_interpreter = false;
   bool show_fps_in_title = true;
   std::optional<std::string> window_title;
