@@ -624,8 +624,9 @@ struct GameMenu::Impl
         break;
       }
       // The game comes back once the button that closed the menu is let go,
-      // so it doesn't get that press.
-      if (resume_pending && !held.Any())
+      // so it doesn't get that press. A direction still held (the stick
+      // steering, say) doesn't keep it paused: the game takes it at once.
+      if (resume_pending && !held.AnyButton())
       {
         resume_pending = false;
         if (!netplay)

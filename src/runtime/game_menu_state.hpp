@@ -52,6 +52,8 @@ struct MenuButtons
   bool right = false;
 
   bool Any() const { return open || accept || back || up || down || left || right; }
+  // A button, not a direction: what can close the menu.
+  bool AnyButton() const { return open || accept || back; }
 };
 
 // What a press did, for the caller to act on.

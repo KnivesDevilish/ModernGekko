@@ -191,6 +191,12 @@ int main()
     MenuButtons held = Up();
     if (!held.Any() || MenuButtons{}.Any())
       return 27;
+    // Only the buttons keep a closed menu's game waiting, not the stick.
+    MenuButtons steering = Left();
+    steering.up = true;
+    if (steering.AnyButton() || !Back().AnyButton() || !Open().AnyButton() ||
+        !Accept().AnyButton())
+      return 63;
   }
   {
     // With quick settings, the main page has a Quick settings row second.

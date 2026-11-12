@@ -350,8 +350,12 @@ std::optional<fs::path> PrepareDisc(const fs::path& image, const fs::path& user_
     *error = Tr("Image rejected: the selected file is not a valid disc image.");
     return std::nullopt;
   }
+#ifndef MODERNGEKKO_REQUIRED_DISC_ID
+  // A build that requires no disc (one for any GameCube or Wii game, such as
+  // a test build): the disc is extracted as it is.
+  return image;
+#else
   const std::string source_id = source->GetGameID(source->GetGamePartition());
-#ifdef MODERNGEKKO_REQUIRED_DISC_ID
   if (source_id == MODERNGEKKO_REQUIRED_DISC_ID)
     return image;
 #endif
@@ -397,7 +401,7 @@ std::optional<fs::path> PrepareDisc(const fs::path& image, const fs::path& user_
     return std::nullopt;
   }
   return output;
-#else
+#elif defined(MODERNGEKKO_REQUIRED_DISC_ID)
   *error = Tr("this disc is not the pinned patched release");
   return std::nullopt;
 #endif
