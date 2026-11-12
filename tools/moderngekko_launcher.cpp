@@ -2846,24 +2846,57 @@ int main(int argc, char** argv)
     screenshot_gallery->Draw(renderer, fonts.bold, scale);
   };
 #ifdef MODERNGEKKO_REQUIRED_DISC_ID
-  // A complete save this build brings (Resources/complete-save, see
-  // tools/launcher_save.hpp), which Game Files can install over the player's.
-  const fs::path complete_save_folder = release_directory / "Resources" / "complete-save";
-  const bool has_complete_save =
-      !moderngekko::frontend::CompleteSaveFiles(complete_save_folder).empty();
-  const fs::path game_save_folder =
-      moderngekko::frontend::WiiSaveFolder(user_directory, MODERNGEKKO_REQUIRED_DISC_ID);
-  const fs::path save_backups_folder =
-      moderngekko::frontend::SaveBackupsFolder(user_directory, MODERNGEKKO_REQUIRED_DISC_ID);
-  // What the page shows, looked at again every second rather than each frame.
-  bool game_save_exists = false;
-  std::optional<fs::path> latest_save_backup;
+  // The complete saves this build brings (Resources/complete-save, see
+  // tools/launcher_save.hpp), which Game Files can install over the player's:
+  // the main game's in the folder itself, another game's in a folder named
+  // after its disc ID. A Wii game's save is a folder of files, a GameCube
+  // game's .gci files on its memory card.
+  struct CompleteSave
+  {
+    std::string disc_id;
+    std::string title;
+    bool gamecube = false;
+    fs::path complete_folder;
+    fs::path save_folder;  // the Wii save folder, or the memory card's
+    fs::path backups;
+    // What the page shows, looked at again every second rather than each
+    // frame.
+    bool game_save_exists = false;
+    std::optional<fs::path> latest_backup;
+    // What the last install or restore did, kept as its English text and
+    // path so it follows the language.
+    const char* message = nullptr;
+    std::string message_detail;
+    bool message_error = false;
+  };
+  std::vector<CompleteSave> complete_saves;
+  {
+    const fs::path resources = release_directory / "Resources" / "complete-save";
+    std::vector<moderngekko::frontend::KnownGame> games = moderngekko::frontend::KnownGames();
+    if (games.empty())
+      games.push_back({MODERNGEKKO_REQUIRED_DISC_ID, MODERNGEKKO_REQUIRED_DISC_ID});
+    for (std::size_t i = 0; i < games.size(); ++i)
+    {
+      CompleteSave save;
+      save.disc_id = games[i].disc_id;
+      save.title = games[i].title;
+      save.gamecube = moderngekko::frontend::IsGameCubeDisc(save.disc_id);
+      save.complete_folder = i == 0 ? resources : resources / save.disc_id;
+      const bool brought =
+          save.gamecube ?
+              !moderngekko::frontend::CompleteGameCubeSaveFiles(save.complete_folder).empty() :
+              !moderngekko::frontend::CompleteSaveFiles(save.complete_folder).empty();
+      if (!brought)
+        continue;
+      save.save_folder =
+          save.gamecube ? moderngekko::frontend::GameCubeCardFolder(user_directory, save.disc_id) :
+                          moderngekko::frontend::WiiSaveFolder(user_directory, save.disc_id);
+      save.backups = moderngekko::frontend::SaveBackupsFolder(user_directory, save.disc_id);
+      complete_saves.push_back(std::move(save));
+    }
+  }
+  const bool has_complete_save = !complete_saves.empty();
   Uint64 save_checked_at = 0;
-  // What the last install or restore did, kept as its English text and path
-  // so it follows the language.
-  const char* save_message = nullptr;
-  std::string save_message_detail;
-  bool save_message_error = false;
 #endif
   // The runner gives MODERNGEKKO_STATICRECOMP priority over config.ini and
   // inherits this process' environment, so say so when it is set.
@@ -4997,47 +5030,22 @@ int main(int argc, char** argv)
       if (files_columns)
         NextPageColumn();
       BeginSection("##files_complete_save", Tr("COMPLETE SAVE"));
-      // With more than one game, the one it is for: the main game.
-      if (moderngekko::frontend::PlaysSeveralGames())
-      {
-        ImGui::PushFont(fonts.bold, 0.0f);
-        ImGui::TextUnformatted(moderngekko::frontend::KnownGames().front().title.c_str());
-        ImGui::PopFont();
-      }
       if (save_checked_at == 0 || SDL_GetTicks() - save_checked_at >= 1000)
       {
-        game_save_exists = moderngekko::frontend::HasGameSave(game_save_folder);
-        latest_save_backup = moderngekko::frontend::LatestSaveBackup(save_backups_folder);
+        for (CompleteSave& save : complete_saves)
+        {
+          save.game_save_exists =
+              save.gamecube ?
+                  moderngekko::frontend::HasGameCubeSave(save.complete_folder, save.save_folder) :
+                  moderngekko::frontend::HasGameSave(save.save_folder);
+          save.latest_backup = moderngekko::frontend::LatestSaveBackup(save.backups);
+        }
         save_checked_at = std::max<Uint64>(SDL_GetTicks(), 1);
       }
       ImGui::PushTextWrapPos(0.0f);
       ImGui::TextUnformatted(Tr("The whole game completed, with everything unlocked. Your own "
                                 "save is kept, and Restore my save brings it back."));
-      if (!game_save_exists)
-        ImGui::TextDisabled("%s",
-                            Tr("Play once, until the game makes its save, then come back."));
       ImGui::PopTextWrapPos();
-      ImGui::Spacing();
-      ImGui::BeginDisabled(!game_save_exists);
-      if (ImGui::Button(Tr("Install complete save")))
-        ImGui::OpenPopup("##install_complete_save");
-      ImGui::EndDisabled();
-      if (latest_save_backup)
-      {
-        ImGui::SameLine();
-        if (ImGui::Button(Tr("Restore my save")))
-          ImGui::OpenPopup("##restore_save");
-      }
-      if (save_message)
-      {
-        const std::string text = Format(Tr(save_message), save_message_detail.c_str());
-        ImGui::PushTextWrapPos(0.0f);
-        if (save_message_error)
-          ImGui::TextColored(ImVec4(1.0f, 0.35f, 0.3f, 1.0f), "%s", text.c_str());
-        else
-          ImGui::TextDisabled("%s", text.c_str());
-        ImGui::PopTextWrapPos();
-      }
       // Both ask first: one replaces the player's progress, the other the
       // complete save.
       const auto confirm = [&](const char* id, const char* heading, const char* body,
@@ -5069,54 +5077,105 @@ int main(int argc, char** argv)
         }
         return confirmed;
       };
-      if (confirm("##install_complete_save", Tr("Install the complete save?"),
-                  Tr("Your progress is replaced by the complete save. A copy of your save is "
-                     "kept first, and Restore my save brings it back."),
-                  Tr("Install")))
+      // Each game's, under its name when the build plays more than one.
+      for (CompleteSave& save : complete_saves)
       {
-        const SDL_Time now_ns = [] {
-          SDL_Time now = 0;
-          SDL_GetCurrentTime(&now);
-          return now;
-        }();
-        SDL_DateTime now{};
-        SDL_TimeToDateTime(now_ns, &now, true);
-        char stamp[32];
-        std::snprintf(stamp, sizeof(stamp), "%04d-%02d-%02d_%02d-%02d-%02d", now.year, now.month,
-                      now.day, now.hour, now.minute, now.second);
-        const moderngekko::frontend::SaveResult result = moderngekko::frontend::InstallCompleteSave(
-            complete_save_folder, game_save_folder, save_backups_folder, stamp);
-        save_message_error = !result;
-        switch (result.error)
+        ImGui::PushID(save.disc_id.c_str());
+        ImGui::Spacing();
+        if (moderngekko::frontend::PlaysSeveralGames())
         {
-        case moderngekko::frontend::SaveError::None:
-          save_message = MODERNGEKKO_UI_TEXT("Complete save installed. Your own save is kept in %s.");
-          save_message_detail = result.backup.string();
-          break;
-        case moderngekko::frontend::SaveError::Backup:
-          save_message = MODERNGEKKO_UI_TEXT("Your save couldn't be copied, so nothing changed: %s");
-          save_message_detail = result.detail;
-          break;
-        default:
-          save_message = MODERNGEKKO_UI_TEXT("Couldn't write the save: %s");
-          save_message_detail = result.detail;
-          break;
+          ImGui::PushFont(fonts.bold, 0.0f);
+          ImGui::TextUnformatted(save.title.c_str());
+          ImGui::PopFont();
         }
-        save_checked_at = 0;
-      }
-      if (confirm("##restore_save", Tr("Bring your save back?"),
-                  Tr("Your save from before the complete save comes back, in place of the "
-                     "current one."),
-                  Tr("Restore")) &&
-          latest_save_backup)
-      {
-        const moderngekko::frontend::SaveResult result =
-            moderngekko::frontend::RestoreSaveBackup(*latest_save_backup, game_save_folder);
-        save_message_error = !result;
-        save_message = result ? MODERNGEKKO_UI_TEXT("Your save is back.") :
-                                MODERNGEKKO_UI_TEXT("Couldn't write the save: %s");
-        save_message_detail = result.detail;
-        save_checked_at = 0;
+        if (!save.game_save_exists)
+        {
+          ImGui::PushTextWrapPos(0.0f);
+          ImGui::TextDisabled("%s",
+                              Tr("Play once, until the game makes its save, then come back."));
+          ImGui::PopTextWrapPos();
+        }
+        ImGui::BeginDisabled(!save.game_save_exists);
+        if (ImGui::Button(Tr("Install complete save")))
+          ImGui::OpenPopup("##install_complete_save");
+        ImGui::EndDisabled();
+        if (save.latest_backup)
+        {
+          ImGui::SameLine();
+          if (ImGui::Button(Tr("Restore my save")))
+            ImGui::OpenPopup("##restore_save");
+        }
+        if (save.message)
+        {
+          const std::string text = Format(Tr(save.message), save.message_detail.c_str());
+          ImGui::PushTextWrapPos(0.0f);
+          if (save.message_error)
+            ImGui::TextColored(ImVec4(1.0f, 0.35f, 0.3f, 1.0f), "%s", text.c_str());
+          else
+            ImGui::TextDisabled("%s", text.c_str());
+          ImGui::PopTextWrapPos();
+        }
+        if (confirm("##install_complete_save", Tr("Install the complete save?"),
+                    Tr("Your progress is replaced by the complete save. A copy of your save is "
+                       "kept first, and Restore my save brings it back."),
+                    Tr("Install")))
+        {
+          const SDL_Time now_ns = [] {
+            SDL_Time now = 0;
+            SDL_GetCurrentTime(&now);
+            return now;
+          }();
+          SDL_DateTime now{};
+          SDL_TimeToDateTime(now_ns, &now, true);
+          char stamp[32];
+          std::snprintf(stamp, sizeof(stamp), "%04d-%02d-%02d_%02d-%02d-%02d", now.year,
+                        now.month, now.day, now.hour, now.minute, now.second);
+          const moderngekko::frontend::SaveResult result =
+              save.gamecube ?
+                  moderngekko::frontend::InstallCompleteGameCubeSave(
+                      save.complete_folder, save.save_folder, save.backups, stamp) :
+                  moderngekko::frontend::InstallCompleteSave(save.complete_folder,
+                                                             save.save_folder, save.backups,
+                                                             stamp);
+          save.message_error = !result;
+          switch (result.error)
+          {
+          case moderngekko::frontend::SaveError::None:
+            save.message =
+                MODERNGEKKO_UI_TEXT("Complete save installed. Your own save is kept in %s.");
+            save.message_detail = result.backup.string();
+            break;
+          case moderngekko::frontend::SaveError::Backup:
+            save.message =
+                MODERNGEKKO_UI_TEXT("Your save couldn't be copied, so nothing changed: %s");
+            save.message_detail = result.detail;
+            break;
+          default:
+            save.message = MODERNGEKKO_UI_TEXT("Couldn't write the save: %s");
+            save.message_detail = result.detail;
+            break;
+          }
+          save_checked_at = 0;
+        }
+        if (confirm("##restore_save", Tr("Bring your save back?"),
+                    Tr("Your save from before the complete save comes back, in place of the "
+                       "current one."),
+                    Tr("Restore")) &&
+            save.latest_backup)
+        {
+          const moderngekko::frontend::SaveResult result =
+              save.gamecube ?
+                  moderngekko::frontend::RestoreGameCubeSaveBackup(*save.latest_backup,
+                                                                   save.save_folder) :
+                  moderngekko::frontend::RestoreSaveBackup(*save.latest_backup,
+                                                           save.save_folder);
+          save.message_error = !result;
+          save.message = result ? MODERNGEKKO_UI_TEXT("Your save is back.") :
+                                  MODERNGEKKO_UI_TEXT("Couldn't write the save: %s");
+          save.message_detail = result.detail;
+          save_checked_at = 0;
+        }
+        ImGui::PopID();
       }
       EndSection();
     }
