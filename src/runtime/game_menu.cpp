@@ -18,6 +18,7 @@
 #include "VideoCommon/AsyncRequests.h"
 #include "VideoCommon/Present.h"
 #include "VideoCommon/VideoConfig.h"
+#include "dolphin_runtime_internal.hpp"
 #include "game_menu_controls.hpp"
 #include "game_menu_draw.hpp"
 #include "game_menu_state.hpp"
@@ -62,6 +63,17 @@ constexpr std::chrono::milliseconds NOTICE_TIME{4000};
 constexpr std::chrono::milliseconds NOTICE_FADE{400};
 
 std::atomic<bool> s_blocks_input{false};
+
+// "GCPad1" is GameCube port 0... "GCPad4" port 3; -1 for anything else
+// (a Wii Remote's "Wiimote1").
+int GameCubePort(std::string_view section)
+{
+  constexpr std::string_view PREFIX = "GCPad";
+  if (section.size() != PREFIX.size() + 1 || !section.starts_with(PREFIX) ||
+      section.back() < '1' || section.back() > '4')
+    return -1;
+  return section.back() - '1';
+}
 
 // The controls the menu reads, made from the profile keys it is given: a
 // group per profile group ("Buttons", "D-Pad", "Extra"...) with the controls
@@ -241,6 +253,9 @@ struct GameMenu::Impl
   std::vector<ControllerEmu::Control*> key_controls;
   // The profile's Device, for the log (LogDevices).
   std::string profile_device;
+  // The GameCube port the profile's section is (0 for GCPad1), whose device
+  // the menu reads as the game does (EffectivePadDevice); -1 for another.
+  int pad_port = -1;
   bool pad_was_held = false;
   bool keys_were_held = false;
   Common::EventHook devices_hook;
@@ -277,9 +292,19 @@ struct GameMenu::Impl
     profile.Load(File::GetUserPath(D_CONFIG_IDX) + settings.profile_file);
     Common::IniFile::Section* section = profile.GetOrCreateSection(settings.profile_section);
     controller.LoadConfig(section);
-    // The Controls page shows the profile as it is now.
+    // The Controls page shows the profile as it is now, with the device the
+    // game reads: a connected pad in place of the profile's when that one
+    // isn't connected.
     std::string device;
     section->Get("Device", &device);
+    profile_device = device;
+    pad_port = GameCubePort(settings.profile_section);
+    if (pad_port >= 0)
+    {
+      device = EffectivePadDevice(pad_port, device);
+      const auto lock = ControllerEmu::EmulatedController::GetStateLock();
+      controller.SetDefaultDevice(device);
+    }
     controls = ReadControls(
         settings.controls,
         [section](const std::string& key) -> std::optional<std::string> {
@@ -300,10 +325,15 @@ struct GameMenu::Impl
       uses_fallback = true;
     }
     LoadHints(*section, device, uses_fallback);
-    profile_device = device;
     controller.UpdateReferences(g_controller_interface);
     // A pad plugged in or out later is found again, as for the game.
     devices_hook = g_controller_interface.RegisterDevicesChangedCallback([this] {
+      if (pad_port >= 0)
+      {
+        const std::string effective = EffectivePadDevice(pad_port, profile_device);
+        const auto lock = ControllerEmu::EmulatedController::GetStateLock();
+        controller.SetDefaultDevice(effective);
+      }
       controller.UpdateReferences(g_controller_interface);
       LogDevices();
     });

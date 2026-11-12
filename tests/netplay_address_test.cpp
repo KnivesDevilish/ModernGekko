@@ -40,6 +40,10 @@ int main()
       ClassifyAddress("podman0", "10.88.0.1") != AddressKind::Ignore ||
       ClassifyAddress("vEthernet (WSL)", "172.30.48.1") != AddressKind::Ignore ||
       ClassifyAddress("VirtualBox Host-Only Network", "192.168.56.1") != AddressKind::Ignore ||
+      ClassifyAddress("vEthernet (Default Switch)", "172.25.160.1") != AddressKind::Ignore ||
+      ClassifyAddress("waydroid0", "192.168.240.1") != AddressKind::Ignore ||
+      ClassifyAddress("lxcbr0", "10.0.3.1") != AddressKind::Ignore ||
+      ClassifyAddress("Bluetooth Network Connection", "192.168.44.1") != AddressKind::Ignore ||
       ClassifyAddress("lo", "127.0.0.1") != AddressKind::Ignore ||
       ClassifyAddress("eth0", "169.254.3.4") != AddressKind::Ignore ||
       ClassifyAddress("eth0", "not an address") != AddressKind::Ignore)

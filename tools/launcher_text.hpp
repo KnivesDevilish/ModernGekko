@@ -357,13 +357,38 @@ inline constexpr Translation SPANISH_TEXTS[] = {
     {"The netplay server is full.", "El servidor de Netplay está lleno."},
     {"The nickname was rejected by the host.", "El anfitrión rechazó el apodo."},
     {"No room answered to that invite code. Check that it is typed right and that the host's "
-     "room is still open. If it keeps failing, the invite server may be down or your connection "
-     "may not allow it: try Direct IP with Tailscale.",
+     "room is still open. In the same house, use Direct IP with the host's At home address: "
+     "invite codes often fail there. If it keeps failing, your connection may not allow invite "
+     "codes: try Direct IP with Tailscale.",
      "Ninguna sala respondió a ese código de invitación. Revisa que esté bien escrito y que la "
-     "sala del anfitrión siga abierta. Si sigue fallando, puede que el servidor de invitaciones "
-     "esté caído o que tu conexión no lo permita: prueba IP directa con Tailscale."},
-    {"Could not reach the netplay host. Check the host name, UDP port, and firewall.",
-     "No se pudo contactar con el anfitrión. Revisa la dirección, el puerto UDP y el firewall."},
+     "sala del anfitrión siga abierta. En la misma casa, usa IP directa con la dirección En casa "
+     "del anfitrión: ahí los códigos de invitación suelen fallar. Si sigue fallando, puede que "
+     "tu conexión no permita códigos de invitación: prueba IP directa con Tailscale."},
+    {"Could not reach the host. Check the address and the UDP port: in the same house, use the "
+     "address the host's lobby shows under At home. If they are right, the host's firewall is "
+     "probably blocking the game: on Windows, the host can allow it in Host Netplay; on Linux, "
+     "the host opens the UDP port (the README says how).",
+     "No se pudo contactar con el anfitrión. Revisa la dirección y el puerto UDP: en la misma "
+     "casa, usa la dirección que la sala del anfitrión muestra en En casa. Si están bien, lo más "
+     "probable es que el firewall del anfitrión esté bloqueando el juego: en Windows, el "
+     "anfitrión puede permitirlo en Crear Netplay; en Linux, el anfitrión abre el puerto UDP (el "
+     "README explica cómo)."},
+    {"If your friends can't connect, the Windows firewall may be blocking the game. Windows asks "
+     "for permission to change it.",
+     "Si tus amigos no pueden conectarse, puede que el firewall de Windows esté bloqueando el "
+     "juego. Windows pide permiso para cambiarlo."},
+    {"Allow the game in the Windows firewall", "Permitir el juego en el firewall de Windows"},
+    {"Waiting for Windows...", "Esperando a Windows..."},
+    {"Done: Windows lets Netplay connections in.",
+     "Listo: Windows deja entrar las conexiones de Netplay."},
+    {"Windows did not get permission: nothing changed.",
+     "Windows no recibió permiso: no se cambió nada."},
+    {"Windows could not change its firewall. The README says how to allow the game by hand.",
+     "Windows no pudo cambiar su firewall. El README explica cómo permitir el juego a mano."},
+    {"If your friends can't connect, your firewall may be blocking UDP port %d: the README says "
+     "how to open it.",
+     "Si tus amigos no pueden conectarse, puede que tu firewall esté bloqueando el puerto UDP "
+     "%d: el README explica cómo abrirlo."},
     {"Could not create the netplay session. Check the UDP port and firewall settings.",
      "No se pudo crear la sesión de Netplay. Revisa el puerto UDP y el firewall."},
     {"The game process exited with code %d.", "El proceso del juego terminó con el código %d."},
@@ -843,15 +868,39 @@ inline constexpr Translation JAPANESE_TEXTS[] = {
     {"The netplay server is full.", "ネットプレイのサーバーが満員です。"},
     {"The nickname was rejected by the host.", "ホストにニックネームを拒否されました。"},
     {"No room answered to that invite code. Check that it is typed right and that the host's "
-     "room is still open. If it keeps failing, the invite server may be down or your connection "
-     "may not allow it: try Direct IP with Tailscale.",
+     "room is still open. In the same house, use Direct IP with the host's At home address: "
+     "invite codes often fail there. If it keeps failing, your connection may not allow invite "
+     "codes: try Direct IP with Tailscale.",
      "その招待コードに応答するルームがありませんでした。入力が正しいか、ホストのルーム"
-     "がまだ開いているか確認してください。それでも失敗する場合は、招待サーバーが停止し"
-     "ているか、お使いの接続が対応していない可能性があります。TailscaleでのI"
+     "がまだ開いているか確認してください。同じ家の中では、ホストの「自宅」のアドレスで"
+     "IP直接接続を使ってください。招待コードはそこではよく失敗します。それでも失敗する"
+     "場合は、お使いの接続が招待コードに対応していない可能性があります。TailscaleでのI"
      "P直接接続をお試しください。"},
-    {"Could not reach the netplay host. Check the host name, UDP port, and firewall.",
-     "ホストに接続できませんでした。ホスト名、UDPポート、ファイアウォールを確認して"
-     "ください。"},
+    {"Could not reach the host. Check the address and the UDP port: in the same house, use the "
+     "address the host's lobby shows under At home. If they are right, the host's firewall is "
+     "probably blocking the game: on Windows, the host can allow it in Host Netplay; on Linux, "
+     "the host opens the UDP port (the README says how).",
+     "ホストに接続できませんでした。アドレスとUDPポートを確認してください。同じ家の中では"
+     "、ホストのロビーの「自宅」に表示されるアドレスを使ってください。正しい場合は、ホスト"
+     "のファイアウォールがゲームをブロックしている可能性が高いです。Windowsでは、ホストが"
+     "「ネットプレイを作成」で許可できます。Linuxでは、ホストがUDPポートを開きます（方法は"
+     "READMEにあります）。"},
+    {"If your friends can't connect, the Windows firewall may be blocking the game. Windows asks "
+     "for permission to change it.",
+     "友達が接続できない場合は、Windowsのファイアウォールがゲームをブロックしている可能性"
+     "があります。変更にはWindowsが許可を求めます。"},
+    {"Allow the game in the Windows firewall", "Windowsのファイアウォールでゲームを許可"},
+    {"Waiting for Windows...", "Windowsを待っています..."},
+    {"Done: Windows lets Netplay connections in.",
+     "完了：Windowsはネットプレイの接続を受け入れます。"},
+    {"Windows did not get permission: nothing changed.",
+     "Windowsは許可を得られませんでした。何も変更されていません。"},
+    {"Windows could not change its firewall. The README says how to allow the game by hand.",
+     "Windowsはファイアウォールを変更できませんでした。手動で許可する方法はREADMEにあります。"},
+    {"If your friends can't connect, your firewall may be blocking UDP port %d: the README says "
+     "how to open it.",
+     "友達が接続できない場合は、ファイアウォールがUDPポート%dをブロックしている可能性があり"
+     "ます。開く方法はREADMEにあります。"},
     {"Could not create the netplay session. Check the UDP port and firewall settings.",
      "ネットプレイのセッションを作成できませんでした。UDPポートとファイアウォールの"
      "設定を確認してください。"},

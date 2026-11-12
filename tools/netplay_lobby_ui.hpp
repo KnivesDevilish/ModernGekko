@@ -29,6 +29,8 @@ struct LobbyAddress
 {
   AddressKind kind = AddressKind::Home;
   std::string address;  // "ip:port"
+
+  bool operator==(const LobbyAddress&) const = default;
 };
 
 // A controller seat (P1 to P4), or a connected player who holds none.

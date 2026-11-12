@@ -52,11 +52,13 @@ inline AddressKind ClassifyAddress(std::string_view interface_name, std::string_
   std::string name(interface_name);
   std::ranges::transform(name, name.begin(),
                          [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-  // Container and virtual machine networks only reach this computer.
-  constexpr std::array<std::string_view, 6> virtual_prefixes = {"docker", "br-",   "veth",
-                                                                "virbr",  "podman", "cni"};
-  constexpr std::array<std::string_view, 4> virtual_names = {"virtualbox", "vmware", "vmnet",
-                                                             "vboxnet"};
+  // Container and virtual machine networks only reach this computer (Windows
+  // names Hyper-V's and WSL's "vEthernet (...)"), and Bluetooth's only a
+  // phone.
+  constexpr std::array<std::string_view, 10> virtual_prefixes = {
+      "docker", "br-", "veth", "virbr", "podman", "cni", "waydroid", "lxcbr", "lxdbr", "incusbr"};
+  constexpr std::array<std::string_view, 5> virtual_names = {"virtualbox", "vmware", "vmnet",
+                                                             "vboxnet", "bluetooth"};
   if (name == "lo" ||
       std::ranges::any_of(virtual_prefixes, [&](std::string_view p) { return name.starts_with(p); }) ||
       std::ranges::any_of(virtual_names, [&](std::string_view n) { return name.contains(n); }))

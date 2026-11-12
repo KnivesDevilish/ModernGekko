@@ -15,6 +15,7 @@
 #include "netplay_address.hpp"
 #include "netplay_session.hpp"
 #include "runner_exit_code.hpp"
+#include "windows_firewall.hpp"
 
 #include "DiscIO/DiscExtractor.h"
 #include "DiscIO/Filesystem.h"
@@ -2851,9 +2852,11 @@ int main(int argc, char** argv)
                               std::string(CONTROLLER_PROFILE_NAME).c_str());
         return false;
       }
-      // The profile's pad isn't connected but exactly one other pad is: most
-      // likely the same pad under another name (USB / Bluetooth).
-      if (FindController(controllers, configured_controllers.front()) < 0 && controllers.size() == 1)
+      // The profile's pad isn't connected but another pad is: most likely the
+      // same pad under another name (USB / Bluetooth, or Steam's virtual
+      // gamepad), or the pad that replaced it. The first one takes its place,
+      // as in the game.
+      if (FindController(controllers, configured_controllers.front()) < 0 && !controllers.empty())
         return retarget_controller(0);
       selected_controller = configured_controllers.front();
       controller_index = FindController(controllers, selected_controller);
@@ -2893,7 +2896,7 @@ int main(int argc, char** argv)
         controller_status = {MODERNGEKKO_UI_TEXT("No SDL gamepad detected")};
 #endif
     }
-    else if (controller_index < 0 && controllers.size() == 1)
+    else if (controller_index < 0 && !controllers.empty())
     {
       retarget_controller(0);  // same rule as ensure_controller
     }
@@ -2958,6 +2961,8 @@ int main(int argc, char** argv)
   bool enter_page = false;
   // Which session the Netplay window is about to start (Host or Join).
   LaunchMode netplay_dialog_mode = LaunchMode::Host;
+  // Host Netplay's "Allow in the Windows firewall" (Windows only).
+  moderngekko::frontend::FirewallRule firewall_rule;
   // PLAY page summary, read again whenever the page is opened: the time
   // played changes while the game runs and mods are added by hand.
   std::uint64_t summary_time_played = 0;
@@ -3055,6 +3060,15 @@ int main(int argc, char** argv)
       std::string process_error;
       if (log_stream)
       {
+        // The log's first line says which release and system wrote it, for
+        // reports; the runner writes after it.
+#if defined(MODERNGEKKO_FRONTEND_VERSION)
+        SDL_IOprintf(log_stream, "%s %s (%s)\n", MODERNGEKKO_FRONTEND_NAME,
+                     MODERNGEKKO_FRONTEND_VERSION, SDL_GetPlatform());
+#else
+        SDL_IOprintf(log_stream, "%s (%s)\n", MODERNGEKKO_FRONTEND_NAME, SDL_GetPlatform());
+#endif
+        SDL_FlushIO(log_stream);
         const SDL_PropertiesID properties = SDL_CreateProperties();
         if (properties)
         {
@@ -3132,13 +3146,18 @@ int main(int argc, char** argv)
               break;
             case moderngekko::frontend::NetplayExitCode::InviteCodeFailed:
               launch_error = Tr("No room answered to that invite code. Check that it is typed "
-                                "right and that the host's room is still open. If it keeps "
-                                "failing, the invite server may be down or your connection "
-                                "may not allow it: try Direct IP with Tailscale.");
+                                "right and that the host's room is still open. In the same "
+                                "house, use Direct IP with the host's At home address: invite "
+                                "codes often fail there. If it keeps failing, your connection "
+                                "may not allow invite codes: try Direct IP with Tailscale.");
               break;
             default:
-              launch_error = Tr("Could not reach the netplay host. Check the host name, UDP "
-                                "port, and firewall.");
+              launch_error = Tr("Could not reach the host. Check the address and the UDP port: "
+                                "in the same house, use the address the host's lobby shows "
+                                "under At home. If they are right, the host's firewall is "
+                                "probably blocking the game: on Windows, the host can allow it "
+                                "in Host Netplay; on Linux, the host opens the UDP port (the "
+                                "README says how).");
               break;
             }
           }
@@ -3685,6 +3704,65 @@ int main(int argc, char** argv)
               ImGui::SetNextItemWidth(-netplay_label_width);
               ImGui::SliderInt(Tr("Buffer frames"), &manual_buffer, 1, 20);
             }
+#if defined(_WIN32)
+            // Windows blocks a program that waits for connections until the
+            // player allows it, and its question is easy to miss or to answer
+            // for home networks only: the host can let the game through here.
+            if (hosting)
+            {
+              using moderngekko::frontend::FirewallResult;
+              const FirewallResult firewall = firewall_rule.Result();
+              ImGui::Spacing();
+              ImGui::PushTextWrapPos(0.0f);
+              ImGui::TextDisabled("%s", Tr("If your friends can't connect, the Windows firewall may "
+                                           "be blocking the game. Windows asks for permission "
+                                           "to change it."));
+              ImGui::BeginDisabled(firewall == FirewallResult::Working);
+              ImGui::PushStyleColor(ImGuiCol_Text, LAUNCHER_ACCENT);
+              const bool allow = ImGui::Button(Tr("Allow the game in the Windows firewall"));
+              ImGui::PopStyleColor();
+              ImGui::EndDisabled();
+              if (allow)
+                firewall_rule.Allow(SiblingRunner(argv[0]),
+                                    std::string(MODERNGEKKO_FRONTEND_NAME) + " Netplay");
+              switch (firewall)
+              {
+              case FirewallResult::Working:
+                ImGui::TextDisabled("%s", Tr("Waiting for Windows..."));
+                break;
+              case FirewallResult::Allowed:
+                ImGui::TextColored(LAUNCHER_ACCENT, "%s",
+                                   Tr("Done: Windows lets Netplay connections in."));
+                break;
+              case FirewallResult::Declined:
+                ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.3f, 1.0f), "%s",
+                                   Tr("Windows did not get permission: nothing changed."));
+                break;
+              case FirewallResult::Failed:
+                ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.3f, 1.0f), "%s",
+                                   Tr("Windows could not change its firewall. The README says "
+                                      "how to allow the game by hand."));
+                break;
+              default:
+                break;
+              }
+              ImGui::PopTextWrapPos();
+            }
+#elif defined(__linux__)
+            // Some systems' firewall (firewalld on Fedora, Bazzite...) lets no
+            // connection in on the host's port until it is opened.
+            if (hosting && !netplay_invite_mode)
+            {
+              ImGui::Spacing();
+              ImGui::PushTextWrapPos(0.0f);
+              ImGui::TextDisabled("%s", Format(Tr("If your friends can't connect, your firewall "
+                                                  "may be blocking UDP port %d: the README says "
+                                                  "how to open it."),
+                                               netplay_port)
+                                            .c_str());
+              ImGui::PopTextWrapPos();
+            }
+#endif
             // Joining by code needs the whole code before Join does anything.
             const auto typed_code = moderngekko::frontend::NormalizeInviteCode(netplay_code.data());
             const bool code_missing = !hosting && netplay_invite_mode && !typed_code;

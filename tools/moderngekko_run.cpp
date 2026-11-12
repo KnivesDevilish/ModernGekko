@@ -7,6 +7,7 @@
 #include "moderngekko/runtime.hpp"
 #include "netplay_address.hpp"
 #include "netplay_session.hpp"
+#include "runner_alerts.hpp"
 #include "runner_exit_code.hpp"
 #include "ui_text.hpp"
 
@@ -61,9 +62,10 @@ std::atomic<bool> s_graphics_failed = false;
 
 // The runtime's alerts ("panic alerts"): each is written to the log. Those
 // about the graphics backend (Vulkan, Direct3D, OpenGL) aren't shown, as the
-// launcher explains a backend that can't start in the player's language; on
-// Windows the others are still shown in a message box, as before. Questions
-// are answered no, as on Linux.
+// launcher explains a backend that can't start in the player's language, nor
+// any while QuietAlerts() is set (a Netplay connection attempt); on Windows
+// the others are still shown in a message box, as before. Questions are
+// answered no, as on Linux.
 bool HandleAlert(const char *caption, const char *text, bool yes_no,
                  Common::MsgType style) {
   const std::string message = text ? text : "";
@@ -75,6 +77,8 @@ bool HandleAlert(const char *caption, const char *text, bool yes_no,
   });
   if (lower.find("video backend") != std::string::npos)
     s_graphics_failed = true;
+  if (moderngekko::frontend::QuietAlerts())
+    return false;
   constexpr std::string_view graphics[] = {"video backend", "vulkan",
                                            "direct3d", "d3d", "opengl"};
   if (std::ranges::any_of(graphics, [&](std::string_view word) {

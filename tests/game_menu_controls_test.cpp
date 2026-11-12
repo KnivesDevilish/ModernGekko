@@ -4,7 +4,8 @@
 // pad's face buttons are its symbols and a Nintendo pad's its own letters;
 // bindings written by hand beyond "|" are reported as such. The hints at the
 // bottom of the menu: a binding split into its gamepad and keyboard inputs,
-// and the button each hint draws.
+// and the button each hint draws. And the device each GameCube port reads
+// when its profile's pad isn't connected.
 #include "runtime/game_menu_controls.hpp"
 
 #include <cstdio>
@@ -17,6 +18,7 @@ namespace
 {
 using moderngekko::detail::ControlsRow;
 using moderngekko::detail::DeviceBinding;
+using moderngekko::detail::EffectivePadDevices;
 using moderngekko::detail::PadDeviceName;
 using moderngekko::detail::PadHint;
 using moderngekko::detail::PadHintOf;
@@ -205,6 +207,40 @@ int main()
         start.kind != PadHint::Kind::Name || start.name != "Start" ||
         trigger.kind != PadHint::Kind::Name || trigger.name != "L trigger")
       return 137;
+  }
+  {
+    // The device each port reads. On a Steam Deck, the launcher wrote the
+    // name it saw for the pad, and the game sees another: it reads that one.
+    const std::string deck = "SDL/0/Steam Deck Controller";
+    const std::vector<std::string> deck_devices = {KEYBOARD, "SteamDeck/0/Steam Deck", deck};
+    if (EffectivePadDevices({"SDL/0/Steam Virtual Gamepad", "", "", ""}, deck_devices) !=
+        std::vector<std::string>{deck, "", "", ""})
+      return 138;
+    // A profile made with no pad plugged in reads the pad plugged in since;
+    // a connected pad, nothing else, or nothing when no pad is connected.
+    const std::vector<std::string> one_pad = {KEYBOARD, "SDL/0/Xbox Controller"};
+    if (EffectivePadDevices({KEYBOARD, "", "", ""}, one_pad) !=
+            std::vector<std::string>{"SDL/0/Xbox Controller", "", "", ""} ||
+        EffectivePadDevices({"SDL/0/Xbox Controller"}, one_pad) !=
+            std::vector<std::string>{"SDL/0/Xbox Controller"} ||
+        EffectivePadDevices({"SteamDeck/0/Steam Deck"}, one_pad) !=
+            std::vector<std::string>{"SteamDeck/0/Steam Deck"} ||
+        EffectivePadDevices({"SDL/0/PS3 Controller"}, {KEYBOARD}) !=
+            std::vector<std::string>{"SDL/0/PS3 Controller"})
+      return 139;
+    // Two players: a pad that another port reads isn't free, and each
+    // missing pad takes the next free one.
+    const std::vector<std::string> pads = {KEYBOARD, "SDL/0/Xbox Controller",
+                                           "SDL/0/PS4 Controller", "SDL/1/Xbox Controller"};
+    if (EffectivePadDevices({"SDL/0/PS3 Controller", "SDL/0/Xbox Controller"}, pads) !=
+            std::vector<std::string>{"SDL/0/PS4 Controller", "SDL/0/Xbox Controller"} ||
+        EffectivePadDevices({"SDL/0/PS3 Controller", "SDL/1/PS3 Controller", KEYBOARD}, pads) !=
+            std::vector<std::string>{"SDL/0/Xbox Controller", "SDL/0/PS4 Controller",
+                                     "SDL/1/Xbox Controller"} ||
+        EffectivePadDevices({"SDL/0/Xbox Controller", KEYBOARD}, {KEYBOARD,
+                                                                   "SDL/0/Xbox Controller"}) !=
+            std::vector<std::string>{"SDL/0/Xbox Controller", KEYBOARD})
+      return 140;
   }
   std::puts("game menu controls: ok");
   return 0;

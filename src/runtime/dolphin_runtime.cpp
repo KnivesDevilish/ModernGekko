@@ -2,7 +2,9 @@
 
 #include "AudioCommon/AudioCommon.h"
 #include "Common/Config/Config.h"
+#include "Common/FileUtil.h"
 #include "Common/HookableEvent.h"
+#include "Common/IniFile.h"
 #include "Common/StringUtil.h"
 #include "Core/Boot/Boot.h"
 #include "Core/Boot/BootManager.h"
@@ -11,6 +13,7 @@
 #include "Core/Config/SYSCONFSettings.h"
 #include "Core/Core.h"
 #include "Core/HW/GBACore.h"
+#include "Core/HW/GCPad.h"
 #include "Core/HW/Memmap.h"
 #include "Core/Host.h"
 #include "Core/NetPlay/NetPlayClient.h"
@@ -20,7 +23,10 @@
 #include "Core/State.h"
 #include "Core/System.h"
 #include "DolphinNoGUI/Platform.h"
+#include "InputCommon/ControllerEmu/ControllerEmu.h"
+#include "InputCommon/ControllerInterface/ControllerInterface.h"
 #include "InputCommon/ControllerInterface/Touch/InputOverrider.h"
+#include "InputCommon/InputConfig.h"
 #include "UICommon/UICommon.h"
 #include "VideoCommon/FrameDumper.h"
 #include "VideoCommon/PerformanceMetrics.h"
@@ -30,6 +36,7 @@
 #include "dolphin_runtime_internal.hpp"
 #include "game_border.hpp"
 #include "game_menu.hpp"
+#include "game_menu_controls.hpp"
 #if MODERNGEKKO_HAS_PULSE
 #include "pulse_volume.hpp"
 #endif
@@ -50,10 +57,14 @@
 #include <cstdlib>
 #include <fstream>
 #include <fmt/format.h>
+#include <iostream>
 #include <mutex>
+#include <optional>
 #include <stop_token>
+#include <string>
 #include <thread>
 #include <utility>
+#include <vector>
 
 namespace {
 static_assert(sizeof(ModernGekkoModuleDesc) == sizeof(StaticRecompModuleDesc));
@@ -512,6 +523,100 @@ void AutomationLoop(Runtime& runtime, ImplT& impl, std::stop_token stop_token)
   WriteAutomationStatus(root, impl);
 }
 
+// The GameCube ports' devices as GCPadNew.ini named them when the runtime
+// started, while a PadDeviceWatch looks after them (EffectivePadDevice).
+std::mutex s_pad_devices_mutex;
+std::optional<std::vector<std::string>> s_profile_pad_devices;
+
+constexpr int GAMECUBE_PORTS = 4;
+
+std::string GameCubeProfilePath() {
+  return File::GetUserPath(D_CONFIG_IDX) + "GCPadNew.ini";
+}
+
+std::string GameCubeSection(int port) { return "GCPad" + std::to_string(port + 1); }
+
+// Each GameCube port reads the device detail::EffectivePadDevices gives it:
+// when the profile's gamepad isn't connected (or the profile names the
+// keyboard), a connected gamepad in its place. Applied whenever controllers
+// come and go, and written to GCPadNew.ini as well while the game runs, since
+// Dolphin loads that file again as the game starts; the profile gets its own
+// devices back when the runtime ends.
+class PadDeviceWatch {
+public:
+  PadDeviceWatch() {
+    Common::IniFile profile;
+    if (profile.Load(GameCubeProfilePath())) {
+      for (int port = 0; port < GAMECUBE_PORTS; ++port) {
+        if (const Common::IniFile::Section *section =
+                std::as_const(profile).GetSection(GameCubeSection(port)))
+          section->Get("Device", &m_profile[port]);
+      }
+    }
+    m_applied = m_profile;
+    {
+      std::lock_guard lock(s_pad_devices_mutex);
+      s_profile_pad_devices = m_profile;
+    }
+    m_hook = g_controller_interface.RegisterDevicesChangedCallback([this] { Apply(); });
+    Apply();
+  }
+
+  ~PadDeviceWatch() {
+    m_hook.reset();
+    {
+      std::lock_guard lock(m_mutex);
+      for (int port = 0; port < GAMECUBE_PORTS; ++port) {
+        if (m_applied[port] != m_profile[port])
+          WriteDevice(port, m_profile[port]);
+      }
+    }
+    std::lock_guard lock(s_pad_devices_mutex);
+    s_profile_pad_devices.reset();
+  }
+
+  PadDeviceWatch(const PadDeviceWatch &) = delete;
+  PadDeviceWatch &operator=(const PadDeviceWatch &) = delete;
+
+private:
+  void Apply() {
+    std::lock_guard lock(m_mutex);
+    const std::vector<std::string> effective = detail::EffectivePadDevices(
+        m_profile, g_controller_interface.GetAllDeviceStrings());
+    for (int port = 0; port < GAMECUBE_PORTS; ++port) {
+      if (effective[port] == m_applied[port])
+        continue;
+      m_applied[port] = effective[port];
+      WriteDevice(port, effective[port]);
+      ControllerEmu::EmulatedController *controller = Pad::GetConfig()->GetController(port);
+      {
+        const auto state_lock = ControllerEmu::EmulatedController::GetStateLock();
+        controller->SetDefaultDevice(effective[port]);
+      }
+      controller->UpdateReferences(g_controller_interface);
+      if (effective[port] == m_profile[port])
+        std::cout << "input: " << GameCubeSection(port) << " reads its profile's device "
+                  << m_profile[port] << " again" << std::endl;
+      else
+        std::cout << "input: " << GameCubeSection(port) << " reads " << effective[port]
+                  << " in place of the profile's " << m_profile[port] << std::endl;
+    }
+  }
+
+  // The Device line of the port's section in GCPadNew.ini.
+  static void WriteDevice(int port, const std::string &device) {
+    Common::IniFile profile;
+    profile.Load(GameCubeProfilePath());
+    profile.GetOrCreateSection(GameCubeSection(port))->Set("Device", device);
+    profile.Save(GameCubeProfilePath());
+  }
+
+  std::mutex m_mutex;
+  std::vector<std::string> m_profile = std::vector<std::string>(GAMECUBE_PORTS);
+  std::vector<std::string> m_applied;
+  Common::EventHook m_hook;
+};
+
 }  // namespace
 
 struct Runtime::Impl {
@@ -543,9 +648,23 @@ struct Runtime::Impl {
 #endif
   // F9's and the menu's screenshots, at graphics.screenshot_scale.
   std::unique_ptr<detail::HighResScreenshot> screenshot;
+  // The GameCube ports' devices, when a profile's pad isn't connected.
+  std::unique_ptr<PadDeviceWatch> pad_devices;
 };
 
 namespace detail {
+std::string EffectivePadDevice(int port, const std::string &profile_device) {
+  std::vector<std::string> profile;
+  {
+    std::lock_guard lock(s_pad_devices_mutex);
+    if (!s_profile_pad_devices || port < 0 ||
+        port >= static_cast<int>(s_profile_pad_devices->size()))
+      return profile_device;
+    profile = *s_profile_pad_devices;
+  }
+  return EffectivePadDevices(profile, g_controller_interface.GetAllDeviceStrings())[port];
+}
+
 void SetExternalUICommon(bool external) {
   std::lock_guard lock(s_runtime_mutex);
   s_external_ui_common = external;
@@ -688,6 +807,8 @@ RuntimeCreateResult Runtime::Create(RuntimeConfig config) {
   const WindowSystemInfo wsi = impl->platform->GetWindowSystemInfo();
   UICommon::InitControllers(wsi);
   impl->controllers_initialized = true;
+  if (!impl->config.headless)
+    impl->pad_devices = std::make_unique<PadDeviceWatch>();
   EnsureAutomationDirectories(impl->config.automation.directory);
   if (!impl->config.automation.directory.empty()) {
     for (int port = 0; port < 4; ++port)
@@ -782,6 +903,7 @@ Runtime::~Runtime() {
     m_impl->automation_registered = false;
   }
   m_impl->state_hook = {};
+  m_impl->pad_devices.reset();
   if (m_impl->controllers_initialized)
     UICommon::ShutdownControllers();
   if (m_impl->ui_initialized)

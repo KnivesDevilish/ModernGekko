@@ -425,4 +425,37 @@ inline std::string PadDeviceName(std::string_view device)
   const std::size_t slash = device.find('/');
   return std::string(slash == std::string_view::npos ? device : device.substr(slash + 1));
 }
+
+// The device each GameCube port reads, from its profile's (profile[0] is
+// GCPad1's). A gamepad that isn't connected, or the keyboard, gives way to
+// the first connected gamepad that no other port reads: the launcher and the
+// game may see the same pad under different names (on a Steam Deck, "Steam
+// Virtual Gamepad" in the launcher and "Steam Deck Controller" in the game),
+// and a profile made while no pad was plugged in names the keyboard. The
+// generated profile's pad inputs carry no device, so they follow it, while
+// its keys name the keyboard and still work. A port with no device, a
+// connected gamepad or any other kind of device keeps its profile's; so does
+// a port when no gamepad is free.
+inline std::vector<std::string> EffectivePadDevices(const std::vector<std::string>& profile,
+                                                    const std::vector<std::string>& connected)
+{
+  const auto is_pad = [](std::string_view device) { return device.starts_with("SDL/"); };
+  const auto is_keyboard = [](std::string_view device) {
+    return device.starts_with("XInput2/") || device.starts_with("DInput/") ||
+           device.starts_with("Quartz/");
+  };
+  std::vector<std::string> result = profile;
+  for (std::string& device : result)
+  {
+    const bool missing_pad = is_pad(device) && !std::ranges::contains(connected, device);
+    if (!missing_pad && !is_keyboard(device))
+      continue;
+    const auto free_pad = std::ranges::find_if(connected, [&](const std::string& candidate) {
+      return is_pad(candidate) && !std::ranges::contains(result, candidate);
+    });
+    if (free_pad != connected.end())
+      device = *free_pad;
+  }
+  return result;
+}
 }  // namespace moderngekko::detail

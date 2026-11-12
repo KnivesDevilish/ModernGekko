@@ -711,6 +711,7 @@ if(MODERNGEKKO_ENABLE_DOLPHIN_RUNTIME)
         tools/dol_patch.cpp
         tools/launcher_music.cpp
         tools/launcher_update.cpp
+        tools/windows_firewall.cpp
         vendor/dolphin/Externals/imgui/imgui/backends/imgui_impl_sdl3.cpp
         vendor/dolphin/Externals/imgui/imgui/backends/imgui_impl_sdlrenderer3.cpp)
     target_include_directories(moderngekko-launcher PRIVATE

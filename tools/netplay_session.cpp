@@ -7,9 +7,10 @@
 #include "netplay_address.hpp"
 #include "netplay_compatibility.hpp"
 #include "netplay_lobby_ui.hpp"
+#include "runner_alerts.hpp"
 #include "runner_exit_code.hpp"
 
-#include "Common/MsgHandler.h"
+#include "Common/ENet.h"
 #include "Common/TraversalClient.h"
 #include "Core/Boot/Boot.h"
 #include "Core/Config/MainSettings.h"
@@ -42,6 +43,7 @@
 #include <ranges>
 #include <span>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <tuple>
 #include <unordered_map>
@@ -98,6 +100,48 @@ const char *CPUCoreLabel(PowerPC::CPUCore core) {
   default:
     return "Interpreter";
   }
+}
+
+// For the log: why the invite server (Dolphin's traversal server) stopped
+// answering, or never did.
+const char *TraversalFailureText(Common::TraversalClient::FailureReason reason) {
+  using Reason = Common::TraversalClient::FailureReason;
+  switch (reason) {
+  case Reason::BadHost:
+    return "its name could not be looked up (no internet connection, or DNS)";
+  case Reason::VersionTooOld:
+    return "it refused this version of the protocol";
+  case Reason::ServerForgotAboutUs:
+    return "it forgot this computer";
+  case Reason::SocketSendError:
+    return "this computer could not send to it (network or firewall)";
+  case Reason::ResendTimeout:
+    return "it did not answer (blocked by a firewall or the network, or down)";
+  }
+  return "unknown failure";
+}
+
+// The address this computer reaches the internet from, the one its router
+// knows it by: a UDP socket "connected" to a public address sends nothing,
+// but the system picks the address it would send from. Empty without a
+// network. ENet must be initialized (the server is).
+std::string PrimaryLocalAddress() {
+  const ENetSocket probe = enet_socket_create(ENET_SOCKET_TYPE_DATAGRAM);
+  if (probe == ENET_SOCKET_NULL)
+    return {};
+  std::string result;
+  ENetAddress remote{};
+  if (enet_address_set_host_ip(&remote, "1.1.1.1") == 0) {
+    remote.port = 53;
+    ENetAddress local{};
+    std::array<char, 64> ip{};
+    if (enet_socket_connect(probe, &remote) == 0 &&
+        enet_socket_get_address(probe, &local) == 0 &&
+        enet_address_get_host_ip(&local, ip.data(), ip.size()) == 0)
+      result = ip.data();
+  }
+  enet_socket_destroy(probe);
+  return result;
 }
 
 struct ControllerOption {
@@ -242,6 +286,7 @@ public:
   }
 
   void OnConnectionLost() override {
+    std::cerr << "netplay: the connection to the host was lost\n";
     m_connection_lost = true;
     {
       std::lock_guard lock(m_mutex);
@@ -251,24 +296,31 @@ public:
   }
 
   void OnConnectionError(const std::string &message) override {
+    std::cerr << "netplay: " << message << '\n';
     std::lock_guard lock(m_mutex);
     m_error = message;
   }
 
   // The invite server did not answer, or forgot this computer. The lobby
   // says so in its invite section; a code join fails before the lobby opens.
-  void OnTraversalError(Common::TraversalClient::FailureReason) override {
+  void OnTraversalError(Common::TraversalClient::FailureReason reason) override {
+    std::cerr << "netplay: invite server: " << TraversalFailureText(reason)
+              << '\n';
     m_invite_server_failed = true;
   }
 
   // Called on the netplay thread, which is also the one that receives the
-  // code from the invite server.
+  // code from the invite server. The code itself stays out of the log, which
+  // players attach to reports.
   void OnTraversalStateChanged(Common::TraversalClient::State state) override {
     if (state != Common::TraversalClient::State::Connected ||
         !Common::g_TraversalClient)
       return;
     const Common::TraversalHostId id = Common::g_TraversalClient->GetHostID();
     std::lock_guard lock(m_mutex);
+    if (m_invite_code.empty())
+      std::cerr << "netplay: the invite server answered"
+                << (m_hosting ? "; the room's code is ready" : "") << '\n';
     m_invite_code.assign(id.data(), strnlen(id.data(), id.size()));
     m_invite_server_failed = false;
   }
@@ -371,8 +423,12 @@ fs::path ExecutableDirectory() {
 }
 
 // The addresses of this computer that friends can connect to, home network
-// first. Container and virtual machine adapters are left out.
-std::vector<LobbyAddress> HostAddresses(const NetPlay::NetPlayServer &server) {
+// first, and in it first the one this computer reaches the internet from
+// (primary, from PrimaryLocalAddress): the one friends at home can reach
+// when the computer has more than one. Container and virtual machine
+// adapters are left out.
+std::vector<LobbyAddress> HostAddresses(const NetPlay::NetPlayServer &server,
+                                        const std::string &primary) {
   std::vector<LobbyAddress> addresses;
   for (const std::string &interface_name : server.GetInterfaceSet()) {
     const std::string host = server.GetInterfaceHost(interface_name);
@@ -384,10 +440,45 @@ std::vector<LobbyAddress> HostAddresses(const NetPlay::NetPlayServer &server) {
       continue;
     addresses.push_back({kind, host});
   }
-  std::ranges::sort(addresses, [](const LobbyAddress &a, const LobbyAddress &b) {
-    return std::tie(a.kind, a.address) < std::tie(b.kind, b.address);
+  const auto is_primary = [&](const LobbyAddress &address) {
+    return !primary.empty() &&
+           std::string_view(address.address).substr(0, address.address.rfind(':')) ==
+               primary;
+  };
+  const auto order = [&](const LobbyAddress &address) {
+    return std::tuple(address.kind, !is_primary(address),
+                      std::string_view(address.address));
+  };
+  std::ranges::sort(addresses, [&](const LobbyAddress &a, const LobbyAddress &b) {
+    return order(a) < order(b);
   });
   return addresses;
+}
+
+// For a report: the addresses the host's lobby shows. A public address
+// identifies the player's connection, so the log only says there is one.
+void LogHostAddresses(const std::vector<LobbyAddress> &addresses,
+                      const std::string &primary) {
+  std::string line = "netplay: this computer's addresses:";
+  if (addresses.empty())
+    line += " none (no network)";
+  for (std::size_t i = 0; i < addresses.size(); ++i) {
+    const LobbyAddress &address = addresses[i];
+    line += i == 0 ? " " : ", ";
+    switch (address.kind) {
+    case AddressKind::Public:
+      line += "a public address (left out here)";
+      break;
+    case AddressKind::Tailscale:
+      line += address.address + " (Tailscale)";
+      break;
+    default:
+      line += address.address + " (home)";
+      break;
+    }
+  }
+  std::cerr << line << "; reaches the internet from "
+            << (primary.empty() ? std::string("none") : primary) << '\n';
 }
 
 class LobbyWindow {
@@ -567,8 +658,12 @@ bool RunLobbyWindow(RuntimeConfig &runtime_config,
   // the system for its network adapters).
   // With an invite code the lobby shows the code, not the addresses.
   std::vector<LobbyAddress> addresses;
-  if (server && !options.invite_code)
-    addresses = HostAddresses(*server);
+  std::string primary_address;
+  if (server && !options.invite_code) {
+    primary_address = PrimaryLocalAddress();
+    addresses = HostAddresses(*server, primary_address);
+    LogHostAddresses(addresses, primary_address);
+  }
   LobbyState lobby_state;
   auto last_refresh = std::chrono::steady_clock::now();
   bool running = true;
@@ -579,8 +674,14 @@ bool RunLobbyWindow(RuntimeConfig &runtime_config,
     const auto now = std::chrono::steady_clock::now();
     if (now - last_refresh >= std::chrono::seconds(1)) {
       available = EnumerateControllers();
-      if (server && !options.invite_code)
-        addresses = HostAddresses(*server);
+      if (server && !options.invite_code) {
+        const std::string primary = PrimaryLocalAddress();
+        std::vector<LobbyAddress> refreshed = HostAddresses(*server, primary);
+        // A network joined or left while the lobby is open.
+        if (refreshed != addresses)
+          LogHostAddresses(refreshed, primary);
+        addresses = std::move(refreshed);
+      }
       last_refresh = now;
     }
 
@@ -795,11 +896,14 @@ int RunNetplayLobby(RuntimeConfig runtime_config, ConfigResult frontend_config,
   std::unique_ptr<NetPlay::NetPlayServer> server;
   std::unique_ptr<NetPlay::NetPlayClient> client;
   if (options.role == NetplayRole::Host) {
-    std::cerr << "netplay: opening host on UDP port " << options.port << '\n';
+    std::cerr << "netplay: opening host on UDP port " << options.port
+              << (options.invite_code ? " (invite code)" : " (direct IP)") << '\n';
     ui.SetHosting(true);
     server = std::make_unique<NetPlay::NetPlayServer>(
         options.port, false, &ui, options.invite_code ? invite : direct);
     if (!server->is_connected) {
+      std::cerr << "netplay: UDP port " << options.port
+                << " could not be opened (another program may be using it)\n";
       server.reset();
       detail::SetExternalUICommon(false);
       UICommon::Shutdown();
@@ -818,27 +922,35 @@ int RunNetplayLobby(RuntimeConfig runtime_config, ConfigResult frontend_config,
   } else {
     if (options.invite_code)
       std::cerr << "netplay: joining with an invite code\n";
+    else if (ClassifyAddress("", options.address) == AddressKind::Public)
+      std::cerr << "netplay: connecting to a public address (left out here), "
+                   "UDP port "
+                << options.port << '\n';
     else
       std::cerr << "netplay: connecting to " << options.address << ':'
                 << options.port << '\n';
     // A code nobody answers to raises one of Dolphin's alerts, a message box
-    // in English on Windows. The launcher explains the failure instead.
-    if (options.invite_code)
-      Common::SetEnableAlert(false);
+    // in English on Windows: only the log keeps it, with its reason ("timed
+    // out connecting to the host"...), and the launcher explains the
+    // failure.
+    const auto connect_started = std::chrono::steady_clock::now();
+    QuietAlerts() = true;
     client = std::make_unique<NetPlay::NetPlayClient>(
         options.address, options.port, &ui, options.nickname,
         options.invite_code ? invite : direct,
         static_cast<u8>(options.controllers.size()));
-    if (options.invite_code)
-      Common::SetEnableAlert(true);
+    QuietAlerts() = false;
+    if (!client->IsConnected())
+      std::cerr << "netplay: no connection after "
+                << std::chrono::duration_cast<std::chrono::milliseconds>(
+                       std::chrono::steady_clock::now() - connect_started)
+                       .count()
+                << " ms\n";
   }
 
   if (!client->IsConnected()) {
     const NetPlay::ConnectionError connection_error =
         client->GetConnectionError();
-    const std::string error = ui.Error();
-    if (!error.empty())
-      std::cerr << "netplay: " << error << '\n';
     client.reset();
     server.reset();
     detail::SetExternalUICommon(false);
