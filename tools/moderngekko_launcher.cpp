@@ -1392,10 +1392,25 @@ void DrawPatchNotes(const std::vector<moderngekko::frontend::PatchNoteLine>& not
   ImGui::EndChild();
 }
 
-// The launcher window's size before the display's scale. It can't be
-// resized: the pages are laid out for this size.
+// The size the launcher's pages are laid out for, before the display's scale.
+// The window is this shape and can't be resized: it opens a third bigger
+// (LAUNCHER_ZOOM, 1280x720 at 100%), everything in it scaled alike, or as
+// big as fits the screen when that is less (never under this size).
 constexpr int LAUNCHER_WIDTH = 960;
 constexpr int LAUNCHER_HEIGHT = 540;
+constexpr float LAUNCHER_ZOOM = 4.0f / 3.0f;
+
+// How much bigger than LAUNCHER_WIDTH x LAUNCHER_HEIGHT the window opens on
+// a display with this content scale and usable area (the screen without its
+// panels), leaving room for the window's title bar and borders.
+float LauncherZoom(float display_scale, const SDL_Rect& usable)
+{
+  if (usable.w <= 0 || usable.h <= 0 || display_scale <= 0.0f)
+    return 1.0f;
+  const float fits_width = (usable.w - 16.0f) / (LAUNCHER_WIDTH * display_scale);
+  const float fits_height = (usable.h - 48.0f) / (LAUNCHER_HEIGHT * display_scale);
+  return std::clamp(std::min(fits_width, fits_height), 1.0f, LAUNCHER_ZOOM);
+}
 
 std::string_view TrimView(std::string_view text)
 {
@@ -2627,9 +2642,15 @@ int main(int argc, char** argv)
   moderngekko::frontend::ActiveLanguage() =
       moderngekko::frontend::ResolveLanguage(config.language, system_language);
 
-  const float scale = SDL_GetDisplayContentScale(SDL_GetPrimaryDisplay());
-  // One compact size that can't be changed, so every page is laid out for
-  // it (LAUNCHER_WIDTH x LAUNCHER_HEIGHT, at the display's scale).
+  // One size that can't be changed, so every page is laid out for it: the
+  // design's (LAUNCHER_WIDTH x LAUNCHER_HEIGHT) at the display's scale, made
+  // a third bigger when the screen has room. `scale` sizes everything drawn.
+  const SDL_DisplayID display = SDL_GetPrimaryDisplay();
+  const float display_scale = SDL_GetDisplayContentScale(display);
+  SDL_Rect usable{};
+  if (!SDL_GetDisplayUsableBounds(display, &usable))
+    usable = {};
+  const float scale = display_scale * LauncherZoom(display_scale, usable);
   SDL_Window* window = SDL_CreateWindow(
       MODERNGEKKO_FRONTEND_NAME, static_cast<int>(LAUNCHER_WIDTH * scale),
       static_cast<int>(LAUNCHER_HEIGHT * scale), SDL_WINDOW_HIGH_PIXEL_DENSITY);
@@ -3828,7 +3849,11 @@ int main(int argc, char** argv)
           }
           ImGui::Spacing();
           ImGui::Spacing();
-          if (DrawPrimaryButton(Tr("PLAY"), fonts.bold, 42 * scale, column_width))
+          // With more than one game the button opens the game selection
+          // screen, so it says LAUNCH; the page keeps its PLAY name.
+          if (DrawPrimaryButton(moderngekko::frontend::PlaysSeveralGames() ? Tr("LAUNCH") :
+                                                                            Tr("PLAY"),
+                                fonts.bold, 42 * scale, column_width))
           {
             // With more than one game, PLAY asks which one first.
             if (moderngekko::frontend::PlaysSeveralGames())

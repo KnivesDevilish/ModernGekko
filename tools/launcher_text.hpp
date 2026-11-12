@@ -325,6 +325,7 @@ inline constexpr Translation SPANISH_TEXTS[] = {
     {"Everyone chooses the same game as the host.", "Todos eligen el mismo juego que el anfitrión."},
     // The game selection screen
     {"SELECT YOUR GAME", "ELIGE TU JUEGO"},
+    {"LAUNCH", "LANZAR"},
     {"Switch", "Cambiar"},
     {"Choose", "Elegir"},
     {"DISC IMAGE", "IMAGEN DE DISCO"},
@@ -878,6 +879,7 @@ inline constexpr Translation JAPANESE_TEXTS[] = {
     {"Everyone chooses the same game as the host.", "全員がホストと同じゲームを選んでください。"},
     // The game selection screen
     {"SELECT YOUR GAME", "ゲームセレクト"},
+    {"LAUNCH", "起動"},
     {"Switch", "切り替え"},
     {"Choose", "決定"},
     {"DISC IMAGE", "ディスクイメージ"},
