@@ -109,6 +109,8 @@ set(MODERNGEKKO_GAME_BORDERS "" CACHE PATH
 # The game selection screen that PLAY opens in a build with more than one
 # game (MODERNGEKKO_GAMES): a folder with its layout.txt, pictures and font
 # (tools/launcher_game_select_layout.hpp), copied to Resources/game-select.
+# Its layout.txt can also name each game's intro, parts of a video in the
+# player's own extracted game, played with tools/third_party/pl_mpeg.h.
 # Without it, PLAY asks with plain buttons.
 set(MODERNGEKKO_GAME_SELECT "" CACHE PATH
     "Folder with the game selection screen's layout.txt, pictures and font")
@@ -729,6 +731,7 @@ if(MODERNGEKKO_ENABLE_DOLPHIN_RUNTIME)
         tools/frontend_config.cpp
         tools/dol_patch.cpp
         tools/launcher_music.cpp
+        tools/launcher_preview_video.cpp
         tools/launcher_update.cpp
         tools/windows_firewall.cpp
         vendor/dolphin/Externals/imgui/imgui/backends/imgui_impl_sdl3.cpp
@@ -990,6 +993,24 @@ if(BUILD_TESTING)
     target_compile_features(moderngekko_launcher_game_select_test PRIVATE cxx_std_23)
     add_test(NAME moderngekko.launcher_game_select
              COMMAND moderngekko_launcher_game_select_test)
+
+    add_executable(moderngekko_launcher_sound_test
+        tests/launcher_sound_test.cpp)
+    target_include_directories(moderngekko_launcher_sound_test PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/tools")
+    target_compile_features(moderngekko_launcher_sound_test PRIVATE cxx_std_23)
+    add_test(NAME moderngekko.launcher_sound COMMAND moderngekko_launcher_sound_test)
+
+    find_package(Threads REQUIRED)
+    add_executable(moderngekko_launcher_preview_video_test
+        tests/launcher_preview_video_test.cpp
+        tools/launcher_preview_video.cpp)
+    target_include_directories(moderngekko_launcher_preview_video_test PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/tools")
+    target_compile_features(moderngekko_launcher_preview_video_test PRIVATE cxx_std_23)
+    target_link_libraries(moderngekko_launcher_preview_video_test PRIVATE Threads::Threads)
+    add_test(NAME moderngekko.launcher_preview_video
+             COMMAND moderngekko_launcher_preview_video_test)
 
     # Header-only, so the test needs no companion translation unit.
     add_executable(moderngekko_launcher_savestates_test

@@ -11,23 +11,34 @@
 #include <pulse/error.h>
 #include <pulse/simple.h>
 
-#include <atomic>
 #include <condition_variable>
-#include <mutex>
 #include <thread>
-#include <vector>
 #endif
 
 #include <algorithm>
+#include <atomic>
 #include <cstdint>
 #include <iostream>
+#include <mutex>
 #include <utility>
+#include <vector>
 
 namespace moderngekko::frontend
 {
+// The music, its volume, and the short sounds playing over it, as the audio
+// output reads them.
 struct MusicPlayer::Decoder
 {
   drmp3 mp3{};
+  std::atomic<float> gain{1.0f};          // the music's
+  std::atomic<float> effects_gain{1.0f};  // the sounds'
+  struct Voice
+  {
+    std::vector<drmp3_int16> samples;  // at the music's rate and channels
+    std::size_t at = 0;
+  };
+  std::mutex voices_mutex;
+  std::vector<Voice> voices;
 };
 
 #if defined(MODERNGEKKO_HAS_CUBEB)
@@ -57,7 +68,6 @@ struct MusicPlayer::Output
   // Counts Resume() calls: after the sound server failed, the next resume
   // (when the game closes) tries again.
   std::uint64_t resumes = 0;
-  std::atomic<float> gain{1.0f};
 };
 #else
 struct MusicPlayer::Output
@@ -75,6 +85,17 @@ float Gain(int volume)
   const float level = static_cast<float>(std::clamp(volume, 0, 100)) / 100.0f;
   return level * level;
 }
+
+// The sounds' level for a slider value: as the slider reads, so a sound
+// stays clear at the music's usual volume.
+float EffectsGain(int volume)
+{
+  return static_cast<float>(std::clamp(volume, 0, 100)) / 100.0f;
+}
+
+// The next frames of music at its volume, with the sounds playing over it
+// added in; a sound that has ended is let go.
+void MixMusic(MusicPlayer::Decoder& decoder, drmp3_int16* samples, long frames);
 
 // The next frames of music, starting over at the end of the file so it
 // loops. A file that can't be decoded any further gives silence.
@@ -103,14 +124,36 @@ void ReadMusic(MusicPlayer::Decoder& decoder, drmp3_int16* samples, long frames)
     written += static_cast<long>(read);
   }
 }
+
+void MixMusic(MusicPlayer::Decoder& decoder, drmp3_int16* samples, long frames)
+{
+  ReadMusic(decoder, samples, frames);
+  const std::size_t count = static_cast<std::size_t>(frames) * decoder.mp3.channels;
+  const float gain = decoder.gain.load();
+  if (gain < 1.0f)
+  {
+    for (std::size_t i = 0; i < count; ++i)
+      samples[i] = static_cast<drmp3_int16>(static_cast<float>(samples[i]) * gain);
+  }
+  const float effects_gain = decoder.effects_gain.load();
+  std::lock_guard lock(decoder.voices_mutex);
+  for (MusicPlayer::Decoder::Voice& voice : decoder.voices)
+  {
+    voice.at += MixInto(samples, count, voice.samples.data() + voice.at,
+                        voice.samples.size() - voice.at, effects_gain);
+  }
+  std::erase_if(decoder.voices, [](const MusicPlayer::Decoder::Voice& voice) {
+    return voice.at >= voice.samples.size();
+  });
+}
 #endif
 
 #if defined(MODERNGEKKO_HAS_CUBEB)
 // The audio device asks for more sound. Runs on cubeb's audio thread.
 long FeedMusic(cubeb_stream*, void* user, const void*, void* output, long frames)
 {
-  ReadMusic(*static_cast<MusicPlayer::Decoder*>(user), static_cast<drmp3_int16*>(output),
-            frames);
+  MixMusic(*static_cast<MusicPlayer::Decoder*>(user), static_cast<drmp3_int16*>(output),
+           frames);
   return frames;
 }
 
@@ -125,11 +168,11 @@ constexpr long BLOCK_FRAMES = 1024;
 
 pa_simple* ConnectMusic(const MusicPlayer::Output& output)
 {
-  // A tenth of a second waiting at the server: a volume change is heard
-  // that soon, and it is plenty to ride out a busy moment.
+  // 60 ms waiting at the server: a sound or a volume change is heard that
+  // soon, and it is enough to ride out a busy moment.
   pa_buffer_attr buffering;
   buffering.maxlength = static_cast<std::uint32_t>(-1);
-  buffering.tlength = static_cast<std::uint32_t>(pa_usec_to_bytes(100000, &output.format));
+  buffering.tlength = static_cast<std::uint32_t>(pa_usec_to_bytes(60000, &output.format));
   buffering.prebuf = static_cast<std::uint32_t>(-1);
   buffering.minreq = static_cast<std::uint32_t>(-1);
   buffering.fragsize = static_cast<std::uint32_t>(-1);
@@ -196,13 +239,7 @@ void PlayMusic(MusicPlayer::Output& output, MusicPlayer::Decoder& decoder, pa_si
         continue;
       }
     }
-    ReadMusic(decoder, block.data(), BLOCK_FRAMES);
-    const float gain = output.gain.load();
-    if (gain < 1.0f)
-    {
-      for (drmp3_int16& sample : block)
-        sample = static_cast<drmp3_int16>(static_cast<float>(sample) * gain);
-    }
+    MixMusic(decoder, block.data(), BLOCK_FRAMES);
     int error = 0;
     if (pa_simple_write(connection, block.data(), block.size() * sizeof(drmp3_int16), &error) <
         0)
@@ -241,6 +278,8 @@ bool MusicPlayer::Play(const std::filesystem::path& path, int volume)
   return false;
 #else
   m_decoder = std::make_unique<Decoder>();
+  m_decoder->gain = Gain(volume);
+  m_decoder->effects_gain = EffectsGain(volume);
 #ifdef _WIN32
   const bool opened = drmp3_init_file_w(&m_decoder->mp3, path.c_str(), nullptr);
 #else
@@ -275,8 +314,9 @@ bool MusicPlayer::Play(const std::filesystem::path& path, int volume)
     params.channels = decoder.mp3.channels;
     params.layout = decoder.mp3.channels == 1 ? CUBEB_LAYOUT_MONO : CUBEB_LAYOUT_STEREO;
     params.prefs = CUBEB_STREAM_PREF_NONE;
-    // A tenth of a second of buffering: plenty for music, light on the CPU.
-    std::uint32_t latency = params.rate / 10;
+    // 60 ms of buffering: a sound is heard about that soon, and it is still
+    // light on the CPU.
+    std::uint32_t latency = params.rate * 6 / 100;
     std::uint32_t minimum = 0;
     if (cubeb_get_min_latency(output.context, &params, &minimum) == CUBEB_OK)
       latency = std::max(latency, minimum);
@@ -287,7 +327,6 @@ bool MusicPlayer::Play(const std::filesystem::path& path, int volume)
       output.stream = nullptr;
       return;
     }
-    cubeb_stream_set_volume(output.stream, Gain(volume));
     started = cubeb_stream_start(output.stream) == CUBEB_OK;
   });
   if (!started)
@@ -297,7 +336,6 @@ bool MusicPlayer::Play(const std::filesystem::path& path, int volume)
   m_output->format.format = PA_SAMPLE_S16NE;
   m_output->format.rate = m_decoder->mp3.sampleRate;
   m_output->format.channels = static_cast<std::uint8_t>(m_decoder->mp3.channels);
-  m_output->gain = Gain(volume);
   // The first connection here, so Play can tell at once whether there is a
   // sound server at all.
   if (pa_simple* connection = ConnectMusic(*m_output))
@@ -319,18 +357,28 @@ bool MusicPlayer::Play(const std::filesystem::path& path, int volume)
 
 void MusicPlayer::SetVolume(int volume)
 {
-#if defined(MODERNGEKKO_HAS_CUBEB)
-  if (m_output && m_output->stream)
+#if defined(MODERNGEKKO_HAS_CUBEB) || defined(MODERNGEKKO_HAS_PULSE_SIMPLE)
+  if (m_decoder)
   {
-    cubeb_stream* stream = m_output->stream;
-    m_output->worker->Execute([stream, volume] { cubeb_stream_set_volume(stream, Gain(volume)); });
+    m_decoder->gain = Gain(volume);
+    m_decoder->effects_gain = EffectsGain(volume);
   }
-#elif defined(MODERNGEKKO_HAS_PULSE_SIMPLE)
-  if (m_output)
-    m_output->gain = Gain(volume);
 #else
   (void)volume;
 #endif
+}
+
+void MusicPlayer::PlayEffect(const SoundEffect& sound)
+{
+  if (!m_decoder || !m_output)
+    return;
+  Decoder::Voice voice;
+  voice.samples = ConvertSound(sound, static_cast<int>(m_decoder->mp3.sampleRate),
+                               static_cast<int>(m_decoder->mp3.channels));
+  if (voice.samples.empty())
+    return;
+  std::lock_guard lock(m_decoder->voices_mutex);
+  m_decoder->voices.push_back(std::move(voice));
 }
 
 void MusicPlayer::Pause()

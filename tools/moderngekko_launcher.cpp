@@ -1206,7 +1206,7 @@ void DrawCreditsPage(ImFont* bold, const std::function<void()>& version_section 
       {"SR-ZGS, ModernGekko", "GNU GPL v3"},
       {"Dolphin", MODERNGEKKO_UI_TEXT("GNU GPL v2 or later")},
       {"SDL 3", MODERNGEKKO_UI_TEXT("zlib License")},
-      {"Dear ImGui", MODERNGEKKO_UI_TEXT("MIT License")},
+      {"Dear ImGui, pl_mpeg", MODERNGEKKO_UI_TEXT("MIT License")},
       {"Noto Sans CJK, Teko", "SIL Open Font License 1.1"},
   }};
   if (bottom_columns)
@@ -2821,7 +2821,7 @@ int main(int argc, char** argv)
         left->metadata                                      ? GameSelectSide::Left :
                                                               GameSelectSide::Right;
     game_select.Open(static_cast<bool>(left->metadata), static_cast<bool>(right->metadata), start,
-                     static_cast<double>(SDL_GetTicksNS()) / 1e9);
+                     static_cast<double>(SDL_GetTicksNS()) / 1e9, left->root, right->root);
     return true;
   };
   const auto& resolutions = moderngekko::frontend::SupportedResolutions();
@@ -5482,6 +5482,8 @@ int main(int argc, char** argv)
       input.clicked = ImGui::IsMouseClicked(ImGuiMouseButton_Left);
       game_select.Place(viewport->Pos, viewport->Size);
       const GameSelectEvent event = game_select.Update(input, now);
+      for (const moderngekko::frontend::SoundEffect* sound : game_select.TakeSounds())
+        music.PlayEffect(*sound);
       GameSelectTexts texts;
       texts.title = Tr("SELECT YOUR GAME");
       texts.switch_games = Tr("Switch");

@@ -6,6 +6,12 @@
 // half and fades to black before the game starts, and back closes the screen.
 // A game that isn't extracted shows in grey and can't be chosen.
 //
+// After a few seconds on an extracted game, its intro plays (layout.txt's
+// preview, from the player's own game files, see launcher_preview_video.hpp):
+// the other half and the divider slide away, the video comes in over the
+// whole canvas with the game's logo still on it, and when it ends, or anything
+// is pressed, the halves come back.
+//
 // The art is a canvas (1920x1333 for SR-ZGS) fitted to the window's height,
 // in its middle; everything here is placed in canvas pixels and drawn with
 // Dear ImGui's draw list, the divider's teeth from code so they can slide.
@@ -14,6 +20,8 @@
 #include "button_glyphs.hpp"
 #include "launcher_game_select_layout.hpp"
 #include "launcher_look.hpp"
+#include "launcher_preview_video.hpp"
+#include "launcher_sound.hpp"
 
 #include <SDL3/SDL.h>
 #include <imgui.h>
@@ -66,6 +74,19 @@ struct GameSelectTexts
   bool small_hints = false;        // Japanese: its letters run bigger
 };
 
+// What the screen plays over the music (layout.txt's sounds).
+enum class GameSelectSound
+{
+  Open,
+  Move,
+  ChooseLeft,
+  ChooseRight,
+  Back,
+  Denied,
+};
+inline constexpr std::array<const char*, 6> GAME_SELECT_SOUND_NAMES = {
+    "open", "move", "choose-left", "choose-right", "back", "denied"};
+
 enum class GameSelectEvent
 {
   None,
@@ -106,6 +127,8 @@ public:
       if (picture->grey)
         SDL_DestroyTexture(picture->grey);
     }
+    m_video.Stop();
+    DestroyVideoTextures();
   }
 
   // Reads Resources/game-select: its layout and pictures. Once; false when
@@ -119,6 +142,7 @@ public:
     if (m_tried)
       return m_loaded;
     m_tried = true;
+    m_renderer = renderer;
     std::ifstream file(folder / "layout.txt", std::ios::binary);
     const std::string text{std::istreambuf_iterator<char>(file),
                            std::istreambuf_iterator<char>()};
@@ -148,17 +172,43 @@ public:
       picture->x = place.x;
       picture->y = place.y;
     }
+    // Its sounds, each optional.
+    for (std::size_t i = 0; i < GAME_SELECT_SOUND_NAMES.size(); ++i)
+    {
+      const auto sound = m_layout.sounds.find(GAME_SELECT_SOUND_NAMES[i]);
+      if (sound == m_layout.sounds.end())
+        continue;
+      m_sounds[i] = LoadSoundEffect(folder / sound->second);
+      if (!m_sounds[i])
+        std::cout << "game select: can't read " << (folder / sound->second).string() << '\n';
+    }
     std::cout << "game select: " << folder.string() << '\n';
     m_loaded = true;
     return true;
   }
 
   const GameSelectLayout& Layout() const { return m_layout; }
+
+  // The sounds to start this frame, in order; the list empties.
+  std::vector<const SoundEffect*> TakeSounds()
+  {
+    std::vector<const SoundEffect*> sounds;
+    for (const GameSelectSound sound : m_pending_sounds)
+    {
+      if (const auto& effect = m_sounds[static_cast<std::size_t>(sound)])
+        sounds.push_back(effect.get());
+    }
+    m_pending_sounds.clear();
+    return sounds;
+  }
   bool IsOpen() const { return m_open; }
   GameSelectSide Chosen() const { return m_selected; }
 
-  // Opens the screen on `start`; a half whose game isn't ready is grey.
-  void Open(bool left_ready, bool right_ready, GameSelectSide start, double now)
+  // Opens the screen on `start`; a half whose game isn't ready is grey. The
+  // folders are the games' (games/<disc ID>), where their intros are.
+  void Open(bool left_ready, bool right_ready, GameSelectSide start, double now,
+            const std::filesystem::path& left_folder = {},
+            const std::filesystem::path& right_folder = {})
   {
     m_open = true;
     m_opened_at = now;
@@ -172,9 +222,18 @@ public:
     m_denied_at.reset();
     m_teeth = 0.0f;
     m_pressed_action = -1;
+    m_pending_sounds = {GameSelectSound::Open};
+    m_folders = {left_folder, right_folder};
+    StopPreview();
+    m_still_since = m_switched_at;
+    m_preview_broken = {};
   }
 
-  void Close() { m_open = false; }
+  void Close()
+  {
+    m_open = false;
+    StopPreview();
+  }
 
   GameSelectEvent Update(const GameSelectInput& input, double now)
   {
@@ -189,24 +248,32 @@ public:
 
     if (m_chosen_at && now - *m_chosen_at >= CHOSEN_LENGTH)
     {
-      m_open = false;
+      Close();
       return GameSelectEvent::Chosen;
     }
     if (m_closing_at && now - *m_closing_at >= CLOSING_LENGTH)
     {
-      m_open = false;
+      Close();
       return GameSelectEvent::Closed;
     }
     // Presses count once the halves are in, and until a game is chosen.
-    if (t < INPUT_AFTER || m_chosen_at || m_closing_at)
-      return GameSelectEvent::None;
+    const bool counts = t >= INPUT_AFTER && !m_chosen_at && !m_closing_at;
+    if (counts)
+      HandleInput(input, now);
+    UpdatePreview(input, counts, now);
+    return GameSelectEvent::None;
+  }
 
+private:
+  void HandleInput(const GameSelectInput& input, double now)
+  {
     if (input.back)
     {
       m_closing_at = now;
       m_pressed_action = 2;
       m_pressed_at = now;
-      return GameSelectEvent::None;
+      m_pending_sounds.push_back(GameSelectSound::Back);
+      return;
     }
     const std::optional<GameSelectSide> under_mouse = SideAt(input.mouse);
     if (input.left || input.right)
@@ -226,13 +293,20 @@ public:
       m_pressed_action = 1;
       m_pressed_at = now;
       if (m_ready[Index(m_selected)])
+      {
         m_chosen_at = now;
+        m_pending_sounds.push_back(m_selected == GameSelectSide::Left ? GameSelectSound::ChooseLeft
+                                                                      : GameSelectSound::ChooseRight);
+      }
       else
+      {
         m_denied_at = now;  // its game isn't extracted: the half shakes
+        m_pending_sounds.push_back(GameSelectSound::Denied);
+      }
     }
-    return GameSelectEvent::None;
   }
 
+public:
   void Draw(ImDrawList* list, ImVec2 origin, ImVec2 size, double now, ImFont* font,
             ImFont* label_font, const GameSelectTexts& texts, bool keyboard, PadStyle pad_style)
   {
@@ -258,10 +332,20 @@ public:
     const float intro = EaseOut(t / 0.9f);
     const float left_weight = LeftWeight(now);
     const float tau = 2.0f * 3.14159265f;
+    // An intro playing: `room` is how far the other half and the divider
+    // have gone, `video` how far its picture has come in.
+    const int previewing = m_preview_at ? m_preview_side : -1;
+    const float room = PreviewRoom(now);
+    const float video = PreviewShown(now);
+    const float away = previewing == 0   ? room * (m_layout.width - m_layout.left_tip + 60.0f)
+                       : previewing == 1 ? -room * (m_layout.right_tip + 60.0f)
+                                         : 0.0f;
+    const auto at_away = [&](float x, float y) { return at(x + away, y); };
 
     // The two halves: background drifting, character floating (more when
     // selected), brighter when selected; the chosen one zooms and flashes.
-    for (int side = 0; side < 2; ++side)
+    // Under an intro that covers it all, nothing to draw.
+    for (int side = 0; side < 2 && video < 0.999f; ++side)
     {
       const Half& half = m_half[side];
       const bool left = side == 0;
@@ -269,6 +353,9 @@ public:
       const bool is_selected = Index(m_selected) == side;
       const float weight = left ? left_weight : 1.0f - left_weight;
       float slide = (1.0f - intro) * (left ? -m_layout.left_end : m_layout.width - m_layout.right_start);
+      if (previewing >= 0 && side != previewing)
+        slide += room * (left ? -(m_layout.left_end + 60.0f)
+                              : m_layout.width - m_layout.right_start + 60.0f);
       if (m_denied_at && is_selected)
       {
         const float since = static_cast<float>(now - *m_denied_at);
@@ -319,23 +406,35 @@ public:
     for (int side = 0; side < 2; ++side)
     {
       const float weight = side == 0 ? left_weight : 1.0f - left_weight;
-      const float strength = weight * pulse * landed * glow_fade * shown;
+      const float strength = weight * pulse * landed * glow_fade * shown * (1.0f - room);
       if (strength > 0.01f)
-        DrawTeethEdge(list, side == 0, drop, strength, at, s);
+        DrawTeethEdge(list, side == 0, drop, strength, at_away, s);
     }
-    DrawDivider(list, drop, black, at);
+    DrawDivider(list, drop, black, at_away);
 
     // The title along the divider, once it has landed.
     float title_alpha = EaseOut((t - 1.0f) / 0.4f) * (0.88f + 0.12f * std::sin(t * tau / 2.2f));
     if (chosen_for >= 0.0f)
       title_alpha *= 1.0f - EaseOut(chosen_for / 0.4f);
-    title_alpha *= shown;
+    title_alpha *= shown * (1.0f - room);
     if (title_alpha > 0.0f && font)
-      DrawTitle(list, font, texts, at(m_layout.Middle(), m_layout.height * 0.5f), s,
+      DrawTitle(list, font, texts, at_away(m_layout.Middle(), m_layout.height * 0.5f), s,
                 title_alpha);
 
+    // The intro, over the whole canvas; choosing its game flashes it too.
+    if (previewing >= 0 && video > 0.0f)
+    {
+      DrawPreview(list, canvas_min, canvas_max, now, video * shown);
+      if (chosen_for >= 0.0f)
+        list->AddRectFilled(canvas_min, canvas_max,
+                            IM_COL32(255, 255, 255,
+                                     static_cast<int>(255 * 0.7f * ChoiceFlash(chosen_for) *
+                                                      video * shown)));
+    }
+
     // The logos pop in; the selected one breathes; a game not extracted
-    // shows grey, with a label over its half.
+    // shows grey, with a label over its half. During an intro its game's logo
+    // stays on it, and the other one goes.
     for (int side = 0; side < 2; ++side)
     {
       const Half& half = m_half[side];
@@ -346,7 +445,9 @@ public:
       float dim = 0.6f + 0.4f * weight;
       if (chosen_for >= 0.0f && !is_selected)
         dim *= 1.0f - EaseOut(chosen_for / 0.5f);
-      DrawPicture(list, half.logo, !m_ready[side], scale, 0.0f, 0.0f, dim, pop.alpha * shown, at);
+      const float leaving = previewing >= 0 && side != previewing ? 1.0f - room : 1.0f;
+      DrawPicture(list, half.logo, !m_ready[side], scale, 0.0f, 0.0f, dim,
+                  pop.alpha * shown * leaving, at);
       if (!m_ready[side] && label_font)
       {
         const float middle = side == 0 ? m_layout.left_end * 0.5f
@@ -380,6 +481,237 @@ private:
   static constexpr float INPUT_AFTER = 0.5f;
   static constexpr double CHOSEN_LENGTH = 1.4;   // flash, then the fade to black
   static constexpr double CLOSING_LENGTH = 0.25;
+  static constexpr double PREVIEW_PREPARE = 0.6;  // still this long: its video gets ready
+  static constexpr double PREVIEW_AFTER = 5.0;    // still this long: its intro plays
+  static constexpr double PREVIEW_CLOSE = 0.7;    // the halves coming back
+  static constexpr int BLUR_WIDTH = 16;           // the blurred copy behind the video
+  static constexpr int BLUR_HEIGHT = 12;
+
+  // The intros: getting the selected game's video ready while the player
+  // stays on it, playing it, and closing it when it ends or anything moves.
+  void UpdatePreview(const GameSelectInput& input, bool counts, double now)
+  {
+    const bool moved = input.left || input.right || input.back || input.mouse_moved;
+    if (counts && (moved || input.choose || input.clicked))
+    {
+      m_still_since = now;
+      if (moved)
+        ClosePreview(now);  // choosing leaves it playing under the flash
+    }
+    if (m_chosen_at || m_closing_at)
+      return;
+    if (m_preview_closing_at)
+    {
+      if (now - *m_preview_closing_at < PREVIEW_CLOSE)
+        return;
+      StopPreview();
+      m_still_since = now;  // and another one after a while
+    }
+    if (m_preview_at)
+    {
+      const GameSelectPreview& preview = *m_layout.previews[m_preview_side];
+      if (game_select_preview::MomentAt(preview, m_video.FrameRate(), VideoSeconds(now)).ended)
+        ClosePreview(now);
+      return;
+    }
+    const int side = Index(m_selected);
+    const auto& preview = m_layout.previews[side];
+    if (!preview || !m_ready[side] || m_preview_broken[side] || m_folders[side].empty())
+      return;
+    const char* name = side == 0 ? "left" : "right";
+    if (m_video_side != side && now - m_still_since >= PREVIEW_PREPARE)
+    {
+      m_video.Stop();
+      m_video_side = -1;
+      const auto source = FindVideoSource(m_folders[side], preview->video);
+      if (!source)
+      {
+        std::cout << "game select: no intro on the " << name << ", "
+                  << (m_folders[side] / preview->video.substr(0, preview->video.find(':'))).string()
+                  << " has no " << preview->video << '\n';
+        m_preview_broken[side] = true;
+        return;
+      }
+      m_video.Start(*source, preview->parts);
+      m_video_side = side;
+    }
+    if (m_video_side != side)
+      return;
+    if (m_video.Failed())
+    {
+      std::cout << "game select: can't play " << preview->video << " (the intro on the " << name
+                << ")\n";
+      m_preview_broken[side] = true;
+      m_video.Stop();
+      m_video_side = -1;
+      return;
+    }
+    if (m_video.Ready() && now - m_still_since >= PREVIEW_AFTER)
+    {
+      m_preview_at = now;
+      m_preview_side = side;
+    }
+  }
+
+  void ClosePreview(double now)
+  {
+    if (!m_preview_at || m_preview_closing_at)
+      return;
+    m_preview_room_from = PreviewRoom(now);
+    m_preview_shown_from = PreviewShown(now);
+    m_preview_closing_at = now;
+  }
+
+  void StopPreview()
+  {
+    m_video.Stop();
+    m_video_side = -1;
+    m_preview_at.reset();
+    m_preview_closing_at.reset();
+  }
+
+  // How far the other half and the divider have gone for the intro, 0..1.
+  float PreviewRoom(double now) const
+  {
+    using game_select_motion::EaseInOut;
+    if (!m_preview_at)
+      return 0.0f;
+    if (m_preview_closing_at)
+      return m_preview_room_from *
+             (1.0f - EaseInOut(static_cast<float>(now - *m_preview_closing_at) / 0.55f));
+    return EaseInOut(static_cast<float>(now - *m_preview_at) / 0.4f);
+  }
+
+  // How far the intro's picture has come in, 0..1.
+  float PreviewShown(double now) const
+  {
+    using game_select_motion::EaseInOut;
+    if (!m_preview_at)
+      return 0.0f;
+    if (m_preview_closing_at)
+      return m_preview_shown_from *
+             (1.0f - EaseInOut(static_cast<float>(now - *m_preview_closing_at) / PREVIEW_CLOSE));
+    return EaseInOut(static_cast<float>(now - *m_preview_at - 0.1) / 0.45f);
+  }
+
+  // Where in its video the intro is: it starts as its picture comes in.
+  double VideoSeconds(double now) const
+  {
+    return m_preview_at ? std::max(0.0, now - *m_preview_at - 0.1) : 0.0;
+  }
+
+  // The intro: the frame due now, as large as fits in the canvas, over a
+  // blurred, darker copy of itself that fills it; its fades over both.
+  void DrawPreview(ImDrawList* list, ImVec2 canvas_min, ImVec2 canvas_max, double now, float alpha)
+  {
+    const GameSelectPreview& preview = *m_layout.previews[m_preview_side];
+    const auto moment =
+        game_select_preview::MomentAt(preview, m_video.FrameRate(), VideoSeconds(now));
+    if (m_video.Take(moment.frame, m_rgba))
+      UploadFrame();
+    if (!m_video_texture || alpha <= 0.0f)
+      return;
+    const auto image = [&](SDL_Texture* texture, ImVec2 min, ImVec2 max, float brightness) {
+      list->AddImage(
+          ImTextureRef(static_cast<ImTextureID>(reinterpret_cast<std::uintptr_t>(texture))), min,
+          max, ImVec2(0.0f, 0.0f), ImVec2(1.0f, 1.0f),
+          ImGui::ColorConvertFloat4ToU32(ImVec4(brightness, brightness, brightness, alpha)));
+    };
+    if (m_blur_texture)
+      image(m_blur_texture, canvas_min, canvas_max, 0.4f);
+    else
+      list->AddRectFilled(canvas_min, canvas_max, IM_COL32(0, 0, 0, static_cast<int>(255 * alpha)));
+    const float width = canvas_max.x - canvas_min.x;
+    const float height = canvas_max.y - canvas_min.y;
+    float w = width;
+    float h = width / preview.shape;
+    if (h > height)
+    {
+      h = height;
+      w = height * preview.shape;
+    }
+    const ImVec2 min(canvas_min.x + (width - w) * 0.5f, canvas_min.y + (height - h) * 0.5f);
+    image(m_video_texture, min, ImVec2(min.x + w, min.y + h), 1.0f);
+    if (moment.black > 0.0f)
+      list->AddRectFilled(canvas_min, canvas_max,
+                          IM_COL32(0, 0, 0, static_cast<int>(255 * alpha * moment.black)));
+    if (moment.colour > 0.0f)
+    {
+      const auto& c = preview.end_colour;
+      list->AddRectFilled(canvas_min, canvas_max,
+                          ImGui::ColorConvertFloat4ToU32(ImVec4(c[0], c[1], c[2], alpha * moment.colour)));
+    }
+  }
+
+  // The frame just taken into the video's texture, and a tiny copy of it into
+  // the blurred one (drawn stretched, it blurs).
+  void UploadFrame()
+  {
+    const int w = m_video.Width();
+    const int h = m_video.Height();
+    if (w <= 0 || h <= 0 || m_rgba.size() < static_cast<std::size_t>(w) * h * 4 || !m_renderer)
+      return;
+    if (!m_video_texture || m_texture_width != w || m_texture_height != h)
+    {
+      DestroyVideoTextures();
+      // pl_mpeg leaves the fourth byte alone: RGBX.
+      m_video_texture = SDL_CreateTexture(m_renderer, SDL_PIXELFORMAT_RGBX32,
+                                          SDL_TEXTUREACCESS_STREAMING, w, h);
+      m_blur_texture = SDL_CreateTexture(m_renderer, SDL_PIXELFORMAT_RGBX32,
+                                         SDL_TEXTUREACCESS_STREAMING, BLUR_WIDTH, BLUR_HEIGHT);
+      // Without an alpha channel SDL would draw them opaque, over the fade.
+      for (SDL_Texture* texture : {m_video_texture, m_blur_texture})
+      {
+        if (!texture)
+          continue;
+        SDL_SetTextureScaleMode(texture, SDL_SCALEMODE_LINEAR);
+        SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_BLEND);
+      }
+      m_texture_width = w;
+      m_texture_height = h;
+    }
+    if (!m_video_texture)
+      return;
+    SDL_UpdateTexture(m_video_texture, nullptr, m_rgba.data(), w * 4);
+    if (!m_blur_texture)
+      return;
+    m_blur.assign(static_cast<std::size_t>(BLUR_WIDTH) * BLUR_HEIGHT * 4, 255);
+    for (int by = 0; by < BLUR_HEIGHT; ++by)
+    {
+      for (int bx = 0; bx < BLUR_WIDTH; ++bx)
+      {
+        std::array<unsigned, 3> sum{};
+        unsigned count = 0;
+        for (int y = by * h / BLUR_HEIGHT; y < (by + 1) * h / BLUR_HEIGHT; y += 2)
+        {
+          const std::uint8_t* row = m_rgba.data() + static_cast<std::size_t>(y) * w * 4;
+          for (int x = bx * w / BLUR_WIDTH; x < (bx + 1) * w / BLUR_WIDTH; x += 2)
+          {
+            sum[0] += row[x * 4];
+            sum[1] += row[x * 4 + 1];
+            sum[2] += row[x * 4 + 2];
+            ++count;
+          }
+        }
+        std::uint8_t* out = m_blur.data() + (static_cast<std::size_t>(by) * BLUR_WIDTH + bx) * 4;
+        for (int c = 0; c < 3; ++c)
+          out[c] = static_cast<std::uint8_t>(count ? sum[c] / count : 0);
+      }
+    }
+    SDL_UpdateTexture(m_blur_texture, nullptr, m_blur.data(), BLUR_WIDTH * 4);
+  }
+
+  void DestroyVideoTextures()
+  {
+    if (m_video_texture)
+      SDL_DestroyTexture(m_video_texture);
+    if (m_blur_texture)
+      SDL_DestroyTexture(m_blur_texture);
+    m_video_texture = nullptr;
+    m_blur_texture = nullptr;
+    m_texture_width = 0;
+    m_texture_height = 0;
+  }
 
   struct Picture
   {
@@ -489,6 +821,7 @@ private:
     m_selected = side;
     m_switched_at = now;
     m_denied_at.reset();
+    m_pending_sounds.push_back(GameSelectSound::Move);
   }
 
   // Which half the mouse is over, in screen pixels (as last drawn).
@@ -728,8 +1061,29 @@ private:
   float m_teeth = 0.0f;
   int m_pressed_action = -1;  // 0 switch, 1 choose, 2 back
   double m_pressed_at = 0.0;
+  std::array<std::shared_ptr<const SoundEffect>, GAME_SELECT_SOUND_NAMES.size()> m_sounds;
+  std::vector<GameSelectSound> m_pending_sounds;
   float m_drawn_scale = 0.0f;
   float m_drawn_left = 0.0f;
   float m_drawn_origin_y = 0.0f;
+
+  // The intros.
+  SDL_Renderer* m_renderer = nullptr;
+  std::array<std::filesystem::path, 2> m_folders;
+  std::array<bool, 2> m_preview_broken{};  // its video can't be played: no intro
+  double m_still_since = 0.0;              // the last press, or the last selection
+  PreviewVideo m_video;
+  int m_video_side = -1;                   // whose video m_video decodes
+  std::optional<double> m_preview_at;      // when the intro began
+  std::optional<double> m_preview_closing_at;
+  int m_preview_side = 0;
+  float m_preview_room_from = 0.0f;
+  float m_preview_shown_from = 0.0f;
+  SDL_Texture* m_video_texture = nullptr;
+  SDL_Texture* m_blur_texture = nullptr;
+  int m_texture_width = 0;
+  int m_texture_height = 0;
+  std::vector<std::uint8_t> m_rgba;
+  std::vector<std::uint8_t> m_blur;
 };
 }  // namespace moderngekko::frontend::ui

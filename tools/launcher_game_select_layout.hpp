@@ -13,16 +13,36 @@
 //   band <top> <bottom> <hints' right end>   the frame's black band
 //   picture <name> <file> <x> <y>  a picture and its top left corner
 //   font <file>                    the title's and the hints' font
+//   sound <event> <file>           a WAV the screen plays over the music
+//   preview <side> <video> <shape> <first>-<last>...
+//                                  the intro a half plays after a while on it:
+//                                  parts of a video in the game's own files
+//                                  (games/<disc ID>), frame numbers counted
+//                                  from 0, played in order. A video inside a
+//                                  .cvm goes after a ':', as in
+//                                  files/Image3.cvm:OPENING.SFD. The shape is
+//                                  the picture's, as 4:3 or 16:9.
+//   preview-fade <side> <in> <out> <RRGGBB> <hold>
+//                                  the intro comes in from black over <in>
+//                                  seconds, goes to the colour over its last
+//                                  <out> seconds, and stays that colour for
+//                                  <hold> more
 // Pictures by name: frame, and left- or right- background, character, logo.
+// Sounds, all optional: open, move, choose-left, choose-right, back, denied
+// (choosing a game that isn't extracted). Previews are optional too.
 #pragma once
 
 #include <algorithm>
+#include <array>
 #include <cmath>
+#include <cstdlib>
 #include <map>
 #include <optional>
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <utility>
+#include <vector>
 
 namespace moderngekko::frontend
 {
@@ -31,6 +51,26 @@ struct GameSelectPicture
   std::string file;
   float x = 0.0f;
   float y = 0.0f;
+};
+
+// A half's intro (layout.txt's preview and preview-fade).
+struct GameSelectPreview
+{
+  std::string video;          // in the game's folder; "a.cvm:B.SFD" for one inside a .cvm
+  float shape = 4.0f / 3.0f;  // the picture's width over its height
+  std::vector<std::pair<int, int>> parts;  // first and last frame of each
+  float fade_in = 0.0f;
+  float fade_out = 0.0f;
+  std::array<float, 3> end_colour{};  // 0..1
+  float hold = 0.0f;
+
+  int Frames() const
+  {
+    int frames = 0;
+    for (const auto& [first, last] : parts)
+      frames += last - first + 1;
+    return frames;
+  }
 };
 
 struct GameSelectLayout
@@ -51,10 +91,104 @@ struct GameSelectLayout
   float hints_right = 0.0f;
   std::map<std::string, GameSelectPicture, std::less<>> pictures;
   std::string font;
+  std::map<std::string, std::string, std::less<>> sounds;  // event: file
+  std::array<std::optional<GameSelectPreview>, 2> previews;  // left, right
 
   // The middle of the divider, where the title goes.
   float Middle() const { return (left_valley + right_valley) * 0.5f; }
 };
+
+namespace game_select_preview
+{
+// "left" 0, "right" 1, anything else -1.
+inline int SideIndex(std::string_view side)
+{
+  return side == "left" ? 0 : side == "right" ? 1 : -1;
+}
+
+// "4:3" as 1.333; nothing when it isn't two positive numbers.
+inline std::optional<float> ParseShape(std::string_view text)
+{
+  const std::size_t colon = text.find(':');
+  if (colon == std::string_view::npos)
+    return std::nullopt;
+  const float width = std::strtof(std::string(text.substr(0, colon)).c_str(), nullptr);
+  const float height = std::strtof(std::string(text.substr(colon + 1)).c_str(), nullptr);
+  if (!(width > 0.0f) || !(height > 0.0f))
+    return std::nullopt;
+  return width / height;
+}
+
+// "88-212": the first and the last frame.
+inline std::optional<std::pair<int, int>> ParsePart(std::string_view text)
+{
+  const std::size_t dash = text.find('-');
+  if (dash == std::string_view::npos || dash == 0 || dash + 1 >= text.size())
+    return std::nullopt;
+  const std::string first_text(text.substr(0, dash));
+  const std::string last_text(text.substr(dash + 1));
+  char* end = nullptr;
+  const long first = std::strtol(first_text.c_str(), &end, 10);
+  if (*end != '\0')
+    return std::nullopt;
+  const long last = std::strtol(last_text.c_str(), &end, 10);
+  if (*end != '\0' || first < 0 || last < first || last > 10'000'000)
+    return std::nullopt;
+  return std::pair<int, int>(static_cast<int>(first), static_cast<int>(last));
+}
+
+// "EEECEE" as three 0..1 values.
+inline std::optional<std::array<float, 3>> ParseColour(std::string_view text)
+{
+  if (text.size() == 7 && text.front() == '#')
+    text.remove_prefix(1);
+  if (text.size() != 6)
+    return std::nullopt;
+  std::array<float, 3> colour{};
+  for (std::size_t i = 0; i < 3; ++i)
+  {
+    const std::string pair(text.substr(i * 2, 2));
+    char* end = nullptr;
+    const long value = std::strtol(pair.c_str(), &end, 16);
+    if (*end != '\0')
+      return std::nullopt;
+    colour[i] = static_cast<float>(value) / 255.0f;
+  }
+  return colour;
+}
+
+// Where an intro is `seconds` after its first frame: which of its frames to
+// show (counted along its parts), and how much of the fades lies over it.
+struct Moment
+{
+  int frame = 0;
+  float black = 0.0f;   // 0..1, the fade in from black
+  float colour = 0.0f;  // 0..1, the fade to the end colour
+  bool ended = false;   // past the video and its hold
+};
+
+inline float VideoLength(const GameSelectPreview& preview, double fps)
+{
+  return fps > 0.0 ? static_cast<float>(preview.Frames() / fps) : 0.0f;
+}
+
+inline Moment MomentAt(const GameSelectPreview& preview, double fps, double seconds)
+{
+  Moment moment;
+  const int frames = preview.Frames();
+  const float length = VideoLength(preview, fps);
+  const float t = static_cast<float>(std::max(0.0, seconds));
+  moment.frame = std::clamp(static_cast<int>(std::floor(t * fps)), 0, std::max(0, frames - 1));
+  if (preview.fade_in > 0.0f)
+    moment.black = 1.0f - std::clamp(t / preview.fade_in, 0.0f, 1.0f);
+  if (preview.fade_out > 0.0f)
+    moment.colour = std::clamp((t - (length - preview.fade_out)) / preview.fade_out, 0.0f, 1.0f);
+  else if (preview.hold > 0.0f && t >= length)
+    moment.colour = 1.0f;
+  moment.ended = t >= length + preview.hold;
+  return moment;
+}
+}  // namespace game_select_preview
 
 // The layout, or nothing when a setting is missing or makes no sense (the
 // launcher then asks with plain buttons instead).
@@ -63,6 +197,9 @@ inline std::optional<GameSelectLayout> ParseGameSelectLayout(std::string_view te
   GameSelectLayout layout;
   bool has_canvas = false, has_left = false, has_right = false, has_halves = false,
        has_teeth = false, has_band = false;
+  // Each side's fades, joined to its preview once all is read (either line
+  // can come first).
+  std::array<std::optional<GameSelectPreview>, 2> fades;
   std::istringstream lines{std::string(text)};
   std::string line;
   while (std::getline(lines, line))
@@ -96,6 +233,60 @@ inline std::optional<GameSelectLayout> ParseGameSelectLayout(std::string_view te
     }
     else if (key == "font")
       words >> layout.font;
+    else if (key == "sound")
+    {
+      std::string event, file;
+      if (words >> event >> file)
+        layout.sounds[event] = file;
+    }
+    else if (key == "preview")
+    {
+      // A preview with anything wrong in it is left out: that half just
+      // has none.
+      using namespace game_select_preview;
+      std::string side, shape, part_text;
+      GameSelectPreview preview;
+      if (!(words >> side >> preview.video >> shape) || SideIndex(side) < 0)
+        continue;
+      const auto parsed_shape = ParseShape(shape);
+      bool good = parsed_shape.has_value();
+      while (good && words >> part_text)
+      {
+        const auto part = ParsePart(part_text);
+        good = part.has_value();
+        if (good)
+          preview.parts.push_back(*part);
+      }
+      if (good && !preview.parts.empty())
+      {
+        preview.shape = *parsed_shape;
+        layout.previews[SideIndex(side)] = std::move(preview);
+      }
+    }
+    else if (key == "preview-fade")
+    {
+      using namespace game_select_preview;
+      std::string side, colour_text;
+      GameSelectPreview fade;
+      if (!(words >> side >> fade.fade_in >> fade.fade_out >> colour_text >> fade.hold) ||
+          SideIndex(side) < 0 || fade.fade_in < 0.0f || fade.fade_out < 0.0f || fade.hold < 0.0f)
+        continue;
+      const auto colour = ParseColour(colour_text);
+      if (!colour)
+        continue;
+      fade.end_colour = *colour;
+      fades[SideIndex(side)] = fade;
+    }
+  }
+  for (std::size_t side = 0; side < 2; ++side)
+  {
+    if (layout.previews[side] && fades[side])
+    {
+      layout.previews[side]->fade_in = fades[side]->fade_in;
+      layout.previews[side]->fade_out = fades[side]->fade_out;
+      layout.previews[side]->end_colour = fades[side]->end_colour;
+      layout.previews[side]->hold = fades[side]->hold;
+    }
   }
   const bool sane = layout.width > 0.0f && layout.height > 0.0f && layout.period > 0.0f &&
                     layout.left_tip < layout.left_valley &&
