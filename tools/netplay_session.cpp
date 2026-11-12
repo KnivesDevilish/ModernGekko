@@ -834,7 +834,9 @@ int RunNetplayLobby(RuntimeConfig runtime_config, ConfigResult frontend_config,
   Config::SetBase(Config::NETPLAY_USE_INDEX, false);
   // The host sends the Wii's 16:9 setting when the match starts, before
   // Runtime::Create runs, so the choice must already be in place here.
-  detail::ApplyAspectRatio(runtime_config.graphics.aspect_ratio);
+  detail::ApplyAspectRatio(runtime_config.graphics.aspect_ratio,
+                           runtime_config.graphics.custom_aspect_width,
+                           runtime_config.graphics.custom_aspect_height);
 
   auto game = std::make_shared<UICommon::GameFile>(
       (runtime_config.game_root / "sys/main.dol").string());

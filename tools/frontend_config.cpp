@@ -96,6 +96,8 @@ std::string NormalizeAspectRatio(std::string value) {
     return "stretch";
   if (lower == "ultrawide")
     return "ultrawide";
+  if (lower == "custom")
+    return "custom";
   return {};
 }
 
@@ -355,8 +357,38 @@ const std::vector<AspectRatioOption> &SupportedAspectRatios() {
        MODERNGEKKO_UI_TEXT("For 21:9 and wider screens: the race is shown wider "
                            "instead of stretched. Menus and the HUD may still "
                            "look stretched.")},
+      {MODERNGEKKO_UI_TEXT("Custom (experimental)"), "custom",
+       MODERNGEKKO_UI_TEXT("The shape you choose, such as 16:10, 21:9 or 32:9. "
+                           "The race keeps its proportions; menus and the HUD "
+                           "may look stretched.")},
   };
   return ratios;
+}
+
+std::optional<CustomAspect> ParseCustomAspect(std::string_view value) {
+  const std::string text = Trim(std::string(value));
+  const std::size_t colon = text.find(':');
+  if (colon == std::string::npos)
+    return std::nullopt;
+  int width = 0;
+  int height = 0;
+  const std::string_view w = std::string_view(text).substr(0, colon);
+  const std::string_view h = std::string_view(text).substr(colon + 1);
+  const auto parsed_w = std::from_chars(w.data(), w.data() + w.size(), width);
+  const auto parsed_h = std::from_chars(h.data(), h.data() + h.size(), height);
+  if (parsed_w.ec != std::errc{} || parsed_w.ptr != w.data() + w.size() ||
+      parsed_h.ec != std::errc{} || parsed_h.ptr != h.data() + h.size())
+    return std::nullopt;
+  if (width < 1 || width > 100 || height < 1 || height > 100 || width < height ||
+      width > height * 6)
+    return std::nullopt;
+  return CustomAspect{width, height};
+}
+
+const std::vector<CustomAspect> &CustomAspectPresets() {
+  static const std::vector<CustomAspect> presets = {
+      {16, 10}, {21, 9}, {32, 9}, {5, 4}, {3, 2}};
+  return presets;
 }
 
 ConfigResult LoadConfig(const fs::path &user_directory,
@@ -420,7 +452,13 @@ ConfigResult LoadConfig(const fs::path &user_directory,
     } else if (key == "aspect_ratio") {
       config.aspect_ratio = NormalizeAspectRatio(raw_value);
       if (config.aspect_ratio.empty())
-        return {.error = "aspect_ratio must be 16:9, 4:3, stretch or ultrawide"};
+        return {.error = "aspect_ratio must be 16:9, 4:3, stretch, ultrawide or custom"};
+    } else if (key == "custom_aspect") {
+      const auto custom = ParseCustomAspect(raw_value);
+      if (!custom)
+        return {.error = "custom_aspect must be width:height, such as 21:9"};
+      config.custom_aspect =
+          std::to_string(custom->width) + ':' + std::to_string(custom->height);
     } else if (key == "border") {
       // Any id is kept: a border the build doesn't have just shows none.
       config.game_border = NormalizeBorderSetting(raw_value);
@@ -587,7 +625,13 @@ bool SaveConfig(const fs::path &user_directory, const ConfigResult &config,
   const std::string aspect_ratio = NormalizeAspectRatio(config.aspect_ratio);
   if (aspect_ratio.empty()) {
     if (error)
-      *error = "aspect_ratio must be 16:9, 4:3, stretch or ultrawide";
+      *error = "aspect_ratio must be 16:9, 4:3, stretch, ultrawide or custom";
+    return false;
+  }
+  const auto custom_aspect = ParseCustomAspect(config.custom_aspect);
+  if (!custom_aspect) {
+    if (error)
+      *error = "custom_aspect must be width:height, such as 21:9";
     return false;
   }
   const std::string game_border = NormalizeBorderSetting(config.game_border);
@@ -663,8 +707,10 @@ bool SaveConfig(const fs::path &user_directory, const ConfigResult &config,
        << "# The game window out of fullscreen: auto (fits the screen) or a\n"
        << "# size such as 1280x720\n"
        << "window_size=" << config.window_size << '\n'
-       << "# 16:9, 4:3 or stretch\n"
+       << "# 16:9, 4:3, stretch, ultrawide or custom\n"
        << "aspect_ratio=" << aspect_ratio << '\n'
+       << "# The shape for custom, width:height (from 1:1 to 6:1), such as 21:9\n"
+       << "custom_aspect=" << custom_aspect->width << ':' << custom_aspect->height << '\n'
        << "# Pictures beside a 4:3 game: none, random or a border's id\n"
        << "border=" << game_border << '\n'
        << "# Picture effect: none, bloom, chromatic, vivid, sharpen, outline, fxaa\n"

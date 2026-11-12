@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -70,8 +71,12 @@ struct ConfigResult {
   std::vector<std::string> controllers;
   bool show_fps_in_title = true;
   bool fullscreen = false;
-  // "16:9", "4:3", "stretch" or "ultrawide" (see SupportedAspectRatios).
+  // "16:9", "4:3", "stretch", "ultrawide" or "custom" (see
+  // SupportedAspectRatios).
   std::string aspect_ratio = "16:9";
+  // The shape "custom" gives the picture, "<width>:<height>" (see
+  // ParseCustomAspect).
+  std::string custom_aspect = "21:9";
   // The pictures beside a 4:3 game on a wide screen: "none", "random" (one is
   // picked each time the game opens) or the id of a border in
   // Resources/borders/borders.txt (tools/game_borders.hpp).
@@ -112,6 +117,15 @@ const std::vector<ResolutionOption> &SupportedResolutions();
 const std::vector<GraphicsBackendOption> &SupportedGraphicsBackends();
 const std::vector<CpuCoreOption> &SupportedCpuCores();
 const std::vector<AspectRatioOption> &SupportedAspectRatios();
+// A custom shape, "<width>:<height>" such as "21:9": whole numbers from 1 to
+// 100, as wide as 1:1 up to 6:1. Nothing for anything else.
+struct CustomAspect {
+  int width = 21;
+  int height = 9;
+};
+std::optional<CustomAspect> ParseCustomAspect(std::string_view value);
+// Ready-made shapes the launcher offers for "custom".
+const std::vector<CustomAspect> &CustomAspectPresets();
 // The first entry, none, is the default.
 const std::vector<EffectOption> &SupportedEffects();
 // The effect of config.ini's value; nullptr for one this build doesn't have.

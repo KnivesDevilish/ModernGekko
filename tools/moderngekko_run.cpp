@@ -490,8 +490,14 @@ int RunMain(int argc, char **argv) {
     config.graphics.aspect_ratio = moderngekko::AspectRatio::Stretch;
   else if (frontend_config.aspect_ratio == "ultrawide")
     config.graphics.aspect_ratio = moderngekko::AspectRatio::Ultrawide;
+  else if (frontend_config.aspect_ratio == "custom")
+    config.graphics.aspect_ratio = moderngekko::AspectRatio::Custom;
   else
     config.graphics.aspect_ratio = moderngekko::AspectRatio::Widescreen;
+  if (const auto custom = moderngekko::frontend::ParseCustomAspect(frontend_config.custom_aspect)) {
+    config.graphics.custom_aspect_width = custom->width;
+    config.graphics.custom_aspect_height = custom->height;
+  }
 
   // The pictures beside a game that doesn't fill the window: the one
   // config.ini names, none, or for "random" one picked now, so each time the

@@ -152,6 +152,20 @@ inline constexpr Translation SPANISH_TEXTS[] = {
     {"Stretch", "Estirada"},
     {"Ultrawide", "Ultrapanorámica"},
     {"Ultrawide (experimental)", "Ultrapanorámica (experimental)"},
+    {"Custom (experimental)", "Personalizada (experimental)"},
+    {"The shape you choose, such as 16:10, 21:9 or 32:9. The race keeps its proportions; menus "
+     "and the HUD may look stretched.",
+     "La forma que elijas, como 16:10, 21:9 o 32:9. La carrera mantiene sus proporciones; los "
+     "menús y el HUD pueden verse estirados."},
+    {"Shape", "Forma"},
+    {"In a window of another shape, bars fill the rest. In fullscreen, choose your screen's "
+     "shape.",
+     "En una ventana de otra forma, unas barras llenan el resto. En pantalla completa, elige la "
+     "forma de tu pantalla."},
+    {"Use whole numbers up to 100, from 1:1 to 6:1 (as wide as it is tall, up to six times "
+     "wider). The game keeps the last shape that was right.",
+     "Usa números enteros hasta 100, de 1:1 a 6:1 (tan ancha como alta, hasta seis veces más "
+     "ancha). El juego conserva la última forma correcta."},
     {"For 21:9 and wider screens: the race is shown wider instead of stretched. Menus and the "
      "HUD may still look stretched.",
      "Para pantallas 21:9 y más anchas: la carrera se ve más ancha en vez de estirada. Los menús "
@@ -572,6 +586,7 @@ inline constexpr Translation SPANISH_TEXTS[] = {
     {"Pages", "Páginas"},
     {"Newer / older", "Más reciente / más antigua"},
     {"Hold to stop testing", "Mantén para dejar de probar"},
+    {"Stop testing", "Dejar de probar"},
     {"Test buttons", "Probar botones"},
 };
 // clang-format on
@@ -682,6 +697,20 @@ inline constexpr Translation JAPANESE_TEXTS[] = {
     {"Stretch", "引き伸ばし"},
     {"Ultrawide", "ウルトラワイド"},
     {"Ultrawide (experimental)", "ウルトラワイド（試験的）"},
+    {"Custom (experimental)", "カスタム（試験的）"},
+    {"The shape you choose, such as 16:10, 21:9 or 32:9. The race keeps its proportions; menus "
+     "and the HUD may look stretched.",
+     "16:10、21:9、32:9など、選んだ比率で表示します。レースの比率は保たれますが、メニューやHUD"
+     "は引き伸ばされて見えることがあります。"},
+    {"Shape", "比率"},
+    {"In a window of another shape, bars fill the rest. In fullscreen, choose your screen's "
+     "shape.",
+     "比率の違うウィンドウでは、余白に帯が入ります。フルスクリーンでは、お使いの画面の比率を"
+     "選んでください。"},
+    {"Use whole numbers up to 100, from 1:1 to 6:1 (as wide as it is tall, up to six times "
+     "wider). The game keeps the last shape that was right.",
+     "100までの整数で、1:1から6:1まで（縦と同じ幅から6倍の幅まで）指定してください。ゲームは"
+     "最後に正しかった比率を使います。"},
     {"For 21:9 and wider screens: the race is shown wider instead of stretched. Menus and the "
      "HUD may still look stretched.",
      "21:9以上の画面向け：レースを引き伸ばさずに広く表示します。メニューやHUDは引き伸ばされて"
@@ -1081,6 +1110,7 @@ inline constexpr Translation JAPANESE_TEXTS[] = {
     {"Pages", "ページ"},
     {"Newer / older", "新しい / 古い"},
     {"Hold to stop testing", "長押しでテスト終了"},
+    {"Stop testing", "テスト終了"},
     {"Test buttons", "ボタンをテスト"},
 };
 // clang-format on

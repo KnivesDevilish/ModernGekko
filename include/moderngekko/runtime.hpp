@@ -41,6 +41,10 @@ enum class AspectRatio
   // Experimental: the game's 3D view widened to the window's shape (21:9 on
   // an ultrawide screen) instead of stretched; its 2D parts still stretch.
   Ultrawide,
+  // Experimental: the picture takes GraphicsSettings' custom shape (bars
+  // fill the rest of the window), its 3D view widened or narrowed to keep
+  // the proportions; its 2D parts still stretch.
+  Custom,
 };
 
 struct GraphicsSettings
@@ -48,6 +52,9 @@ struct GraphicsSettings
   std::string backend;
   std::optional<int> internal_resolution_scale;
   AspectRatio aspect_ratio = AspectRatio::Widescreen;
+  // The shape AspectRatio::Custom gives the picture, width:height.
+  int custom_aspect_width = 21;
+  int custom_aspect_height = 9;
   // Pictures in the black bars beside the game when it doesn't fill the
   // window, as a 4:3 game on a wide screen (src/runtime/game_border.hpp): the
   // folder with borders.txt and the id of the border to show. No border when

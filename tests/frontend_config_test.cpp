@@ -273,6 +273,28 @@ int main() {
     if (!moderngekko::frontend::SaveConfig(aspect, aspect_config, &error) ||
         moderngekko::frontend::LoadConfig(aspect, false).aspect_ratio != "ultrawide")
       return 109;
+    // A custom shape: "custom" and its width:height, which keeps a sane
+    // range (1:1 to 6:1, whole numbers up to 100).
+    aspect_config.aspect_ratio = "custom";
+    aspect_config.custom_aspect = " 32:9 ";
+    const auto custom = moderngekko::frontend::LoadConfig(aspect, false);
+    if (!moderngekko::frontend::SaveConfig(aspect, aspect_config, &error) ||
+        moderngekko::frontend::LoadConfig(aspect, false).aspect_ratio != "custom" ||
+        moderngekko::frontend::LoadConfig(aspect, false).custom_aspect != "32:9" ||
+        custom.custom_aspect != "21:9")
+      return 110;
+    for (const char* refused : {"9:16", "7:1", "0:9", "21", "21:9:1", "a:b", "101:100", ""}) {
+      aspect_config.custom_aspect = refused;
+      if (moderngekko::frontend::SaveConfig(aspect, aspect_config, &error) ||
+          moderngekko::frontend::ParseCustomAspect(refused))
+        return 111;
+    }
+    const auto parsed = moderngekko::frontend::ParseCustomAspect("16:10");
+    if (!parsed || parsed->width != 16 || parsed->height != 10 ||
+        !moderngekko::frontend::ParseCustomAspect("1:1") ||
+        !moderngekko::frontend::ParseCustomAspect("6:1"))
+      return 112;
+    aspect_config.custom_aspect = "21:9";
     {
       std::ofstream file(aspect / "config.ini", std::ios::trunc);
       file << "[Video]\nresolution=1920x1080\naspect_ratio = Stretch\n";

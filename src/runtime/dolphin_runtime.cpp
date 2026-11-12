@@ -675,17 +675,30 @@ void SetBootSessionData(std::unique_ptr<BootSessionData> boot_session_data) {
   s_boot_session_data = std::move(boot_session_data);
 }
 
-void ApplyAspectRatio(AspectRatio aspect_ratio) {
+void ApplyAspectRatio(AspectRatio aspect_ratio, int custom_width, int custom_height) {
   // The Wii's 16:9 setting decides what the game draws, and Dolphin's Auto
   // mode follows the game. Netplay replaces the system setting with the
   // host's, and Auto keeps every player's picture in the right shape.
   Config::SetBase(Config::SYSCONF_WIDESCREEN,
                   aspect_ratio != AspectRatio::Standard);
   const bool fill = aspect_ratio == AspectRatio::Stretch || aspect_ratio == AspectRatio::Ultrawide;
-  Config::SetBase(Config::GFX_ASPECT_RATIO, fill ? AspectMode::Stretch : AspectMode::Auto);
-  // Ultrawide: the 3D view takes the window's width (Dolphin's widescreen
-  // hack, which only changes what is drawn, so Netplay is unaffected).
-  Config::SetBase(Config::GFX_WIDESCREEN_HACK, aspect_ratio == AspectRatio::Ultrawide);
+  Config::SetBase(Config::GFX_ASPECT_RATIO, aspect_ratio == AspectRatio::Custom ? AspectMode::Custom
+                                            : fill                             ? AspectMode::Stretch
+                                                                               : AspectMode::Auto);
+  // Custom: the picture's shape. Dolphin takes it relative to the game's own
+  // 4:3 output, as it does for 16:9.
+  const bool custom = aspect_ratio == AspectRatio::Custom && custom_width > 0 && custom_height > 0;
+  if (custom) {
+    Config::SetBase(Config::GFX_CUSTOM_ASPECT_RATIO_WIDTH, custom_width);
+    Config::SetBase(Config::GFX_CUSTOM_ASPECT_RATIO_HEIGHT, custom_height);
+  }
+  // Ultrawide, and a custom shape other than 16:9: the 3D view takes the
+  // picture's shape, wider or narrower, instead of being stretched to it
+  // (Dolphin's widescreen hack, which only changes what is drawn, so Netplay
+  // is unaffected).
+  Config::SetBase(Config::GFX_WIDESCREEN_HACK,
+                  aspect_ratio == AspectRatio::Ultrawide ||
+                      (custom && custom_width * 9 != custom_height * 16));
 }
 
 PowerPC::CPUCore SelectedCPUCore() { return SelectCPUCore(); }
@@ -838,7 +851,9 @@ RuntimeCreateResult Runtime::Create(RuntimeConfig config) {
   Config::SetBase(Config::GFX_SHADER_COMPILATION_MODE,
                   ShaderCompilationMode::AsynchronousUberShaders);
   Config::SetBase(Config::GFX_WAIT_FOR_SHADERS_BEFORE_STARTING, true);
-  detail::ApplyAspectRatio(impl->config.graphics.aspect_ratio);
+  detail::ApplyAspectRatio(impl->config.graphics.aspect_ratio,
+                           impl->config.graphics.custom_aspect_width,
+                           impl->config.graphics.custom_aspect_height);
   const std::vector<std::string> audio_backends =
       AudioCommon::GetSoundBackends();
   if (impl->config.headless) {

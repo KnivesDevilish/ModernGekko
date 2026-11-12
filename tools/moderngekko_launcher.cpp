@@ -631,33 +631,82 @@ PadStyle PadStyleOf(SDL_GamepadType type)
   }
 }
 
-// One hint of the footer: a button (or two) and what it does.
+// A keyboard key in a footer hint: by its name ("Esc", "Q"), or an arrow.
+struct FooterKey
+{
+  std::string name;
+  int arrow = 0;  // -1 left, 1 right: drawn instead of a name
+};
+
+// The picture of a gamepad of this kind.
+DeviceIcon DeviceIconOf(SDL_GamepadType type)
+{
+  switch (type)
+  {
+  case SDL_GAMEPAD_TYPE_XBOX360:
+  case SDL_GAMEPAD_TYPE_XBOXONE:
+    return DeviceIcon::Xbox;
+  case SDL_GAMEPAD_TYPE_PS3:
+  case SDL_GAMEPAD_TYPE_PS4:
+  case SDL_GAMEPAD_TYPE_PS5:
+    return DeviceIcon::PlayStation;
+  case SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_PRO:
+  case SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_JOYCON_LEFT:
+  case SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_JOYCON_RIGHT:
+  case SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_JOYCON_PAIR:
+    return DeviceIcon::Nintendo;
+  default:
+    return DeviceIcon::Gamepad;
+  }
+}
+
+// One hint of the footer: a button (or two) and what it does, and the key
+// (or keys) that do it on the keyboard.
 struct FooterHint
 {
   PadButton button;
   std::optional<PadButton> second;
   const char* text;
+  std::vector<FooterKey> keys;
 };
 
 // The footer's hints, right-aligned on the line at line_min (screen
-// coordinates) whose right end is `right`. Returns how wide they are; with
-// draw false, only measures them.
-float DrawFooterHints(std::span<const FooterHint> hints, PadStyle style, ImFont* bold,
-                      ImVec2 line_min, float right, bool draw)
+// coordinates) whose right end is `right`: the gamepad's buttons, or with
+// keyboard true the keys (a hint without keys is left out then). Returns how
+// wide they are; with draw false, only measures them.
+float DrawFooterHints(std::span<const FooterHint> all_hints, PadStyle style, bool keyboard,
+                      ImFont* bold, ImVec2 line_min, float right, bool draw)
 {
+  std::vector<FooterHint> hints;
+  for (const FooterHint& hint : all_hints)
+  {
+    if (!keyboard || !hint.keys.empty())
+      hints.push_back(hint);
+  }
   ImFont* font = ImGui::GetFont();
   const float font_size = ImGui::GetFontSize();
   const float glyph = std::floor(ImGui::GetTextLineHeight() * 0.95f);
   const float gap = ImGui::GetStyle().ItemSpacing.x;
-  const auto glyph_width = [&](PadButton button) {
-    return PadButtonWidth(bold, glyph, style, button);
+  const auto key_width = [&](const FooterKey& key) {
+    return key.arrow != 0 ? glyph : KeyCapWidth(bold, glyph, key.name);
+  };
+  const auto glyphs_width = [&](const FooterHint& hint) {
+    float width = 0.0f;
+    if (keyboard)
+    {
+      for (std::size_t k = 0; k < hint.keys.size(); ++k)
+        width += (k > 0 ? 4.0f : 0.0f) + key_width(hint.keys[k]);
+      return width;
+    }
+    width = PadButtonWidth(bold, glyph, style, hint.button);
+    if (hint.second)
+      width += 4.0f + PadButtonWidth(bold, glyph, style, *hint.second);
+    return width;
   };
   float width = 0.0f;
   for (std::size_t i = 0; i < hints.size(); ++i)
   {
-    width += glyph_width(hints[i].button);
-    if (hints[i].second)
-      width += 4.0f + glyph_width(*hints[i].second);
+    width += glyphs_width(hints[i]);
     width += gap * 0.6f + ImGui::CalcTextSize(hints[i].text).x;
     if (i + 1 < hints.size())
       width += gap * 2.0f;
@@ -669,10 +718,24 @@ float DrawFooterHints(std::span<const FooterHint> hints, PadStyle style, ImFont*
   const float glyph_y = line_min.y + std::floor((ImGui::GetTextLineHeight() - glyph) * 0.5f);
   for (std::size_t i = 0; i < hints.size(); ++i)
   {
-    x += DrawPadButton(list, bold, ImVec2(x, glyph_y), glyph, style, hints[i].button);
-    if (hints[i].second)
-      x += 4.0f + DrawPadButton(list, bold, ImVec2(x + 4.0f, glyph_y), glyph, style,
-                                *hints[i].second);
+    if (keyboard)
+    {
+      for (std::size_t k = 0; k < hints[i].keys.size(); ++k)
+      {
+        const FooterKey& key = hints[i].keys[k];
+        if (k > 0)
+          x += 4.0f;
+        x += key.arrow != 0 ? DrawArrowKeyCap(list, ImVec2(x, glyph_y), glyph, key.arrow < 0)
+                            : DrawKeyCap(list, bold, ImVec2(x, glyph_y), glyph, key.name);
+      }
+    }
+    else
+    {
+      x += DrawPadButton(list, bold, ImVec2(x, glyph_y), glyph, style, hints[i].button);
+      if (hints[i].second)
+        x += 4.0f + DrawPadButton(list, bold, ImVec2(x + 4.0f, glyph_y), glyph, style,
+                                  *hints[i].second);
+    }
     x += gap * 0.6f;
     list->AddText(font, font_size, ImVec2(x, line_min.y), ImGui::GetColorU32(ImGuiCol_TextDisabled),
                   hints[i].text);
@@ -826,6 +889,8 @@ struct SummaryTile
   bool clickable = false;
   // Shown instead of value when value doesn't fit; "..." cuts it otherwise.
   std::string short_value;
+  // A picture before the value: what the player plays with.
+  std::optional<DeviceIcon> icon;
 };
 
 // What the PLAY page shows below the button, built from plain values so the
@@ -835,11 +900,14 @@ struct PlaySummary
   std::uint64_t time_played_ms = 0;
   // The connected gamepad's name, or empty when the profile's pad is missing.
   std::string controller;
+  // Its picture (a gamepad of its kind), or the keyboard's.
+  std::optional<DeviceIcon> controller_icon;
   bool keyboard_only = false;
   // GameCube mode: the first controller also answers to the keyboard, so the
   // game is playable while the pad is unplugged.
   bool keys_without_pad = false;
-  std::string_view aspect_ratio;  // "16:9", "4:3", "stretch" or "ultrawide"
+  std::string_view aspect_ratio;  // "16:9", "4:3", "stretch", "ultrawide" or "custom"
+  std::string_view custom_aspect; // the shape of "custom", such as "21:9"
   bool fullscreen = false;
   int installed_mods = 0;
   std::string mods_folder;
@@ -854,6 +922,7 @@ std::array<SummaryTile, 4> BuildPlaySummaryTiles(const PlaySummary& summary)
 
   SummaryTile& controls = tiles[1];
   controls = {"##summary_controls", Tr("CONTROLS"), {}, false, Tr("Open Controls"), true};
+  controls.icon = summary.controller_icon;
   if (!summary.controller.empty())
     controls.value = summary.controller;
   else if (summary.keyboard_only)
@@ -872,6 +941,7 @@ std::array<SummaryTile, 4> BuildPlaySummaryTiles(const PlaySummary& summary)
 
   const std::string aspect = summary.aspect_ratio == "stretch"     ? Tr("Stretch")
                              : summary.aspect_ratio == "ultrawide" ? Tr("Ultrawide")
+                             : summary.aspect_ratio == "custom"    ? std::string(summary.custom_aspect)
                              : summary.aspect_ratio.empty()       ? std::string("16:9")
                                                                   : std::string(summary.aspect_ratio);
   tiles[2] = {"##summary_display", Tr("DISPLAY"),
@@ -950,7 +1020,19 @@ bool DrawSummaryTile(const SummaryTile& tile, float width, ImFont* bold, float s
                      std::max(1.0f, style.ChildBorderSize));
   draw_list->AddText(font, heading_size, ImVec2(min.x + padding.x, min.y + padding.y),
                      ImGui::GetColorU32(ImGuiCol_TextDisabled), tile.heading);
-  const float text_width = size.x - padding.x * 2.0f;
+  // The device's picture before the value, as tall as the value's letters.
+  float icon_width = 0.0f;
+  if (tile.icon)
+  {
+    const float icon_height = std::floor(value_size * 0.95f);
+    icon_width = DrawDeviceIcon(draw_list,
+                                ImVec2(min.x + padding.x,
+                                       min.y + padding.y + heading_size + 3.0f * scale +
+                                           (value_size - icon_height) * 0.5f),
+                                icon_height, *tile.icon) +
+                 5.0f * scale;
+  }
+  const float text_width = size.x - padding.x * 2.0f - icon_width;
   // The value at full size, or a little smaller, then its short form the
   // same way, and only then cut with "...": the compact window's cards stay
   // whole for nearly every value.
@@ -981,8 +1063,9 @@ bool DrawSummaryTile(const SummaryTile& tile, float width, ImFont* bold, float s
       tile.warning ? ImVec4(1.0f, 0.75f, 0.3f, 1.0f) : style.Colors[ImGuiCol_Text];
   // A smaller value sits a little lower, on about the same baseline.
   draw_list->AddText(bold, shown_size,
-                     ImVec2(min.x + padding.x, min.y + padding.y + heading_size + 3.0f * scale +
-                                                   (value_size - shown_size) * 0.7f),
+                     ImVec2(min.x + padding.x + icon_width,
+                            min.y + padding.y + heading_size + 3.0f * scale +
+                                (value_size - shown_size) * 0.7f),
                      ImGui::GetColorU32(value_color), shown.c_str());
   if (hovered)
   {
@@ -2682,6 +2765,12 @@ int main(int argc, char** argv)
     if (config.aspect_ratio == aspect_ratios[i].value)
       aspect_ratio_index = static_cast<int>(i);
   }
+  // The custom shape's two numbers as the Settings page edits them; saved
+  // once they make a shape config.ini accepts.
+  moderngekko::frontend::CustomAspect custom_aspect =
+      moderngekko::frontend::ParseCustomAspect(config.custom_aspect)
+          .value_or(moderngekko::frontend::CustomAspect{});
+  bool custom_aspect_refused = false;
   // The pictures this build can show beside a 4:3 game (Resources/borders,
   // see tools/game_borders.hpp); Settings offers them when there are any.
   const moderngekko::frontend::GameBorderList game_borders =
@@ -2941,8 +3030,15 @@ int main(int argc, char** argv)
   // At the start and after the game, a gamepad moves nothing until all its
   // buttons are let go: one still held from the game mustn't press PLAY.
   bool pad_waits_for_release = true;
-  // The last thing used was a gamepad: the footer shows what its buttons do.
-  bool pad_in_use = false;
+  // What was used last: a gamepad or the keyboard (the footer shows what its
+  // buttons or keys do), or the mouse (no hints).
+  enum class LastInput
+  {
+    Mouse,
+    Keyboard,
+    Pad,
+  };
+  LastInput last_input = LastInput::Mouse;
   PadStyle pad_style = PadStyle::Xbox;
   const auto read_pad_style = [&] {
     int count = 0;
@@ -3303,10 +3399,11 @@ int main(int argc, char** argv)
       for (int key = ImGuiKey_NamedKey_BEGIN; key < ImGuiKey_GamepadStart && !key_pressed; ++key)
         key_pressed = ImGui::IsKeyPressed(static_cast<ImGuiKey>(key), false);
       if (pad_pressed)
-        pad_in_use = true;
-      else if (key_pressed || ImGui::IsAnyMouseDown() || io.MouseDelta.x != 0.0f ||
-               io.MouseDelta.y != 0.0f)
-        pad_in_use = false;
+        last_input = LastInput::Pad;
+      else if (key_pressed)
+        last_input = LastInput::Keyboard;
+      else if (ImGui::IsAnyMouseDown() || io.MouseDelta.x != 0.0f || io.MouseDelta.y != 0.0f)
+        last_input = LastInput::Mouse;
       if (!pad_down)
         pad_waits_for_release = false;
     }
@@ -3333,10 +3430,14 @@ int main(int argc, char** argv)
     else if (!popup_was_open && !item_was_active && !viewer_was_open &&
              !ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel))
     {
-      // LB and RB: the page before or after this one in the sidebar.
-      const int step = pad_moves ? static_cast<int>(ImGui::IsKeyPressed(ImGuiKey_GamepadR1, false)) -
-                                       static_cast<int>(ImGui::IsKeyPressed(ImGuiKey_GamepadL1, false)) :
-                                   0;
+      // LB and RB, or Q and E on the keyboard: the page before or after this
+      // one in the sidebar.
+      int step = pad_moves ? static_cast<int>(ImGui::IsKeyPressed(ImGuiKey_GamepadR1, false)) -
+                                 static_cast<int>(ImGui::IsKeyPressed(ImGuiKey_GamepadL1, false)) :
+                             0;
+      if (step == 0 && !io.WantTextInput)
+        step = static_cast<int>(ImGui::IsKeyPressed(ImGuiKey_E, false)) -
+               static_cast<int>(ImGui::IsKeyPressed(ImGuiKey_Q, false));
       if (step != 0)
       {
         const auto shown = std::ranges::find(LAUNCHER_PAGES, current_page,
@@ -3849,13 +3950,20 @@ int main(int argc, char** argv)
           PlaySummary summary;
           summary.time_played_ms = summary_time_played;
           if (controller_index >= 0)
+          {
             summary.controller = controllers[controller_index].label;
+            summary.controller_icon =
+                DeviceIconOf(SDL_GetGamepadTypeForID(controllers[controller_index].joystick_id));
+          }
 #ifdef MODERNGEKKO_GAMECUBE_CONTROLLERS
           summary.keyboard_only =
               controller_index < 0 && selected_controller == keyboard_device;
           summary.keys_without_pad = true;
+          if (controller_index < 0)
+            summary.controller_icon = DeviceIcon::Keyboard;
 #endif
           summary.aspect_ratio = config.aspect_ratio;
+          summary.custom_aspect = config.custom_aspect;
           summary.fullscreen = fullscreen;
           summary.installed_mods = summary_installed_mods;
           summary.mods_folder = moderngekko::frontend::PathText(user_directory / "Mods");
@@ -3958,6 +4066,7 @@ int main(int argc, char** argv)
       display_label_width =
           std::max(display_label_width, ImGui::CalcTextSize(Tr("4:3 borders")).x);
     display_label_width = std::max(display_label_width, ImGui::CalcTextSize(Tr("Window size")).x);
+    display_label_width = std::max(display_label_width, ImGui::CalcTextSize(Tr("Shape")).x);
     const float display_list_x = display_label_x + display_label_width + 16.0f * scale;
     ImGui::AlignTextToFramePadding();
     ImGui::TextUnformatted(Tr("Aspect ratio"));
@@ -4001,6 +4110,84 @@ int main(int argc, char** argv)
     }
     ImGui::SetItemTooltip("%s",
                           Tr("Netplay: the host's 16:9 or 4:3 choice applies to every player."));
+    // Custom: the shape's width and height, typed or picked from the usual
+    // ones. Saved as soon as they make a shape from 1:1 to 6:1.
+    if (config.aspect_ratio == "custom")
+    {
+      const auto save_custom_aspect = [&](moderngekko::frontend::CustomAspect shape) {
+        const std::string text = std::to_string(shape.width) + ':' + std::to_string(shape.height);
+        custom_aspect_refused = !moderngekko::frontend::ParseCustomAspect(text);
+        if (custom_aspect_refused)
+          return;
+        const std::string previous = config.custom_aspect;
+        config.custom_aspect = text;
+        config.resolution = resolutions[resolution_index].text;
+        config.show_fps_in_title = show_fps_in_title;
+        config.controller = selected_controller;
+        std::string error;
+        if (!moderngekko::frontend::SaveConfig(user_directory, config, &error))
+        {
+          config.custom_aspect = previous;
+          std::lock_guard lock(dialog.mutex);
+          dialog.error = std::move(error);
+        }
+      };
+      ImGui::AlignTextToFramePadding();
+      ImGui::TextUnformatted(Tr("Shape"));
+      ImGui::SameLine(display_list_x);
+      const float number_width = ImGui::CalcTextSize("0000").x + ImGui::GetStyle().FramePadding.x * 2;
+      ImGui::SetNextItemWidth(number_width);
+      ImGui::InputInt("##custom_aspect_width", &custom_aspect.width, 0, 0);
+      const bool width_done = ImGui::IsItemDeactivatedAfterEdit();
+      ImGui::SameLine(0.0f, 4.0f * scale);
+      ImGui::TextUnformatted(":");
+      ImGui::SameLine(0.0f, 4.0f * scale);
+      ImGui::SetNextItemWidth(number_width);
+      ImGui::InputInt("##custom_aspect_height", &custom_aspect.height, 0, 0);
+      if (width_done || ImGui::IsItemDeactivatedAfterEdit())
+        save_custom_aspect(custom_aspect);
+      // The usual shapes, one click each, under the numbers and lined up with
+      // them (on more lines when the column is narrow); the one in use in the
+      // accent colour.
+      const float presets_right = ImGui::GetCursorScreenPos().x + ImGui::GetContentRegionAvail().x;
+      bool first_preset = true;
+      for (const auto& preset : moderngekko::frontend::CustomAspectPresets())
+      {
+        const std::string label = std::to_string(preset.width) + ':' + std::to_string(preset.height);
+        const float button_width =
+            ImGui::CalcTextSize(label.c_str()).x + ImGui::GetStyle().FramePadding.x * 2.0f;
+        if (!first_preset)
+          ImGui::SameLine();
+        if (first_preset || ImGui::GetCursorScreenPos().x + button_width > presets_right)
+        {
+          if (!first_preset)
+            ImGui::NewLine();
+          ImGui::SetCursorPosX(display_list_x);
+        }
+        first_preset = false;
+        const bool current =
+            custom_aspect.width == preset.width && custom_aspect.height == preset.height;
+        if (current)
+          ImGui::PushStyleColor(ImGuiCol_Text, LAUNCHER_ACCENT);
+        if (ImGui::SmallButton((label + "##custom_aspect_preset").c_str()))
+        {
+          custom_aspect = preset;
+          save_custom_aspect(preset);
+        }
+        if (current)
+          ImGui::PopStyleColor();
+      }
+      ImGui::PushTextWrapPos(0.0f);
+      if (custom_aspect_refused)
+        ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.3f, 1.0f), "%s",
+                           Tr("Use whole numbers up to 100, from 1:1 to 6:1 (as wide as it is "
+                              "tall, up to six times wider). The game keeps the last shape that "
+                              "was right."));
+      else
+        ImGui::TextDisabled("%s", Tr("In a window of another shape, bars fill the rest. In "
+                                     "fullscreen, choose your screen's shape."));
+      ImGui::PopTextWrapPos();
+    }
     if (!game_borders.borders.empty())
     {
       // None, Random (one picked each time the game opens) or one of the
@@ -4812,31 +4999,60 @@ int main(int argc, char** argv)
     }
     ImGui::Spacing();
     ImGui::Separator();
-    // The controller's state; on the right, while a gamepad is in use, what
-    // its buttons do here.
+    // The controller's state, after a picture of what the game reads (a
+    // gamepad of its kind, or the keyboard); on the right, while a gamepad or
+    // the keyboard is in use, what its buttons or keys do here.
     {
       const std::string status = Format(Tr("Controller: %s"), controller_status.Text().c_str());
+      std::optional<DeviceIcon> status_icon;
+      if (controller_index >= 0 && controller_index < static_cast<int>(controllers.size()))
+        status_icon = DeviceIconOf(SDL_GetGamepadTypeForID(controllers[controller_index].joystick_id));
+#ifdef MODERNGEKKO_GAMECUBE_CONTROLLERS
+      else if (controller_profile_exists)
+        status_icon = DeviceIcon::Keyboard;  // the first controller's keys still play
+#endif
+      const bool keys_shown = last_input == LastInput::Keyboard;
       std::vector<FooterHint> hints;
-      if (pad_in_use && (io.BackendFlags & ImGuiBackendFlags_HasGamepad))
+      const FooterKey enter{Tr("Enter")};
+      const FooterKey escape{"Esc"};
+      if (keys_shown ||
+          (last_input == LastInput::Pad && (io.BackendFlags & ImGuiBackendFlags_HasGamepad)))
       {
         if (testing_controls)
-          hints = {{PadButton::East, std::nullopt, Tr("Hold to stop testing")}};
+          hints = keys_shown ? std::vector<FooterHint>{{PadButton::East, std::nullopt,
+                                                         Tr("Stop testing"), {escape}}}
+                             : std::vector<FooterHint>{{PadButton::East, std::nullopt,
+                                                         Tr("Hold to stop testing"), {}}};
         else if (current_page == LauncherPage::Controls && controller_profile_exists &&
                  !popup_was_open)
-          hints = {{PadButton::North, std::nullopt, Tr("Test buttons")},
-                   {PadButton::South, std::nullopt, Tr("Accept")},
-                   {PadButton::East, std::nullopt, Tr("Go back")},
-                   {PadButton::LeftShoulder, PadButton::RightShoulder, Tr("Pages")}};
+          hints = {{PadButton::North, std::nullopt, Tr("Test buttons"), {}},
+                   {PadButton::South, std::nullopt, Tr("Accept"), {enter}},
+                   {PadButton::East, std::nullopt, Tr("Go back"), {escape}},
+                   {PadButton::LeftShoulder, PadButton::RightShoulder, Tr("Pages"),
+                    {{"Q"}, {"E"}}}};
         else if (viewer_was_open)
-          hints = {{PadButton::LeftShoulder, PadButton::RightShoulder, Tr("Newer / older")},
-                   {PadButton::East, std::nullopt, Tr("Go back")}};
+          hints = {{PadButton::LeftShoulder, PadButton::RightShoulder, Tr("Newer / older"),
+                    {{"", -1}, {"", 1}}},
+                   {PadButton::East, std::nullopt, Tr("Go back"), {escape}}};
         else if (popup_was_open)
-          hints = {{PadButton::South, std::nullopt, Tr("Accept")},
-                   {PadButton::East, std::nullopt, Tr("Go back")}};
+          hints = {{PadButton::South, std::nullopt, Tr("Accept"), {enter}},
+                   {PadButton::East, std::nullopt, Tr("Go back"), {escape}}};
         else
-          hints = {{PadButton::South, std::nullopt, Tr("Accept")},
-                   {PadButton::East, std::nullopt, Tr("Go back")},
-                   {PadButton::LeftShoulder, PadButton::RightShoulder, Tr("Pages")}};
+          hints = {{PadButton::South, std::nullopt, Tr("Accept"), {enter}},
+                   {PadButton::East, std::nullopt, Tr("Go back"), {escape}},
+                   {PadButton::LeftShoulder, PadButton::RightShoulder, Tr("Pages"),
+                    {{"Q"}, {"E"}}}};
+      }
+      if (status_icon)
+      {
+        const float icon_height = std::floor(ImGui::GetTextLineHeight() * 0.95f);
+        const ImVec2 at = ImGui::GetCursorScreenPos();
+        const float icon_width = DrawDeviceIcon(
+            ImGui::GetWindowDrawList(),
+            ImVec2(at.x, at.y + std::floor((ImGui::GetTextLineHeight() - icon_height) * 0.5f)),
+            icon_height, *status_icon);
+        ImGui::Dummy(ImVec2(icon_width, ImGui::GetTextLineHeight()));
+        ImGui::SameLine(0.0f, 6.0f * scale);
       }
       if (hints.empty())
       {
@@ -4847,12 +5063,12 @@ int main(int argc, char** argv)
         const ImVec2 line_min = ImGui::GetCursorScreenPos();
         const float right = line_min.x + ImGui::GetContentRegionAvail().x;
         const float hints_width =
-            DrawFooterHints(hints, pad_style, fonts.bold, line_min, right, false);
+            DrawFooterHints(hints, pad_style, keys_shown, fonts.bold, line_min, right, false);
         ImGui::TextUnformatted(FitTextToWidth(ImGui::GetFont(), ImGui::GetFontSize(), status,
                                               ImGui::GetContentRegionAvail().x - hints_width -
                                                   ImGui::GetStyle().ItemSpacing.x * 3.0f)
                                    .c_str());
-        DrawFooterHints(hints, pad_style, fonts.bold, line_min, right, true);
+        DrawFooterHints(hints, pad_style, keys_shown, fonts.bold, line_min, right, true);
       }
     }
     // What B closes next frame, before it goes back to the sidebar.
