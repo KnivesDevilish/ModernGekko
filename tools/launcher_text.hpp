@@ -150,9 +150,6 @@ inline constexpr Translation SPANISH_TEXTS[] = {
     {"Internal resolution", "Resolución interna"},
     {"Aspect ratio", "Relación de aspecto"},
     {"16:9 (Widescreen)", "16:9 (Panorámica)"},
-    {"Stretch", "Estirada"},
-    {"Ultrawide", "Ultrapanorámica"},
-    {"Ultrawide (experimental)", "Ultrapanorámica (experimental)"},
     {"Custom (experimental)", "Personalizada (experimental)"},
     {"The shape you choose, such as 16:10, 21:9 or 32:9. The race keeps its proportions; menus "
      "and the HUD may look stretched.",
@@ -167,18 +164,12 @@ inline constexpr Translation SPANISH_TEXTS[] = {
      "wider). The game keeps the last shape that was right.",
      "Usa números enteros hasta 100, de 1:1 a 6:1 (tan ancha como alta, hasta seis veces más "
      "ancha). El juego conserva la última forma correcta."},
-    {"For 21:9 and wider screens: the race is shown wider instead of stretched. Menus and the "
-     "HUD may still look stretched.",
-     "Para pantallas 21:9 y más anchas: la carrera se ve más ancha en vez de estirada. Los menús "
-     "y el HUD pueden seguir viéndose estirados."},
-    {"The game draws in widescreen. Best for most monitors and TVs.",
-     "El juego se dibuja en panorámico. Lo mejor para la mayoría de monitores y televisores."},
-    {"The original 4:3 picture, with bars on the sides of a wide window.",
-     "La imagen 4:3 original, con bandas a los lados en una ventana ancha."},
-    {"The widescreen picture stretched to fill the window, whatever its shape. On a 16:9 screen "
-     "it looks the same as 16:9.",
-     "La imagen panorámica estirada para llenar la ventana, tenga la forma que tenga. En una "
-     "pantalla 16:9 se ve igual que 16:9."},
+    {"The game draws in widescreen and fills the window, whatever its shape. A game made for 4:3 "
+     "is widened too. Best for most screens.",
+     "El juego se dibuja en panorámico y llena la ventana, tenga la forma que tenga. Un juego "
+     "hecho para 4:3 también se ensancha. Lo mejor para la mayoría de pantallas."},
+    {"The game's 4:3 picture, stretched to fill the window.",
+     "La imagen 4:3 del juego, estirada para llenar la ventana."},
     {"Netplay: the host's 16:9 or 4:3 choice applies to every player.",
      "Netplay: la elección 16:9 o 4:3 del anfitrión se aplica a todos."},
     {"4:3 borders", "Bordes en 4:3"},
@@ -711,9 +702,6 @@ inline constexpr Translation JAPANESE_TEXTS[] = {
     {"Internal resolution", "内部解像度"},
     {"Aspect ratio", "アスペクト比"},
     {"16:9 (Widescreen)", "16:9（ワイド）"},
-    {"Stretch", "引き伸ばし"},
-    {"Ultrawide", "ウルトラワイド"},
-    {"Ultrawide (experimental)", "ウルトラワイド（試験的）"},
     {"Custom (experimental)", "カスタム（試験的）"},
     {"The shape you choose, such as 16:10, 21:9 or 32:9. The race keeps its proportions; menus "
      "and the HUD may look stretched.",
@@ -728,18 +716,12 @@ inline constexpr Translation JAPANESE_TEXTS[] = {
      "wider). The game keeps the last shape that was right.",
      "100までの整数で、1:1から6:1まで（縦と同じ幅から6倍の幅まで）指定してください。ゲームは"
      "最後に正しかった比率を使います。"},
-    {"For 21:9 and wider screens: the race is shown wider instead of stretched. Menus and the "
-     "HUD may still look stretched.",
-     "21:9以上の画面向け：レースを引き伸ばさずに広く表示します。メニューやHUDは引き伸ばされて"
-     "見えることがあります。"},
-    {"The game draws in widescreen. Best for most monitors and TVs.",
-     "ゲームをワイド画面で描画します。ほとんどのモニターやテレビに最適です。"},
-    {"The original 4:3 picture, with bars on the sides of a wide window.",
-     "オリジナルの4:3画面です。横長のウィンドウでは左右に帯が入ります。"},
-    {"The widescreen picture stretched to fill the window, whatever its shape. On a 16:9 screen "
-     "it looks the same as 16:9.",
-     "ワイド画面をウィンドウの形に合わせて引き伸ばします。16:9の画面では16:9と"
-     "同じ表示になります。"},
+    {"The game draws in widescreen and fills the window, whatever its shape. A game made for 4:3 "
+     "is widened too. Best for most screens.",
+     "ゲームをワイド画面で描画し、ウィンドウの形に関係なく全体に表示します。4:3向けのゲームも"
+     "広げて表示されます。ほとんどの画面に最適です。"},
+    {"The game's 4:3 picture, stretched to fill the window.",
+     "ゲームの4:3の映像を、ウィンドウ全体に引き伸ばして表示します。"},
     {"Netplay: the host's 16:9 or 4:3 choice applies to every player.",
      "ネットプレイ：ホストが選んだ16:9か4:3が全員に適用されます。"},
     {"4:3 borders", "4:3の壁紙"},

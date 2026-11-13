@@ -678,12 +678,13 @@ void SetBootSessionData(std::unique_ptr<BootSessionData> boot_session_data) {
 }
 
 void ApplyAspectRatio(AspectRatio aspect_ratio, int custom_width, int custom_height) {
-  // The Wii's 16:9 setting decides what the game draws, and Dolphin's Auto
-  // mode follows the game. Netplay replaces the system setting with the
-  // host's, and Auto keeps every player's picture in the right shape.
+  // The Wii's 16:9 setting decides what the game draws. Netplay replaces the
+  // system setting with the host's.
   Config::SetBase(Config::SYSCONF_WIDESCREEN,
                   aspect_ratio != AspectRatio::Standard);
-  const bool fill = aspect_ratio == AspectRatio::Stretch || aspect_ratio == AspectRatio::Ultrawide;
+  // Everything but a custom shape fills the window (so no bars beside the
+  // picture), each player's in its own shape.
+  const bool fill = aspect_ratio != AspectRatio::Custom;
   Config::SetBase(Config::GFX_ASPECT_RATIO, aspect_ratio == AspectRatio::Custom ? AspectMode::Custom
                                             : fill                             ? AspectMode::Stretch
                                                                                : AspectMode::Auto);
@@ -694,12 +695,14 @@ void ApplyAspectRatio(AspectRatio aspect_ratio, int custom_width, int custom_hei
     Config::SetBase(Config::GFX_CUSTOM_ASPECT_RATIO_WIDTH, custom_width);
     Config::SetBase(Config::GFX_CUSTOM_ASPECT_RATIO_HEIGHT, custom_height);
   }
-  // Ultrawide, and a custom shape other than 16:9: the 3D view takes the
-  // picture's shape, wider or narrower, instead of being stretched to it
-  // (Dolphin's widescreen hack, which only changes what is drawn, so Netplay
-  // is unaffected).
+  // Widescreen, Ultrawide, and a custom shape other than 16:9: the 3D view
+  // takes the picture's shape, wider or narrower, instead of being stretched
+  // to it (Dolphin's widescreen hack, which only changes what is drawn, so
+  // Netplay is unaffected). When the game already draws the window's shape,
+  // it changes nothing. Standard is stretched as it is.
   Config::SetBase(Config::GFX_WIDESCREEN_HACK,
-                  aspect_ratio == AspectRatio::Ultrawide ||
+                  aspect_ratio == AspectRatio::Widescreen ||
+                      aspect_ratio == AspectRatio::Ultrawide ||
                       (custom && custom_width * 9 != custom_height * 16));
 }
 

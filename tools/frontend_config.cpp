@@ -92,10 +92,10 @@ std::string NormalizeAspectRatio(std::string value) {
     return "16:9";
   if (lower == "4:3" || lower == "standard")
     return "4:3";
-  if (lower == "stretch" || lower == "stretched")
-    return "stretch";
-  if (lower == "ultrawide")
-    return "ultrawide";
+  // Stretch and Ultrawide were options until 0.1.4; 16:9 now fills the
+  // window, whatever its shape, as Ultrawide did.
+  if (lower == "stretch" || lower == "stretched" || lower == "ultrawide")
+    return "16:9";
   if (lower == "custom")
     return "custom";
   return {};
@@ -352,19 +352,12 @@ const std::vector<AspectRatioOption> &SupportedAspectRatios() {
   // The texts are English; the launcher translates them when it shows them.
   static const std::vector<AspectRatioOption> ratios = {
       {MODERNGEKKO_UI_TEXT("16:9 (Widescreen)"), "16:9",
-       MODERNGEKKO_UI_TEXT(
-           "The game draws in widescreen. Best for most monitors and TVs.")},
+       MODERNGEKKO_UI_TEXT("The game draws in widescreen and fills the window, "
+                           "whatever its shape. A game made for 4:3 is "
+                           "widened too. Best for most screens.")},
       {"4:3", "4:3",
-       MODERNGEKKO_UI_TEXT("The original 4:3 picture, with bars on the sides "
-                           "of a wide window.")},
-      {MODERNGEKKO_UI_TEXT("Stretch"), "stretch",
-       MODERNGEKKO_UI_TEXT("The widescreen picture stretched to fill the "
-                           "window, whatever its shape. On a 16:9 screen it "
-                           "looks the same as 16:9.")},
-      {MODERNGEKKO_UI_TEXT("Ultrawide (experimental)"), "ultrawide",
-       MODERNGEKKO_UI_TEXT("For 21:9 and wider screens: the race is shown wider "
-                           "instead of stretched. Menus and the HUD may still "
-                           "look stretched.")},
+       MODERNGEKKO_UI_TEXT("The game's 4:3 picture, stretched to fill the "
+                           "window.")},
       {MODERNGEKKO_UI_TEXT("Custom (experimental)"), "custom",
        MODERNGEKKO_UI_TEXT("The shape you choose, such as 16:10, 21:9 or 32:9. "
                            "The race keeps its proportions; menus and the HUD "
@@ -460,7 +453,7 @@ ConfigResult LoadConfig(const fs::path &user_directory,
     } else if (key == "aspect_ratio") {
       config.aspect_ratio = NormalizeAspectRatio(raw_value);
       if (config.aspect_ratio.empty())
-        return {.error = "aspect_ratio must be 16:9, 4:3, stretch, ultrawide or custom"};
+        return {.error = "aspect_ratio must be 16:9, 4:3 or custom"};
     } else if (key == "custom_aspect") {
       const auto custom = ParseCustomAspect(raw_value);
       if (!custom)
@@ -634,7 +627,7 @@ bool SaveConfig(const fs::path &user_directory, const ConfigResult &config,
   const std::string aspect_ratio = NormalizeAspectRatio(config.aspect_ratio);
   if (aspect_ratio.empty()) {
     if (error)
-      *error = "aspect_ratio must be 16:9, 4:3, stretch, ultrawide or custom";
+      *error = "aspect_ratio must be 16:9, 4:3 or custom";
     return false;
   }
   const auto custom_aspect = ParseCustomAspect(config.custom_aspect);
@@ -716,7 +709,7 @@ bool SaveConfig(const fs::path &user_directory, const ConfigResult &config,
        << "# The game window out of fullscreen: auto (fits the screen) or a\n"
        << "# size such as 1280x720\n"
        << "window_size=" << config.window_size << '\n'
-       << "# 16:9, 4:3, stretch, ultrawide or custom\n"
+       << "# 16:9, 4:3 or custom (16:9 and 4:3 fill the window)\n"
        << "aspect_ratio=" << aspect_ratio << '\n'
        << "# The shape for custom, width:height (from 1:1 to 6:1), such as 21:9\n"
        << "custom_aspect=" << custom_aspect->width << ':' << custom_aspect->height << '\n'

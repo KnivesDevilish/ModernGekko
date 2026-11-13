@@ -32,12 +32,17 @@ struct ModuleSource
 };
 
 // How the picture fills the window. Widescreen and Standard also tell the Wii
-// which shape the game should draw (the system's 16:9 setting); Dolphin then
-// follows the game, so the image is never squashed.
+// which shape the game should draw (the system's 16:9 setting).
 enum class AspectRatio
 {
-  Widescreen, // the game draws 16:9
-  Standard,   // the game draws 4:3, with bars on a wide window
+  // The game draws 16:9 and fills the window, whatever its shape: its 3D
+  // view is widened or narrowed to it (on a 16:9 window, nothing changes).
+  // A game that only draws 4:3 is widened too; its 2D parts stretch.
+  Widescreen,
+  // The game draws 4:3 (its menus and HUD laid out for a 4:3 TV), and the
+  // whole picture is stretched to fill the window, as Dolphin's Stretch to
+  // Window does.
+  Standard,
   Stretch,    // the game draws 16:9 stretched to fill the window
   // Experimental: the game's 3D view widened to the window's shape (21:9 on
   // an ultrawide screen) instead of stretched; its 2D parts still stretch.
@@ -72,7 +77,7 @@ struct GraphicsSettings
   // takes them at the game's.
   int screenshot_scale = 0;
   // What screenshots' file names start with, before their number, such as
-  // "SR-ZGS" for SR-ZGS_0001.png; the game's disc ID when empty.
+  // "SR-Source" for SR-Source_0001.png; the game's disc ID when empty.
   std::string screenshot_name;
 };
 
