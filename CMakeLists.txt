@@ -1098,6 +1098,17 @@ if(BUILD_TESTING)
     add_test(NAME moderngekko.launcher_user_folder
              COMMAND moderngekko_launcher_user_folder_test)
 
+    add_executable(moderngekko_launcher_line_break_test
+        tests/launcher_line_break_test.cpp)
+    target_include_directories(moderngekko_launcher_line_break_test PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/tools")
+    target_compile_features(moderngekko_launcher_line_break_test PRIVATE cxx_std_23)
+    if(MSVC)
+        target_compile_options(moderngekko_launcher_line_break_test PRIVATE /utf-8)
+    endif()
+    add_test(NAME moderngekko.launcher_line_break
+             COMMAND moderngekko_launcher_line_break_test)
+
     add_executable(moderngekko_launcher_banner_test
         tests/launcher_banner_test.cpp)
     target_include_directories(moderngekko_launcher_banner_test PRIVATE

@@ -11,6 +11,7 @@
 #include "launcher_game_select.hpp"
 #include "launcher_banner.hpp"
 #include "launcher_games.hpp"
+#include "launcher_line_break.hpp"
 #include "launcher_loading.hpp"
 #include "launcher_transition.hpp"
 #include "launcher_user_folder.hpp"
@@ -1386,6 +1387,28 @@ std::string ReadPatchNotes(const fs::path& path)
   return text;
 }
 
+// A line of the patch notes at the cursor, wrapped to the room left: one with
+// Japanese by BreakLines (launcher_line_break.hpp), as Dear ImGui would cut
+// it anywhere, even inside a name; the rest by Dear ImGui.
+void PatchNoteText(const std::string& text)
+{
+  if (!moderngekko::frontend::HasJapanese(text))
+  {
+    ImGui::TextUnformatted(text.c_str());
+    return;
+  }
+  ImFont* const font = ImGui::GetFont();
+  const float size = ImGui::GetFontSize();
+  const std::string lines = moderngekko::frontend::BreakLines(
+      text, ImGui::GetContentRegionAvail().x, [&](std::string_view piece) {
+        return font->CalcTextSizeA(size, FLT_MAX, 0.0f, piece.data(), piece.data() + piece.size())
+            .x;
+      });
+  ImGui::PushTextWrapPos(-1.0f);
+  ImGui::TextUnformatted(lines.c_str());
+  ImGui::PopTextWrapPos();
+}
+
 // The PLAY page's PATCH NOTES panel, at the given size: its heading stays put
 // and the notes scroll under it when they don't fit.
 // pad_scroll scrolls the notes (a gamepad's right stick).
@@ -1415,10 +1438,10 @@ void DrawPatchNotes(const std::vector<moderngekko::frontend::PatchNoteLine>& not
       // A hanging indent: the wrapped lines start under the text, not the dot.
       ImGui::Bullet();
       ImGui::SameLine();
-      ImGui::TextUnformatted(line.text.c_str());
+      PatchNoteText(line.text);
       break;
     case Kind::Paragraph:
-      ImGui::TextUnformatted(line.text.c_str());
+      PatchNoteText(line.text);
       break;
     case Kind::Gap:
       ImGui::Spacing();
