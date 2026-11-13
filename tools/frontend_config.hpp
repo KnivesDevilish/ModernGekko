@@ -71,8 +71,8 @@ struct ConfigResult {
   std::vector<std::string> controllers;
   bool show_fps_in_title = true;
   bool fullscreen = false;
-  // "16:9", "4:3", "stretch", "ultrawide" or "custom" (see
-  // SupportedAspectRatios).
+  // "16:9", "4:3" or "custom" (see SupportedAspectRatios; an earlier
+  // version's "stretch" or "ultrawide" is read as "16:9").
   std::string aspect_ratio = "16:9";
   // The shape "custom" gives the picture, "<width>:<height>" (see
   // ParseCustomAspect).

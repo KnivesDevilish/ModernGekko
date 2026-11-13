@@ -20,7 +20,7 @@ namespace moderngekko::frontend::ui
 {
 namespace fs = std::filesystem;
 
-// SR-ZGS accent: a neon lime green. Shared by the theme and the few texts that
+// SR-Source accent: a neon lime green. Shared by the theme and the few texts that
 // pick a colour explicitly (the Play header and the READY status).
 inline constexpr ImVec4 LAUNCHER_ACCENT(0.72f, 1.0f, 0.18f, 1.0f);
 

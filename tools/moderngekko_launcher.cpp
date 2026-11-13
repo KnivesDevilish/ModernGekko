@@ -946,7 +946,7 @@ struct PlaySummary
   // GameCube mode: the first controller also answers to the keyboard, so the
   // game is playable while the pad is unplugged.
   bool keys_without_pad = false;
-  std::string_view aspect_ratio;  // "16:9", "4:3", "stretch", "ultrawide" or "custom"
+  std::string_view aspect_ratio;  // "16:9", "4:3" or "custom"
   std::string_view custom_aspect; // the shape of "custom", such as "21:9"
   bool fullscreen = false;
   int installed_mods = 0;
@@ -979,11 +979,9 @@ std::array<SummaryTile, 4> BuildPlaySummaryTiles(const PlaySummary& summary)
     controls.warning = true;
   }
 
-  const std::string aspect = summary.aspect_ratio == "stretch"     ? Tr("Stretch")
-                             : summary.aspect_ratio == "ultrawide" ? Tr("Ultrawide")
-                             : summary.aspect_ratio == "custom"    ? std::string(summary.custom_aspect)
-                             : summary.aspect_ratio.empty()       ? std::string("16:9")
-                                                                  : std::string(summary.aspect_ratio);
+  const std::string aspect = summary.aspect_ratio == "custom" ? std::string(summary.custom_aspect)
+                             : summary.aspect_ratio.empty()   ? std::string("16:9")
+                                                              : std::string(summary.aspect_ratio);
   tiles[2] = {"##summary_display", Tr("DISPLAY"),
               summary.fullscreen ? Format(Tr("%s \xC2\xB7 Fullscreen"), aspect.c_str())
                                  : Format(Tr("%s \xC2\xB7 Window"), aspect.c_str()),
@@ -1387,14 +1385,15 @@ std::string ReadPatchNotes(const fs::path& path)
   return text;
 }
 
-// A line of the patch notes at the cursor, wrapped to the room left: one with
-// Japanese by BreakLines (launcher_line_break.hpp), as Dear ImGui would cut
-// it anywhere, even inside a name; the rest by Dear ImGui.
-void PatchNoteText(const std::string& text)
+// Text at the cursor, wrapped to the room left: one with Japanese by
+// BreakLines (launcher_line_break.hpp), as Dear ImGui would cut it anywhere,
+// even inside a name; the rest by Dear ImGui. The patch notes' lines, and the
+// choices' descriptions in Settings.
+void WrappedText(std::string_view text)
 {
   if (!moderngekko::frontend::HasJapanese(text))
   {
-    ImGui::TextUnformatted(text.c_str());
+    ImGui::TextUnformatted(text.data(), text.data() + text.size());
     return;
   }
   ImFont* const font = ImGui::GetFont();
@@ -1407,6 +1406,16 @@ void PatchNoteText(const std::string& text)
   ImGui::PushTextWrapPos(-1.0f);
   ImGui::TextUnformatted(lines.c_str());
   ImGui::PopTextWrapPos();
+}
+
+// A choice's description in a Settings list: dimmed and wrapped.
+void DimWrappedText(std::string_view text)
+{
+  ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+  ImGui::PushTextWrapPos(0.0f);
+  WrappedText(text);
+  ImGui::PopTextWrapPos();
+  ImGui::PopStyleColor();
 }
 
 // The PLAY page's PATCH NOTES panel, at the given size: its heading stays put
@@ -1438,10 +1447,10 @@ void DrawPatchNotes(const std::vector<moderngekko::frontend::PatchNoteLine>& not
       // A hanging indent: the wrapped lines start under the text, not the dot.
       ImGui::Bullet();
       ImGui::SameLine();
-      PatchNoteText(line.text);
+      WrappedText(line.text);
       break;
     case Kind::Paragraph:
-      PatchNoteText(line.text);
+      WrappedText(line.text);
       break;
     case Kind::Gap:
       ImGui::Spacing();
@@ -4675,9 +4684,7 @@ int main(int argc, char** argv)
         // Each choice explains itself in the list, so the page stays short
         // enough for the default window.
         ImGui::Indent(12.0f * scale);
-        ImGui::PushTextWrapPos(0.0f);
-        ImGui::TextDisabled("%s", Tr(aspect_ratios[i].description));
-        ImGui::PopTextWrapPos();
+        DimWrappedText(Tr(aspect_ratios[i].description));
         ImGui::Unindent(12.0f * scale);
       }
       ImGui::EndCombo();
@@ -5067,9 +5074,7 @@ int main(int argc, char** argv)
         if (selected)
           ImGui::SetItemDefaultFocus();
         ImGui::Indent(12.0f * scale);
-        ImGui::PushTextWrapPos(0.0f);
-        ImGui::TextDisabled("%s", Tr(effect.description));
-        ImGui::PopTextWrapPos();
+        DimWrappedText(Tr(effect.description));
         ImGui::Unindent(12.0f * scale);
       }
       ImGui::EndCombo();

@@ -509,10 +509,6 @@ int RunMain(int argc, char **argv) {
 #endif
   if (frontend_config.aspect_ratio == "4:3")
     config.graphics.aspect_ratio = moderngekko::AspectRatio::Standard;
-  else if (frontend_config.aspect_ratio == "stretch")
-    config.graphics.aspect_ratio = moderngekko::AspectRatio::Stretch;
-  else if (frontend_config.aspect_ratio == "ultrawide")
-    config.graphics.aspect_ratio = moderngekko::AspectRatio::Ultrawide;
   else if (frontend_config.aspect_ratio == "custom")
     config.graphics.aspect_ratio = moderngekko::AspectRatio::Custom;
   else

@@ -2,7 +2,7 @@
 
 // "Check for updates": the launcher asks GitHub for the newest published
 // release of the project (a build names it with MODERNGEKKO_UPDATE_REPOSITORY,
-// such as KnivesDevilish/SR-ZGS) and compares its version with its own
+// such as KnivesDevilish/SR-Source) and compares its version with its own
 // (MODERNGEKKO_FRONTEND_VERSION). It only reads: nothing is downloaded or
 // installed, and a newer version is shown with a link to its download page.
 //

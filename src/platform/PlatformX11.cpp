@@ -222,9 +222,43 @@ int IgnoreXError(Display*, XErrorEvent*)
   return 0;
 }
 
-// The middle of the window RuntimeConfig::centre_on_window names (the
-// launcher's), on the desktop; nothing without one, or when it has gone.
-std::optional<std::pair<int, int>> CentreOfWindowToCentreOn(Display* display)
+// The window RuntimeConfig::centre_on_window names (the launcher's): its
+// middle on the desktop, and the frame the window manager put around it
+// (_NET_FRAME_EXTENTS; none without one).
+struct CentringWindow
+{
+  int centre_x = 0;
+  int centre_y = 0;
+  moderngekko::detail::FrameExtents frame;
+};
+
+// The frame the window manager says it put around a window, or none.
+moderngekko::detail::FrameExtents FrameOf(Display* display, Window window)
+{
+  moderngekko::detail::FrameExtents frame;
+  Atom type = 0;
+  int format = 0;
+  unsigned long count = 0;
+  unsigned long left_over = 0;
+  unsigned char* data = nullptr;
+  if (XGetWindowProperty(display, window, XInternAtom(display, "_NET_FRAME_EXTENTS", False), 0,
+                         4, False, XA_CARDINAL, &type, &format, &count, &left_over,
+                         &data) == Success &&
+      data && format == 32 && count == 4)
+  {
+    // Format 32 comes as longs, whatever their size.
+    const long* values = reinterpret_cast<const long*>(data);
+    const auto extent = [&](int i) { return static_cast<int>(std::clamp(values[i], 0L, 500L)); };
+    frame = {extent(0), extent(1), extent(2), extent(3)};
+  }
+  if (data)
+    XFree(data);
+  return frame;
+}
+
+// The window to centre on, as the desktop has it; nothing without one, or
+// when it has gone.
+std::optional<CentringWindow> FindWindowToCentreOn(Display* display)
 {
   const std::uint64_t id = moderngekko::detail::WindowToCentreOn();
   if (id == 0)
@@ -239,11 +273,13 @@ std::optional<std::pair<int, int>> CentreOfWindowToCentreOn(Display* display)
   const bool found = XGetWindowAttributes(display, window, &attributes) != 0 &&
                      XTranslateCoordinates(display, window, DefaultRootWindow(display), 0, 0,
                                            &x, &y, &child) != 0;
+  const moderngekko::detail::FrameExtents frame =
+      found ? FrameOf(display, window) : moderngekko::detail::FrameExtents{};
   XSync(display, False);
   XSetErrorHandler(previous);
   if (!found || attributes.width <= 0 || attributes.height <= 0)
     return std::nullopt;
-  return std::pair{x + attributes.width / 2, y + attributes.height / 2};
+  return CentringWindow{x + attributes.width / 2, y + attributes.height / 2, frame};
 }
 }  // namespace
 
@@ -259,13 +295,20 @@ bool PlatformX11::Init()
 
   // The size chosen in the launcher, or one that fits the screen, in the
   // middle of the launcher's window, on its monitor, or of the primary
-  // monitor.
-  const std::optional<std::pair<int, int>> centre = CentreOfWindowToCentreOn(m_display);
-  const moderngekko::detail::ScreenArea screen = MonitorAt(m_display, centre);
+  // monitor. The window manager puts the window's frame where it asks to
+  // be, and the window inside it: the frame's corner is asked for, taking
+  // the launcher's frame as this one's, so the game's picture has its middle
+  // where the launcher's had.
+  const std::optional<CentringWindow> launcher = FindWindowToCentreOn(m_display);
+  const moderngekko::detail::ScreenArea screen =
+      MonitorAt(m_display, launcher ? std::optional(std::pair{launcher->centre_x,
+                                                               launcher->centre_y}) :
+                                      std::nullopt);
   const moderngekko::detail::WindowPlace place =
-      centre ? moderngekko::detail::PlaceWindowAt(moderngekko::detail::RequestedWindowSize(),
-                                                  screen, centre->first, centre->second) :
-               moderngekko::detail::PlaceWindow(moderngekko::detail::RequestedWindowSize(), screen);
+      launcher ? moderngekko::detail::PlaceFramedWindowAt(
+                     moderngekko::detail::RequestedWindowSize(), screen, launcher->centre_x,
+                     launcher->centre_y, launcher->frame) :
+                 moderngekko::detail::PlaceWindow(moderngekko::detail::RequestedWindowSize(), screen);
   m_window_x = place.x;
   m_window_y = place.y;
   m_window_width = static_cast<unsigned int>(place.width);

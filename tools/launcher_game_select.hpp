@@ -12,7 +12,7 @@
 // whole canvas with the game's logo still on it, and when it ends, or anything
 // is pressed, the halves come back.
 //
-// The art is a canvas (1920x1333 for SR-ZGS) fitted to the window's height,
+// The art is a canvas (1920x1333 for SR-Source) fitted to the window's height,
 // in its middle; everything here is placed in canvas pixels and drawn with
 // Dear ImGui's draw list, the divider's teeth from code so they can slide.
 #pragma once

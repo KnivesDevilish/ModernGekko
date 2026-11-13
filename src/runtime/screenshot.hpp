@@ -9,7 +9,7 @@
 // back to its own; the setting is never changed. A paused game runs those
 // frames without sound or input and pauses again, so the picture is of a
 // moment a few frames later. The PNG goes where Dolphin puts its own,
-// ScreenShots/<game id>/ in the user folder, with a short name: SR-ZGS_0001.png
+// ScreenShots/<game id>/ in the user folder, with a short name: SR-Source_0001.png
 // and on.
 
 #include "screenshot_keys.hpp"

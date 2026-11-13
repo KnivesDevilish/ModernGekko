@@ -101,8 +101,8 @@ private:
 };
 
 // A screenshot's file name: the name chosen for them (the game's, such as
-// "SR-ZGS"; letters, digits, "-" and "_" kept) and the next number after the
-// highest already in the folder, four digits at least: "SR-ZGS_0001.png".
+// "SR-Source"; letters, digits, "-" and "_" kept) and the next number after the
+// highest already in the folder, four digits at least: "SR-Source_0001.png".
 // Numbers taken out of the middle are not given again, so a new screenshot
 // always sorts after the others.
 inline std::string NextScreenshotName(const std::filesystem::path& folder, std::string_view name)

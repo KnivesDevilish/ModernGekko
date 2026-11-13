@@ -52,7 +52,7 @@ std::atomic<bool> s_blocks_input{false};
 
 // Where Dolphin's own F9 saves (Core/CoreScreenshot.cpp), ScreenShots/<game
 // id>/, with a short name: the one chosen for them (the game's id without
-// one) and a number, such as SR-ZGS_0001.png (NextScreenshotName).
+// one) and a number, such as SR-Source_0001.png (NextScreenshotName).
 std::string NewScreenshotPath(const std::string& name)
 {
   const std::string game = SConfig::GetInstance().GetGameID();

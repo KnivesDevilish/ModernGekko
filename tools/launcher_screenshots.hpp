@@ -71,8 +71,8 @@ inline std::vector<ScreenshotFile> ListScreenshots(const std::filesystem::path& 
 }
 
 // When a screenshot was taken, from its file's time, as "2026-11-07 08:09"
-// in the computer's time zone: names need not hold the date (SR-ZGS's are
-// SR-ZGS_0001.png and on).
+// in the computer's time zone: names need not hold the date (SR-Source's are
+// SR-Source_0001.png and on).
 inline std::string ScreenshotTimeLabel(std::filesystem::file_time_type time)
 {
   const auto system = std::chrono::clock_cast<std::chrono::system_clock>(time);

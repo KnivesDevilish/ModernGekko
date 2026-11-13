@@ -2,7 +2,9 @@
 // is 16:9 at 85% of the screen, centred, also on a second monitor or one
 // turned upright; a chosen size is kept when it fits, and the automatic one
 // used when it doesn't; with no screen known, 1280x720 or the chosen size.
-// Centred on the launcher's window instead, it stays on its screen.
+// Centred on the launcher's window instead, it stays on its screen; with a
+// window manager's frame around it, the frame goes where the window asks, so
+// the window inside is still centred.
 #include "runtime/window_size.hpp"
 
 #include <cstdio>
@@ -10,6 +12,8 @@
 namespace
 {
 using moderngekko::detail::CentredOn;
+using moderngekko::detail::FrameExtents;
+using moderngekko::detail::PlaceFramedWindowAt;
 using moderngekko::detail::PlaceWindow;
 using moderngekko::detail::PlaceWindowAt;
 using moderngekko::detail::ScreenArea;
@@ -66,6 +70,18 @@ int main()
       CentredOn(500, 1100, 0, 1080) != 0 || CentredOn(500, 300, 0, 0) != 350 ||
       !Is(PlaceWindowAt({1600, 900}, {}, 1000, 600), 200, 150, 1600, 900))
     return 102;
+  // A 30-pixel title bar and 2-pixel borders: the frame's corner is asked
+  // for, the window inside (2 pixels right, 30 down) has its middle where
+  // the launcher's had. No frame: as PlaceWindowAt. Near the top, the title
+  // bar stays on the screen.
+  const FrameExtents frame{2, 2, 30, 2};
+  if (!Is(PlaceFramedWindowAt({1280, 720}, {0, 0, 1920, 1080}, 960, 560, frame), 318, 170, 1280,
+          720) ||
+      !Is(PlaceFramedWindowAt({1280, 720}, {0, 0, 1920, 1080}, 960, 560, {}), 320, 200, 1280,
+          720) ||
+      !Is(PlaceFramedWindowAt({1280, 720}, {0, 0, 1920, 1080}, 700, 300, frame), 58, 0, 1280,
+          720))
+    return 103;
   std::puts("window size: ok");
   return 0;
 }

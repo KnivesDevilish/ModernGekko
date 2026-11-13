@@ -100,6 +100,33 @@ inline WindowPlace PlaceWindowAt(WindowSize asked, ScreenArea screen, int centre
   return place;
 }
 
+// A window manager's decorations around a window: its title bar and
+// borders, in pixels.
+struct FrameExtents
+{
+  int left = 0;
+  int right = 0;
+  int top = 0;
+  int bottom = 0;
+};
+
+// As PlaceWindowAt, for a window manager that puts a window's frame (its
+// decorations, `frame`) where the window asks to be, as X11 window managers
+// do: x and y are then the frame's corner, so that the window inside has its
+// middle at (centre_x, centre_y) and the whole frame stays on the screen.
+// The game's window takes the launcher's decorations as its own: the same
+// window manager draws both.
+inline WindowPlace PlaceFramedWindowAt(WindowSize asked, ScreenArea screen, int centre_x,
+                                       int centre_y, FrameExtents frame)
+{
+  WindowPlace place = PlaceWindow(asked, screen);
+  place.x = CentredOn(centre_x + (frame.right - frame.left) / 2,
+                      place.width + frame.left + frame.right, screen.x, screen.width);
+  place.y = CentredOn(centre_y + (frame.bottom - frame.top) / 2,
+                      place.height + frame.top + frame.bottom, screen.y, screen.height);
+  return place;
+}
+
 // Set by the runtime before the window opens (one thread, so no lock).
 inline WindowSize& RequestedWindowSize()
 {

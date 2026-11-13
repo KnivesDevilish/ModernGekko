@@ -269,10 +269,10 @@ int main() {
     aspect_config.aspect_ratio = "21:9";
     if (moderngekko::frontend::SaveConfig(aspect, aspect_config, &error))
       return 21;
-    // The experimental ultrawide picture, by its name.
+    // Ultrawide is gone: 16:9 fills the window, whatever its shape.
     aspect_config.aspect_ratio = "Ultrawide";
     if (!moderngekko::frontend::SaveConfig(aspect, aspect_config, &error) ||
-        moderngekko::frontend::LoadConfig(aspect, false).aspect_ratio != "ultrawide")
+        moderngekko::frontend::LoadConfig(aspect, false).aspect_ratio != "16:9")
       return 109;
     // A custom shape: "custom" and its width:height, which keeps a sane
     // range (1:1 to 6:1, whole numbers up to 100).
@@ -300,7 +300,8 @@ int main() {
       std::ofstream file(aspect / "config.ini", std::ios::trunc);
       file << "[Video]\nresolution=1920x1080\naspect_ratio = Stretch\n";
     }
-    if (moderngekko::frontend::LoadConfig(aspect, false).aspect_ratio != "stretch")
+    // Stretch is gone: 16:9 fills the window now.
+    if (moderngekko::frontend::LoadConfig(aspect, false).aspect_ratio != "16:9")
       return 22;
     {
       std::ofstream file(aspect / "config.ini", std::ios::trunc);
