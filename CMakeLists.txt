@@ -33,9 +33,24 @@ set(MODERNGEKKO_RUNNER_OUTPUT_NAME "moderngekko-run" CACHE STRING
 # Screenshots are named <this>_0001.png and on (the game's disc ID when
 # empty), in ScreenShots/<disc ID>/ of the user directory.
 set(MODERNGEKKO_SCREENSHOT_NAME "" CACHE STRING
-    "What screenshots' file names start with, such as SR-ZGS")
+    "What screenshots' file names start with, such as SR-Source")
 set(MODERNGEKKO_USER_DIRECTORY_NAME "moderngekko" CACHE STRING
     "Frontend user directory name")
+# The user directory's earlier names, as name;name: when the launcher opens
+# and its own folder isn't there yet, it moves the first of them that is to
+# its place (tools/launcher_user_folder.hpp), so the players of a renamed
+# project keep their settings, saves and games.
+set(MODERNGEKKO_PREVIOUS_USER_DIRECTORY_NAMES "" CACHE STRING
+    "Earlier user directory names the launcher moves to the current one (name;name)")
+string(REPLACE ";" "|" MODERNGEKKO_PREVIOUS_USER_DIRECTORY_NAMES_DEFINITION
+       "${MODERNGEKKO_PREVIOUS_USER_DIRECTORY_NAMES}")
+# The launcher window's title (the frontend name when empty), also what the
+# Windows launcher says it is in its details and the Task Manager.
+set(MODERNGEKKO_LAUNCHER_TITLE "" CACHE STRING
+    "Launcher window title (the frontend name when empty)")
+# Who makes the build, in the Windows executables' details.
+set(MODERNGEKKO_PUBLISHER "" CACHE STRING
+    "Publisher in the Windows executables' details (Properties > Details)")
 set(MODERNGEKKO_REQUIRED_DISC_ID "" CACHE STRING
     "Required six-character disc ID for branded builds")
 # A branded build that plays more than one game lists them all, the main one
@@ -79,10 +94,16 @@ set(MODERNGEKKO_ACCEPTED_SOURCE_DISC_ID "" CACHE STRING
     "Source disc ID accepted by the optional disc preparer")
 set(MODERNGEKKO_LAUNCHER_BANNER "" CACHE FILEPATH
     "Optional PNG shown at the top of the launcher's Play page")
+# A folder with the PLAY page's banner in layers, that move: layout.txt and its
+# pictures (tools/launcher_banner_layout.hpp), copied to Resources/banner.
+# With it the page shows it instead of MODERNGEKKO_LAUNCHER_BANNER, which
+# stays as the banner when the layers can't be drawn.
+set(MODERNGEKKO_LAUNCHER_BANNER_LAYERS "" CACHE PATH
+    "Optional folder with the Play page's banner in layers (layout.txt and its PNGs)")
 set(MODERNGEKKO_LAUNCHER_CONTROLLER_ART "" CACHE FILEPATH
-    "Optional PNG of the SR-ZGS controller drawing for the Controls page tester")
+    "Optional PNG of the SR-Source controller drawing for the Controls page tester")
 set(MODERNGEKKO_LAUNCHER_KEYBOARD_ART "" CACHE FILEPATH
-    "Optional PNG of the SR-ZGS keyboard drawing for the Controls page tester")
+    "Optional PNG of the SR-Source keyboard drawing for the Controls page tester")
 set(MODERNGEKKO_LAUNCHER_MODS_ART "" CACHE FILEPATH
     "Optional PNG shown in the EXPANSIONS panel of the launcher's Mods & expansions page")
 set(MODERNGEKKO_LOBBY_ART "" CACHE FILEPATH
@@ -775,6 +796,14 @@ if(MODERNGEKKO_ENABLE_DOLPHIN_RUNTIME)
         target_compile_definitions(moderngekko-launcher PRIVATE
             MODERNGEKKO_REQUIRED_DISC_ID="${MODERNGEKKO_REQUIRED_DISC_ID}")
     endif()
+    if(MODERNGEKKO_LAUNCHER_TITLE)
+        target_compile_definitions(moderngekko-launcher PRIVATE
+            MODERNGEKKO_LAUNCHER_TITLE="${MODERNGEKKO_LAUNCHER_TITLE}")
+    endif()
+    if(MODERNGEKKO_PREVIOUS_USER_DIRECTORY_NAMES)
+        target_compile_definitions(moderngekko-launcher PRIVATE
+            MODERNGEKKO_PREVIOUS_USER_DIRECTORY_NAMES="${MODERNGEKKO_PREVIOUS_USER_DIRECTORY_NAMES_DEFINITION}")
+    endif()
     if(MODERNGEKKO_GAMES)
         target_compile_definitions(moderngekko-launcher PRIVATE
             MODERNGEKKO_GAMES="${MODERNGEKKO_GAMES_DEFINITION}")
@@ -824,6 +853,10 @@ if(MODERNGEKKO_ENABLE_DOLPHIN_RUNTIME)
     # shows it at the top of the Play page; without it the page is text only.
     moderngekko_add_resource(moderngekko-launcher "${MODERNGEKKO_LAUNCHER_BANNER}"
                              launcher-banner.png)
+    # Resources/banner: the same banner in layers, that move
+    # (tools/launcher_banner.hpp); shown instead when it is there.
+    moderngekko_add_resource_folder(moderngekko-launcher "${MODERNGEKKO_LAUNCHER_BANNER_LAYERS}"
+                                    banner)
     # The Controls page tester draws Resources/launcher-controller.png and lights
     # up its buttons; the button positions in the launcher match that drawing.
     # Without it the tester shows the button list alone.
@@ -945,21 +978,84 @@ if(WIN32)
             endif()
         endif()
     endforeach()
-    # The program's icon, built into both executables as icon 101: Explorer
-    # and the taskbar show it, and the game's window takes it
-    # (src/platform/PlatformWin32.cpp, IDI_ICON1).
+    # Each program's resources: the program's icon, as icon 101 (Explorer and
+    # the taskbar show it, and the game's window takes it,
+    # src/platform/PlatformWin32.cpp, IDI_ICON1), and its details, under
+    # Properties > Details: the product's name and version, what the program
+    # is (also its name in the Task Manager), who made it and its file name.
+    enable_language(RC)
+    set(_moderngekko_icon_resource "")
     if(MODERNGEKKO_APP_ICON_ICO)
-        enable_language(RC)
         file(TO_NATIVE_PATH "${MODERNGEKKO_APP_ICON_ICO}" _moderngekko_icon_path)
         string(REPLACE "\\" "\\\\" _moderngekko_icon_path "${_moderngekko_icon_path}")
-        set(_moderngekko_icon_rc "${CMAKE_CURRENT_BINARY_DIR}/moderngekko_app_icon.rc")
-        file(WRITE "${_moderngekko_icon_rc}" "101 ICON \"${_moderngekko_icon_path}\"\n")
-        foreach(_moderngekko_window_program moderngekko-launcher moderngekko-run)
-            if(TARGET ${_moderngekko_window_program})
-                target_sources(${_moderngekko_window_program} PRIVATE "${_moderngekko_icon_rc}")
-            endif()
-        endforeach()
+        set(_moderngekko_icon_resource "101 ICON \"${_moderngekko_icon_path}\"\n")
     endif()
+    # The version as four numbers: 0.2.0 is 0,2,0,0.
+    string(REGEX MATCHALL "[0-9]+" _moderngekko_version_numbers "${MODERNGEKKO_FRONTEND_VERSION}")
+    list(APPEND _moderngekko_version_numbers 0 0 0 0)
+    list(SUBLIST _moderngekko_version_numbers 0 4 _moderngekko_version_numbers)
+    string(REPLACE ";" "," _moderngekko_version_numbers "${_moderngekko_version_numbers}")
+    set(_moderngekko_version_text "${MODERNGEKKO_FRONTEND_VERSION}")
+    if(NOT _moderngekko_version_text)
+        set(_moderngekko_version_text "0")
+    endif()
+    set(_moderngekko_launcher_description "${MODERNGEKKO_LAUNCHER_TITLE}")
+    if(NOT _moderngekko_launcher_description)
+        set(_moderngekko_launcher_description "${MODERNGEKKO_FRONTEND_NAME}")
+    endif()
+    set(_moderngekko_runner_description "${MODERNGEKKO_DEFAULT_WINDOW_TITLE}")
+    if(NOT _moderngekko_runner_description)
+        set(_moderngekko_runner_description "${MODERNGEKKO_FRONTEND_NAME}")
+    endif()
+    set(_moderngekko_copyright "GNU GPL v3")
+    if(MODERNGEKKO_PUBLISHER)
+        set(_moderngekko_copyright "Copyright (C) ${MODERNGEKKO_PUBLISHER}. GNU GPL v3")
+    endif()
+    foreach(_moderngekko_window_program moderngekko-launcher moderngekko-run)
+        if(NOT TARGET ${_moderngekko_window_program})
+            continue()
+        endif()
+        if(_moderngekko_window_program STREQUAL "moderngekko-launcher")
+            set(_moderngekko_program_file "${MODERNGEKKO_LAUNCHER_OUTPUT_NAME}")
+            set(_moderngekko_program_description "${_moderngekko_launcher_description}")
+        else()
+            set(_moderngekko_program_file "${MODERNGEKKO_RUNNER_OUTPUT_NAME}")
+            set(_moderngekko_program_description "${_moderngekko_runner_description}")
+        endif()
+        set(_moderngekko_program_rc
+            "${CMAKE_CURRENT_BINARY_DIR}/${_moderngekko_window_program}_resources.rc")
+        file(WRITE "${_moderngekko_program_rc}" "#pragma code_page(65001)
+${_moderngekko_icon_resource}1 VERSIONINFO
+FILEVERSION ${_moderngekko_version_numbers}
+PRODUCTVERSION ${_moderngekko_version_numbers}
+FILEFLAGSMASK 0x3fL
+FILEFLAGS 0x0L
+FILEOS 0x40004L
+FILETYPE 0x1L
+FILESUBTYPE 0x0L
+BEGIN
+    BLOCK \"StringFileInfo\"
+    BEGIN
+        BLOCK \"040904b0\"
+        BEGIN
+            VALUE \"CompanyName\", \"${MODERNGEKKO_PUBLISHER}\"
+            VALUE \"FileDescription\", \"${_moderngekko_program_description}\"
+            VALUE \"FileVersion\", \"${_moderngekko_version_text}\"
+            VALUE \"InternalName\", \"${_moderngekko_program_file}\"
+            VALUE \"LegalCopyright\", \"${_moderngekko_copyright}\"
+            VALUE \"OriginalFilename\", \"${_moderngekko_program_file}.exe\"
+            VALUE \"ProductName\", \"${MODERNGEKKO_FRONTEND_NAME}\"
+            VALUE \"ProductVersion\", \"${_moderngekko_version_text}\"
+        END
+    END
+    BLOCK \"VarFileInfo\"
+    BEGIN
+        VALUE \"Translation\", 0x409, 1200
+    END
+END
+")
+        target_sources(${_moderngekko_window_program} PRIVATE "${_moderngekko_program_rc}")
+    endforeach()
 endif()
 
 if(BUILD_TESTING)
@@ -993,6 +1089,22 @@ if(BUILD_TESTING)
     target_compile_features(moderngekko_launcher_game_select_test PRIVATE cxx_std_23)
     add_test(NAME moderngekko.launcher_game_select
              COMMAND moderngekko_launcher_game_select_test)
+
+    add_executable(moderngekko_launcher_user_folder_test
+        tests/launcher_user_folder_test.cpp)
+    target_include_directories(moderngekko_launcher_user_folder_test PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/tools")
+    target_compile_features(moderngekko_launcher_user_folder_test PRIVATE cxx_std_23)
+    add_test(NAME moderngekko.launcher_user_folder
+             COMMAND moderngekko_launcher_user_folder_test)
+
+    add_executable(moderngekko_launcher_banner_test
+        tests/launcher_banner_test.cpp)
+    target_include_directories(moderngekko_launcher_banner_test PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/tools")
+    target_compile_features(moderngekko_launcher_banner_test PRIVATE cxx_std_23)
+    add_test(NAME moderngekko.launcher_banner
+             COMMAND moderngekko_launcher_banner_test)
 
     add_executable(moderngekko_launcher_transition_test
         tests/launcher_transition_test.cpp)

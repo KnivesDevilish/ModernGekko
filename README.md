@@ -4,7 +4,7 @@ A runtime for GameCube/Wii recomps.
 
 ## About this fork
 
-This is a modified fork of [ExpansionPak/ModernGekko](https://github.com/ExpansionPak/ModernGekko) by Hyperway, maintained by KnivesDevilish for [SR-ZGS](https://github.com/KnivesDevilish/SR-ZGS), the static recompilation of *Sonic Riders: Zero Gravity* (Wii). SR-ZGS uses it as its `external/ModernGekko` submodule.
+This is a modified fork of [ExpansionPak/ModernGekko](https://github.com/ExpansionPak/ModernGekko) by Hyperway, maintained by KnivesDevilish for [Sonic Riders: Source](https://github.com/KnivesDevilish/SR-Source) (SR-Source, formerly SR-ZGS), the static recompilation project of *Sonic Riders* (GameCube) and *Sonic Riders: Zero Gravity* (Wii). SR-Source uses it as its `external/ModernGekko` submodule.
 
 The changes live in the `knives/srzgs-launcher` branch, which starts from the original `master` (commit `a2e4e2b`, September 2026). They add:
 
@@ -38,6 +38,7 @@ New CMake options. All of them are optional: when one is left empty, the launche
 | Option | What it sets |
 | --- | --- |
 | `MODERNGEKKO_LAUNCHER_BANNER` | PNG at the top of the PLAY page |
+| `MODERNGEKKO_LAUNCHER_BANNER_LAYERS` | Folder with the same banner in layers that move, shown instead of it: a `layout.txt` and its PNGs (format in `tools/launcher_banner_layout.hpp`). The backdrop can wave like a flag, a layer can float, the layers lean with the mouse at their own depths, and the logos take turns |
 | `MODERNGEKKO_LAUNCHER_BACKGROUND` | Picture behind the launcher's pages |
 | `MODERNGEKKO_LAUNCHER_CONTROLLER_ART`, `MODERNGEKKO_LAUNCHER_KEYBOARD_ART` | Drawings for the Controls page tester |
 | `MODERNGEKKO_LAUNCHER_MODS_ART` | Picture of the EXPANSIONS panel on the Mods & expansions page |
@@ -45,11 +46,16 @@ New CMake options. All of them are optional: when one is left empty, the launche
 | `MODERNGEKKO_LOBBY_ART`, `MODERNGEKKO_LOBBY_BACKGROUND` | Portrait and background picture of the Netplay lobby |
 | `MODERNGEKKO_LAUNCHER_PATCH_NOTES` | UTF-8 text for the PATCH NOTES panel, with optional `[en]`, `[es]` and `[ja]` sections |
 | `MODERNGEKKO_FRONTEND_VERSION`, `MODERNGEKKO_UPDATE_REPOSITORY` | Version shown by the launcher and the GitHub repository whose releases it checks |
+| `MODERNGEKKO_LAUNCHER_TITLE` | The launcher window's title (the frontend name when empty) |
+| `MODERNGEKKO_PREVIOUS_USER_DIRECTORY_NAMES` | The user folder's earlier names (`name;name`): when the launcher opens and its folder isn't there yet, it moves the first earlier one it finds to it, settings, saves, games and all, and points `default-game.txt` at the new place (`tools/launcher_user_folder.hpp`); if it can't be moved, it is used where it is |
+| `MODERNGEKKO_PUBLISHER` | Who makes the build, in the Windows executables' details |
 | `MODERNGEKKO_GAME_BORDERS` | Folder with the 4:3 borders' pictures and their `borders.txt` (format in `tools/game_borders.hpp`) |
 
 `MODERNGEKKO_SAVESTATES` (ON by default) can take savestates away from the player: with it OFF, the game window has no savestate keys (the fork's copies of Dolphin's game windows are in `src/platform/`) and the PLAY page doesn't offer to start from a savestate. The runner's `--load-state` and the automation keep them for testing.
 
-SR-ZGS passes all of them from `tools/build_tools.sh`, and `MODERNGEKKO_SAVESTATES=OFF`.
+SR-Source passes all of them from `tools/build_tools.sh`, and `MODERNGEKKO_SAVESTATES=OFF`.
+
+On Windows both executables carry their details (Properties > Details, and the Task Manager's name for them): the product's name (`MODERNGEKKO_FRONTEND_NAME`) and version, what each program is (the launcher's title; the runner's `MODERNGEKKO_DEFAULT_WINDOW_TITLE`), the publisher and the file name.
 
 This fork is distributed under the same license as the original, the GNU GPL v3 (see `LICENSE`). As the license asks of modified versions: this is a modified version of ModernGekko, changed by KnivesDevilish starting on November 3, 2026; the commit history of `knives/srzgs-launcher` lists every change. The rest of this README is the original one.
 

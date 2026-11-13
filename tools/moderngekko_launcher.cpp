@@ -9,9 +9,11 @@
 #include "launcher_patch_notes.hpp"
 #include "launcher_gallery.hpp"
 #include "launcher_game_select.hpp"
+#include "launcher_banner.hpp"
 #include "launcher_games.hpp"
 #include "launcher_loading.hpp"
 #include "launcher_transition.hpp"
+#include "launcher_user_folder.hpp"
 #include "launcher_save.hpp"
 #include "launcher_ui.hpp"
 #include "launcher_update.hpp"
@@ -71,6 +73,19 @@ namespace
 #define MODERNGEKKO_RUNNER_FILENAME "moderngekko-run"
 #endif
 
+// The launcher's own name (MODERNGEKKO_LAUNCHER_TITLE): its window's title
+// and the top bar's heading. Without one, the window takes the frontend's
+// name and the top bar says "Launcher".
+#ifdef MODERNGEKKO_LAUNCHER_TITLE
+#define MODERNGEKKO_LAUNCHER_HEADING MODERNGEKKO_LAUNCHER_TITLE
+#else
+#define MODERNGEKKO_LAUNCHER_TITLE MODERNGEKKO_FRONTEND_NAME
+#define MODERNGEKKO_LAUNCHER_HEADING "Launcher"
+#endif
+// The user folder's earlier names (launcher_user_folder.hpp), as name|name.
+#ifndef MODERNGEKKO_PREVIOUS_USER_DIRECTORY_NAMES
+#define MODERNGEKKO_PREVIOUS_USER_DIRECTORY_NAMES ""
+#endif
 #ifndef MODERNGEKKO_USER_DIRECTORY_NAME
 #define MODERNGEKKO_USER_DIRECTORY_NAME "moderngekko"
 #endif
@@ -799,9 +814,12 @@ bool DrawNavigationItem(const char* label, bool selected, ImFont* bold, float sc
 
 using LauncherBanner = LauncherImage;
 
-LauncherBanner LoadLauncherBanner(SDL_Renderer* renderer, const fs::path& release_directory)
+// largest_width: the most pixels wide it is drawn (LoadLauncherImage).
+LauncherBanner LoadLauncherBanner(SDL_Renderer* renderer, const fs::path& release_directory,
+                                  float largest_width)
 {
-  return LoadLauncherImage(renderer, release_directory, "launcher-banner.png", "launcher banner");
+  return LoadLauncherImage(renderer, release_directory, "launcher-banner.png", "launcher banner",
+                           false, largest_width);
 }
 
 // Draws the banner at the cursor, `width` wide, with the panels' rounding.
@@ -1171,15 +1189,15 @@ void DrawCreditsRows(const char* id, std::span<const std::array<const char*, 2>>
   ImGui::EndTable();
 }
 
-// Who made SR-ZGS and what it is built on, credited as each project credits
-// itself (the READMEs of SR-ZGS and ModernGekko): the author and the version
+// Who made Sonic Riders: Source and what it is built on, credited as each
+// project credits itself (the READMEs of SR-Source and ModernGekko): the author and the version
 // side by side, then the projects and their licenses. version_section, when
 // set, draws the VERSION panel beside CREATED BY (DrawVersionSection).
 void DrawCreditsPage(ImFont* bold, const std::function<void()>& version_section = {})
 {
   DrawPageHeader(Tr("Credits"),
-                 Tr("SR-ZGS is an independent fan project. It is not affiliated with or endorsed "
-                    "by SEGA."),
+                 Tr("Sonic Riders: Source is an independent fan project. It is not affiliated "
+                    "with or endorsed by SEGA."),
                  bold);
   const bool top_columns = version_section && BeginPageColumns("##credits_top");
   BeginSection("##credits_author", Tr("CREATED BY"));
@@ -1189,11 +1207,12 @@ void DrawCreditsPage(ImFont* bold, const std::function<void()>& version_section 
                          "\xE7\x9A\x84");
   ImGui::PopFont();
   ImGui::TextDisabled("JP: Naizu Akumateki \xC2\xB7 EN: KnivesDevilish");
-  DrawWebLink("github.com/KnivesDevilish/SR-ZGS", "https://github.com/KnivesDevilish/SR-ZGS");
+  DrawWebLink("github.com/KnivesDevilish/SR-Source",
+              "https://github.com/KnivesDevilish/SR-Source");
   ImGui::Spacing();
   ImGui::PushTextWrapPos(0.0f);
-  ImGui::TextDisabled("%s", Tr("With the SR-ZGS contributors and testers: research, "
-                               "development and testing."));
+  ImGui::TextDisabled("%s", Tr("With the contributors and testers of Sonic Riders: Source, "
+                               "for research, development and testing."));
   ImGui::PopTextWrapPos();
   EndSection();
   if (top_columns)
@@ -1220,8 +1239,9 @@ void DrawCreditsPage(ImFont* bold, const std::function<void()>& version_section 
   DrawCreditsRows("##credits_built_on_rows", BUILT_ON, bold);
   EndSection();
 
-  static constexpr std::array<std::array<const char*, 2>, 5> LICENSES = {{
-      {"SR-ZGS, ModernGekko", "GNU GPL v3"},
+  static constexpr std::array<std::array<const char*, 2>, 6> LICENSES = {{
+      {"Sonic Riders: Source", "GNU GPL v3"},
+      {"ModernGekko", "GNU GPL v3"},
       {"Dolphin", MODERNGEKKO_UI_TEXT("GNU GPL v2 or later")},
       {"SDL 3", MODERNGEKKO_UI_TEXT("zlib License")},
       {"Dear ImGui, pl_mpeg", MODERNGEKKO_UI_TEXT("MIT License")},
@@ -1256,7 +1276,7 @@ const char* DownloadPage()
   return page.c_str();
 }
 
-// The top bar's notice of a newer version, next to "Launcher": a lime pill
+// The top bar's notice of a newer version, next to the launcher's name: a lime pill
 // that opens the download page.
 void DrawNewVersionNotice(const std::string& version, float scale)
 {
@@ -1731,7 +1751,7 @@ struct LegendRow
   std::size_t last;
 };
 
-// Where the SR-ZGS controller drawing has each of its buttons. These belong
+// Where the SR-Source controller drawing has each of its buttons. These belong
 // to that drawing: other artwork bundled with
 // MODERNGEKKO_LAUNCHER_CONTROLLER_ART needs its own positions here.
 constexpr float CONTROLLER_ART_CANVAS = 1024.0f;
@@ -1915,7 +1935,7 @@ constexpr std::array<ArtHotspot, 12> CONTROLLER_ART_HOTSPOTS = {{
 }};
 #endif
 
-// Where the SR-ZGS keyboard drawing (1768 x 608) has the keys the generated
+// Where the SR-Source keyboard drawing (1768 x 608) has the keys the generated
 // profile uses: the top of each keycap. Keys missing here are still listed by
 // name when the drawing isn't bundled. Like the controller positions, these
 // belong to that drawing (MODERNGEKKO_LAUNCHER_KEYBOARD_ART).
@@ -2620,7 +2640,21 @@ int main(int argc, char** argv)
       extract_only = argv[++i];
   }
 
-  const fs::path user_directory = DefaultUserDirectory();
+  // A renamed project's players keep their folder: the one of the earlier
+  // name is moved to the new one the first time.
+  const fs::path user_directory = [] {
+    const moderngekko::frontend::SettledUserFolder settled =
+        moderngekko::frontend::SettleUserFolder(
+            DefaultUserDirectory(),
+            moderngekko::frontend::SplitFolderNames(MODERNGEKKO_PREVIOUS_USER_DIRECTORY_NAMES));
+    if (!settled.moved_from.empty())
+      std::cout << "user folder: moved " << settled.moved_from.string() << " to "
+                << settled.folder.string() << '\n';
+    if (!settled.error.empty())
+      std::cerr << "user folder: can't move " << settled.folder.string() << " to its new name ("
+                << settled.error << "); using it where it is\n";
+    return settled.folder;
+  }();
   const fs::path release_directory = ExecutableDirectory(argv[0]);
   if (extract_only)
   {
@@ -2670,7 +2704,7 @@ int main(int argc, char** argv)
     usable = {};
   const float scale = display_scale * LauncherZoom(display_scale, usable);
   SDL_Window* window = SDL_CreateWindow(
-      MODERNGEKKO_FRONTEND_NAME, static_cast<int>(LAUNCHER_WIDTH * scale),
+      MODERNGEKKO_LAUNCHER_TITLE, static_cast<int>(LAUNCHER_WIDTH * scale),
       static_cast<int>(LAUNCHER_HEIGHT * scale), SDL_WINDOW_HIGH_PIXEL_DENSITY);
   if (!window)
   {
@@ -2717,14 +2751,37 @@ int main(int argc, char** argv)
   ImGui_ImplSDL3_InitForSDLRenderer(window, renderer);
   ImGui_ImplSDL3_SetGamepadMode(ImGui_ImplSDL3_GamepadMode_AutoAll);
   ImGui_ImplSDLRenderer3_Init(renderer);
-  const LauncherBanner banner = LoadLauncherBanner(renderer, release_directory);
+  // The PLAY page's banner is drawn at most half the window wide, the
+  // EXPANSIONS picture 40% of it: bigger pictures are shrunk first.
+  int window_pixels_wide = 0;
+  if (!SDL_GetWindowSizeInPixels(window, &window_pixels_wide, nullptr))
+    window_pixels_wide = 0;
+  const LauncherBanner banner =
+      LoadLauncherBanner(renderer, release_directory, window_pixels_wide * 0.5f);
+  // The same banner in layers, that move (Resources/banner): shown instead
+  // when it is there.
+  LayeredBanner layered_banner;
+  layered_banner.Load(renderer, release_directory / "Resources" / "banner",
+                      window_pixels_wide * 0.5f);
+  // The PLAY page's banner at the cursor, `width` wide: the one in layers, or
+  // else the flat one. False with neither.
+  const auto draw_banner = [&](float width) {
+    if (layered_banner.Loaded())
+      layered_banner.Draw(renderer, width, static_cast<double>(SDL_GetTicksNS()) / 1e9);
+    else if (banner.texture)
+      DrawLauncherBanner(banner, width);
+    else
+      return false;
+    return true;
+  };
   const LauncherImage controller_art = LoadLauncherImage(
       renderer, release_directory, "launcher-controller.png", "launcher controller art");
   const LauncherImage keyboard_art = LoadLauncherImage(
       renderer, release_directory, "launcher-keyboard.png", "launcher keyboard art");
   // The Mods & expansions page's picture of what expansions could be.
   const LauncherImage mods_art =
-      LoadLauncherImage(renderer, release_directory, "launcher-mods.png", "launcher mods art");
+      LoadLauncherImage(renderer, release_directory, "launcher-mods.png", "launcher mods art",
+                        false, window_pixels_wide * 0.4f);
   // The background's floor slides (RenderBackground in launcher_ui.hpp).
   const LauncherImage background = LoadLauncherImage(
       renderer, release_directory, "launcher-background.png", "launcher background", true);
@@ -3870,12 +3927,13 @@ int main(int argc, char** argv)
     ImGui::Begin(MODERNGEKKO_FRONTEND_NAME " Launcher", nullptr,
                  ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove |
                      ImGuiWindowFlags_NoSavedSettings);
-    // Top bar: "Launcher" on the left (the game's name is already in the
-    // window title and the banner), the CPU core PLAY will use on the right
-    // (MODERNGEKKO_STATICRECOMP wins over config.ini, as in the runner).
+    // Top bar: the launcher's name on the left ("Launcher" without one; the
+    // game's name is already in the banner), the CPU core PLAY will use on
+    // the right (MODERNGEKKO_STATICRECOMP wins over config.ini, as in the
+    // runner).
     ImGui::PushFont(fonts.bold, 0.0f);
     ImGui::AlignTextToFramePadding();
-    ImGui::TextUnformatted("Launcher");
+    ImGui::TextUnformatted(MODERNGEKKO_LAUNCHER_HEADING);
     ImGui::PopFont();
     ImGui::SameLine();
 #if defined(MODERNGEKKO_FRONTEND_VERSION) && defined(MODERNGEKKO_UPDATE_REPOSITORY)
@@ -4009,11 +4067,8 @@ int main(int argc, char** argv)
 
           // The banner already shows the game's name, so no text title
           // follows it.
-          if (banner.texture)
-          {
-            DrawLauncherBanner(banner, column_width);
+          if (draw_banner(column_width))
             ImGui::Spacing();
-          }
           if (!moderngekko::frontend::PlaysSeveralGames())
           {
             const std::string ready = Format(Tr("GAME READY \xC2\xB7 %s"),
@@ -4227,8 +4282,9 @@ int main(int argc, char** argv)
                                  Tr("Careful: an IP address identifies your connection. Don't "
                                     "show it on stream or share it in public."));
             }
-            ImGui::TextDisabled("%s", Tr("Every player needs the same SR-ZGS release and game "
-                                         "files. Everyone plays with the host's CPU core."));
+            ImGui::TextDisabled("%s", Tr("Every player needs the same Sonic Riders: Source "
+                                         "release and game files. Everyone plays with the "
+                                         "host's CPU core."));
             if (moderngekko::frontend::PlaysSeveralGames())
               ImGui::TextDisabled("%s", Tr("Everyone chooses the same game as the host."));
             ImGui::PopTextWrapPos();
@@ -4486,11 +4542,8 @@ int main(int argc, char** argv)
         }
         else
         {
-          if (banner.texture)
-          {
-            DrawLauncherBanner(banner, ImGui::GetContentRegionAvail().x);
+          if (draw_banner(ImGui::GetContentRegionAvail().x))
             ImGui::Spacing();
-          }
           DrawStatusPill(Tr("GAME NOT INSTALLED"), ImVec4(1.0f, 0.75f, 0.3f, 1.0f), scale, false);
           ImGui::Spacing();
           ImGui::TextUnformatted(Tr("No extracted game is configured yet."));
@@ -5462,10 +5515,14 @@ int main(int argc, char** argv)
                    Tr("Mods change the game or add to it when it starts, without touching your "
                       "copy of it."),
                    fonts.bold);
-    // What is installed on the left, what is planned on the right.
+    // What is installed on the left, what is planned on the right. A square
+    // or upright EXPANSIONS picture goes beside its text, so its column is
+    // the wider one.
     const float mods_page_bottom =
         ImGui::GetCursorScreenPos().y + ImGui::GetContentRegionAvail().y;
-    const bool mods_columns = BeginPageColumns("##mods_columns", 0.48f);
+    const bool mods_art_upright = mods_art.texture && mods_art.aspect >= 0.75f;
+    const bool mods_columns =
+        BeginPageColumns("##mods_columns", mods_art_upright ? 0.42f : 0.48f);
     BeginSection("##mods_installed", Tr("INSTALLED MODS"));
     if (installed_mods.empty())
     {
@@ -5492,8 +5549,8 @@ int main(int argc, char** argv)
       OpenFolder(user_directory / "Mods");
     ImGui::Spacing();
     ImGui::PushTextWrapPos(0.0f);
-    ImGui::TextDisabled("%s", Tr("Mod support is experimental: SR-ZGS doesn't have mods of its "
-                                 "own yet."));
+    ImGui::TextDisabled("%s", Tr("Mod support is experimental: there are no mods made for "
+                                 "Sonic Riders: Source yet."));
     ImGui::PopTextWrapPos();
     EndSection();
     if (mods_columns)
@@ -5504,7 +5561,27 @@ int main(int argc, char** argv)
     const char* expansions_text = Tr("Story campaigns, characters, tracks and more, made by the "
                                      "community, without changing the original game files.");
     const char* expansions_goal = Tr("A long-term goal of the project.");
-    if (mods_art.texture)
+    if (mods_art_upright)
+    {
+      // Beside the text, as tall as the room left on the page allows (so it
+      // doesn't scroll) and at most 60% of the column wide.
+      const ImGuiStyle& style = ImGui::GetStyle();
+      const float width = ImGui::GetContentRegionAvail().x;
+      const float room = mods_page_bottom - ImGui::GetCursorScreenPos().y -
+                         style.WindowPadding.y * 0.75f - style.ItemSpacing.y * 2.0f;
+      const float art_width = std::floor(
+          std::clamp(room / mods_art.aspect, 100.0f * scale, width * 0.6f));
+      DrawLauncherBanner(mods_art, art_width);
+      ImGui::SameLine();
+      ImGui::BeginGroup();
+      ImGui::PushTextWrapPos(0.0f);
+      ImGui::TextUnformatted(expansions_text);
+      ImGui::Spacing();
+      ImGui::TextDisabled("%s", expansions_goal);
+      ImGui::PopTextWrapPos();
+      ImGui::EndGroup();
+    }
+    else if (mods_art.texture)
     {
       // As large as the column and the room above the text under it allow,
       // so the page doesn't scroll.
@@ -5520,10 +5597,13 @@ int main(int argc, char** argv)
       DrawLauncherBanner(mods_art, art_width);
       ImGui::Spacing();
     }
-    ImGui::PushTextWrapPos(0.0f);
-    ImGui::TextUnformatted(expansions_text);
-    ImGui::TextDisabled("%s", expansions_goal);
-    ImGui::PopTextWrapPos();
+    if (!mods_art_upright)
+    {
+      ImGui::PushTextWrapPos(0.0f);
+      ImGui::TextUnformatted(expansions_text);
+      ImGui::TextDisabled("%s", expansions_goal);
+      ImGui::PopTextWrapPos();
+    }
     EndSection();
     if (mods_columns)
       EndPageColumns();
@@ -5783,6 +5863,7 @@ int main(int argc, char** argv)
     SDL_DestroyTexture(keyboard_art.texture);
   if (banner.texture)
     SDL_DestroyTexture(banner.texture);
+  layered_banner.Unload();
   if (background.texture)
     SDL_DestroyTexture(background.texture);
   // Its thread stops and its pictures go before the renderer.

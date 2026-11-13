@@ -196,10 +196,30 @@ inline void SetWindowIcon(SDL_Window* window, const fs::path& release_directory)
   }
 }
 
+// A picture drawn at most largest_width pixels wide (0: not known), halved as
+// often as it is still twice that or more: the renderer shrinks pictures with
+// a plain linear filter, which only reads a few of their pixels each, so a
+// big shrink looks grainy and jagged. Each halving averages 2x2 pixels
+// (linear, exactly half the size). The surface is replaced.
+inline void ShrinkForDrawing(SDL_Surface*& surface, float largest_width)
+{
+  while (largest_width > 0.0f && surface->w >= 2.0f * largest_width && surface->h >= 4)
+  {
+    SDL_Surface* half =
+        SDL_ScaleSurface(surface, surface->w / 2, surface->h / 2, SDL_SCALEMODE_LINEAR);
+    if (!half)
+      break;
+    SDL_DestroySurface(surface);
+    surface = half;
+  }
+}
+
 // find_floor: for a background, also look for a floor that can slide.
+// largest_width: the most pixels wide the picture is ever drawn (0: not
+// known); a much bigger picture is shrunk first (ShrinkForDrawing).
 inline LauncherImage LoadLauncherImage(SDL_Renderer* renderer, const fs::path& release_directory,
                                        std::string_view file_name, std::string_view log_label,
-                                       bool find_floor = false)
+                                       bool find_floor = false, float largest_width = 0.0f)
 {
   LauncherImage image;
   const fs::path path = release_directory / "Resources" / file_name;
@@ -213,6 +233,7 @@ inline LauncherImage LoadLauncherImage(SDL_Renderer* renderer, const fs::path& r
               << '\n';
     return image;
   }
+  ShrinkForDrawing(surface, largest_width);
   if (surface->w > 0 && surface->h > 0)
   {
     image.texture = SDL_CreateTextureFromSurface(renderer, surface);
