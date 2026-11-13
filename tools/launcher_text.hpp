@@ -164,10 +164,10 @@ inline constexpr Translation SPANISH_TEXTS[] = {
      "wider). The game keeps the last shape that was right.",
      "Usa números enteros hasta 100, de 1:1 a 6:1 (tan ancha como alta, hasta seis veces más "
      "ancha). El juego conserva la última forma correcta."},
-    {"The game draws in widescreen and fills the window, whatever its shape. A game made for 4:3 "
-     "is widened too. Best for most screens.",
-     "El juego se dibuja en panorámico y llena la ventana, tenga la forma que tenga. Un juego "
-     "hecho para 4:3 también se ensancha. Lo mejor para la mayoría de pantallas."},
+    {"The game draws in widescreen, stretched to fill the window whatever its shape. A game made "
+     "for 4:3 is stretched too. Best for most screens.",
+     "El juego se dibuja en panorámico, estirado para llenar la ventana tenga la forma que tenga. "
+     "Un juego hecho para 4:3 también se estira. Lo mejor para la mayoría de pantallas."},
     {"The game's 4:3 picture, stretched to fill the window.",
      "La imagen 4:3 del juego, estirada para llenar la ventana."},
     {"Netplay: the host's 16:9 or 4:3 choice applies to every player.",
@@ -716,10 +716,10 @@ inline constexpr Translation JAPANESE_TEXTS[] = {
      "wider). The game keeps the last shape that was right.",
      "100までの整数で、1:1から6:1まで（縦と同じ幅から6倍の幅まで）指定してください。ゲームは"
      "最後に正しかった比率を使います。"},
-    {"The game draws in widescreen and fills the window, whatever its shape. A game made for 4:3 "
-     "is widened too. Best for most screens.",
-     "ゲームをワイド画面で描画し、ウィンドウの形に関係なく全体に表示します。4:3向けのゲームも"
-     "広げて表示されます。ほとんどの画面に最適です。"},
+    {"The game draws in widescreen, stretched to fill the window whatever its shape. A game made "
+     "for 4:3 is stretched too. Best for most screens.",
+     "ゲームをワイド画面で描画し、ウィンドウの形に関係なく全体に引き伸ばして表示します。4:3向け"
+     "のゲームも引き伸ばされます。ほとんどの画面に最適です。"},
     {"The game's 4:3 picture, stretched to fill the window.",
      "ゲームの4:3の映像を、ウィンドウ全体に引き伸ばして表示します。"},
     {"Netplay: the host's 16:9 or 4:3 choice applies to every player.",

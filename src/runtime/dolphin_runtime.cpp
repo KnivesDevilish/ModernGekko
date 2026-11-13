@@ -695,14 +695,12 @@ void ApplyAspectRatio(AspectRatio aspect_ratio, int custom_width, int custom_hei
     Config::SetBase(Config::GFX_CUSTOM_ASPECT_RATIO_WIDTH, custom_width);
     Config::SetBase(Config::GFX_CUSTOM_ASPECT_RATIO_HEIGHT, custom_height);
   }
-  // Widescreen, Ultrawide, and a custom shape other than 16:9: the 3D view
-  // takes the picture's shape, wider or narrower, instead of being stretched
-  // to it (Dolphin's widescreen hack, which only changes what is drawn, so
-  // Netplay is unaffected). When the game already draws the window's shape,
-  // it changes nothing. Standard is stretched as it is.
+  // Ultrawide, and a custom shape other than 16:9: the 3D view takes the
+  // picture's shape, wider or narrower, instead of being stretched to it
+  // (Dolphin's widescreen hack, which only changes what is drawn, so Netplay
+  // is unaffected). Widescreen and Standard are stretched as they are.
   Config::SetBase(Config::GFX_WIDESCREEN_HACK,
-                  aspect_ratio == AspectRatio::Widescreen ||
-                      aspect_ratio == AspectRatio::Ultrawide ||
+                  aspect_ratio == AspectRatio::Ultrawide ||
                       (custom && custom_width * 9 != custom_height * 16));
 }
 

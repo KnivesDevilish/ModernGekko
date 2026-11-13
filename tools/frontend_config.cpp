@@ -352,9 +352,9 @@ const std::vector<AspectRatioOption> &SupportedAspectRatios() {
   // The texts are English; the launcher translates them when it shows them.
   static const std::vector<AspectRatioOption> ratios = {
       {MODERNGEKKO_UI_TEXT("16:9 (Widescreen)"), "16:9",
-       MODERNGEKKO_UI_TEXT("The game draws in widescreen and fills the window, "
-                           "whatever its shape. A game made for 4:3 is "
-                           "widened too. Best for most screens.")},
+       MODERNGEKKO_UI_TEXT("The game draws in widescreen, stretched to fill "
+                           "the window whatever its shape. A game made for 4:3 "
+                           "is stretched too. Best for most screens.")},
       {"4:3", "4:3",
        MODERNGEKKO_UI_TEXT("The game's 4:3 picture, stretched to fill the "
                            "window.")},

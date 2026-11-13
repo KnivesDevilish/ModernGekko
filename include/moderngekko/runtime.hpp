@@ -35,9 +35,9 @@ struct ModuleSource
 // which shape the game should draw (the system's 16:9 setting).
 enum class AspectRatio
 {
-  // The game draws 16:9 and fills the window, whatever its shape: its 3D
-  // view is widened or narrowed to it (on a 16:9 window, nothing changes).
-  // A game that only draws 4:3 is widened too; its 2D parts stretch.
+  // The game draws 16:9, and the picture is stretched to fill the window,
+  // whatever its shape (on a 16:9 window, nothing changes). A game that only
+  // draws 4:3 is stretched to it too.
   Widescreen,
   // The game draws 4:3 (its menus and HUD laid out for a 4:3 TV), and the
   // whole picture is stretched to fill the window, as Dolphin's Stretch to
