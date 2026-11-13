@@ -276,7 +276,13 @@ if(MODERNGEKKO_ENABLE_DOLPHIN_RUNTIME)
     set(ENABLE_HWDB OFF CACHE BOOL "" FORCE)
     set(ENABLE_EVDEV OFF CACHE BOOL "" FORCE)
     set(ENABLE_WAYLAND ON CACHE BOOL "" FORCE)
-    set(ENABLE_EGL OFF CACHE BOOL "" FORCE)
+    # On Linux, Dolphin opens OpenGL only through EGL (in an X11 window too):
+    # without it the OpenGL backend can't start there. Not used elsewhere.
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        set(ENABLE_EGL ON CACHE BOOL "" FORCE)
+    else()
+        set(ENABLE_EGL OFF CACHE BOOL "" FORCE)
+    endif()
     set(USE_SYSTEM_SDL3 OFF CACHE BOOL "" FORCE)
     # SDL bundles its own copy of the macOS hidapi backend
     if(APPLE)
