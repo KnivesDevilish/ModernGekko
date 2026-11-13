@@ -87,9 +87,10 @@ inline constexpr Translation SPANISH_TEXTS[] = {
      "Servidor público de Dolphin (stun.dolphin-emu.org)"},
     {"An invite code has 8 characters (numbers and letters a-f).",
      "El código tiene 8 caracteres (números y letras a-f)."},
-    {"Every player needs the same SR-ZGS release and game files. Everyone plays with the host's "
-     "CPU core.",
-     "Todos necesitan la misma versión de SR-ZGS y los mismos archivos del juego. Todos juegan "
+    {"Every player needs the same Sonic Riders: Source release and game files. Everyone plays "
+     "with the host's CPU core.",
+     "Todos necesitan la misma versión de Sonic Riders: Source y los mismos archivos del juego. "
+     "Todos juegan "
      "con el núcleo de CPU del anfitrión."},
     {"Nickname", "Apodo"},
     {"Host / IP", "Anfitrión / IP"},
@@ -193,12 +194,16 @@ inline constexpr Translation SPANISH_TEXTS[] = {
     {"Show FPS in window title", "Mostrar FPS en el título"},
 
     // Credits page
-    {"SR-ZGS is an independent fan project. It is not affiliated with or endorsed by SEGA.",
-     "SR-ZGS es un proyecto independiente hecho por fans. No está afiliado ni respaldado por "
+    {"Sonic Riders: Source is an independent fan project. It is not affiliated with or endorsed "
+     "by SEGA.",
+     "Sonic Riders: Source es un proyecto independiente hecho por fans. No está afiliado ni "
+     "respaldado por "
      "SEGA."},
     {"CREATED BY", "CREADO POR"},
-    {"With the SR-ZGS contributors and testers: research, development and testing.",
-     "Con los colaboradores y testers de SR-ZGS: investigación, desarrollo y pruebas."},
+    {"With the contributors and testers of Sonic Riders: Source, for research, development and "
+     "testing.",
+     "Con los colaboradores y testers de Sonic Riders: Source, en investigación, desarrollo y "
+     "pruebas."},
     {"BUILT ON", "BASADO EN"},
     {"Static recompilation framework", "Framework de recompilación estática"},
     {"Runtime for GameCube/Wii recomps, by Hyperway",
@@ -573,20 +578,14 @@ inline constexpr Translation SPANISH_TEXTS[] = {
     {"Game volume", "Volumen del juego"},
     {"Drawn over the game's picture. Light enough for integrated graphics.", "Se dibuja sobre la imagen del juego. Es ligero, apto para gráficos integrados."},
     {"The game's picture as it is.", "La imagen del juego tal cual."},
-    {"Bloom", "Bloom"},
-    {"Lights and bright highlights glow softly.", "Las luces y los brillos resplandecen suavemente."},
-    {"Chromatic aberration", "Aberración cromática"},
-    {"Red and blue drift apart toward the edges, as through a camera lens.", "El rojo y el azul se separan hacia los bordes, como a través de la lente de una cámara."},
-    {"Vivid colors", "Colores vivos"},
-    {"Richer colors and a little more contrast.", "Colores más intensos y un poco más de contraste."},
-    {"Sharpen", "Nitidez"},
-    {"Details and edges stand out more.", "Los detalles y los bordes se ven más definidos."},
-    {"Smooth edges (FXAA)", "Suavizar bordes (FXAA)"},
-    {"Softens jagged edges.", "Suaviza los bordes dentados."},
+    {"Remaster", "Remasterizado"},
+    {"Crisper detail, richer colors, glowing lights and soft shadows in the corners, like a remaster.",
+     "Más nitidez, colores más ricos, luces que brillan y sombras suaves en los rincones, como en una remasterización."},
+    {"Anime outline", "Contorno anime"},
+    {"Clean ink lines and flat, bright colors, like an anime. The lines go round everything on screen, not only the characters.",
+     "Líneas de tinta limpias y colores planos y vivos, como en un anime. Las líneas rodean todo lo que hay en pantalla, no solo a los personajes."},
     {"CRT", "CRT"},
     {"Scanlines and darker corners, like an old TV.", "Líneas de escaneo y esquinas más oscuras, como un televisor antiguo."},
-    {"Outline", "Contorno"},
-    {"Dark lines along the edges, like a cartoon. They go round everything on screen, not only the characters.", "Líneas oscuras en los bordes, como en un dibujo animado. Rodean todo lo que hay en pantalla, no solo a los personajes."},
     // Mods & expansions page
     {"Mods & expansions", "Mods y expansiones"},
     {"Open Mods & expansions", "Abrir Mods y expansiones"},
@@ -594,7 +593,8 @@ inline constexpr Translation SPANISH_TEXTS[] = {
     {"INSTALLED MODS", "MODS INSTALADOS"},
     {"No mods installed yet.", "Todavía no hay mods instalados."},
     {"Mod packages (.mgm) go in this folder and load when the game starts:", "Los paquetes de mods (.mgm) van en esta carpeta y se cargan al iniciar el juego:"},
-    {"Mod support is experimental: SR-ZGS doesn't have mods of its own yet.", "El soporte de mods es experimental: SR-ZGS todavía no tiene mods propios."},
+    {"Mod support is experimental: there are no mods made for Sonic Riders: Source yet.",
+     "El soporte de mods es experimental: todavía no hay mods hechos para Sonic Riders: Source."},
     {"EXPANSIONS", "EXPANSIONES"},
     {"PLANNED", "PLANEADO"},
     {"Story campaigns, characters, tracks and more, made by the community, without changing the original game files.", "Campañas de historia, personajes, pistas y más, creados por la comunidad, sin modificar los archivos originales del juego."},
@@ -653,9 +653,9 @@ inline constexpr Translation JAPANESE_TEXTS[] = {
     {"Invite codes", "招待コード"},
     {"Dolphin's public server (stun.dolphin-emu.org)", "Dolphinの公開サーバー（stun.dolphin-emu.org）"},
     {"An invite code has 8 characters (numbers and letters a-f).", "招待コードは8文字です（数字とa〜fの英字）。"},
-    {"Every player needs the same SR-ZGS release and game files. Everyone plays with the host's "
-     "CPU core.",
-     "全員が同じSR-ZGSのバージョンとゲームファイルを使う必要があります。CPUコ"
+    {"Every player needs the same Sonic Riders: Source release and game files. Everyone plays "
+     "with the host's CPU core.",
+     "全員が同じSonic\u00A0Riders:\u00A0Sourceのバージョンとゲームファイルを使う必要があります。CPUコ"
      "アは全員ホストのものを使います。"},
     {"Nickname", "ニックネーム"},
     {"Host / IP", "ホスト / IP"},
@@ -754,12 +754,14 @@ inline constexpr Translation JAPANESE_TEXTS[] = {
     {"Start in fullscreen", "フルスクリーンで起動"},
     {"Show FPS in window title", "ウィンドウタイトルにFPSを表示"},
     // Credits page
-    {"SR-ZGS is an independent fan project. It is not affiliated with or endorsed by SEGA.",
-     "SR-ZGSは非公式のファンプロジェクトです。セガとは関係がなく、セガの承認も受"
+    {"Sonic Riders: Source is an independent fan project. It is not affiliated with or endorsed "
+     "by SEGA.",
+     "Sonic\u00A0Riders:\u00A0Sourceは非公式のファンプロジェクトです。セガとは関係がなく、セガの承認も受"
      "けていません。"},
     {"CREATED BY", "制作"},
-    {"With the SR-ZGS contributors and testers: research, development and testing.",
-     "SR-ZGSの協力者とテスターの皆さんとともに：調査、開発、テスト。"},
+    {"With the contributors and testers of Sonic Riders: Source, for research, development and "
+     "testing.",
+     "Sonic\u00A0Riders:\u00A0Sourceの協力者とテスターの皆さんとともに：調査、開発、テスト。"},
     {"BUILT ON", "使用技術"},
     {"Static recompilation framework", "静的再コンパイルのフレームワーク"},
     {"Runtime for GameCube/Wii recomps, by Hyperway", "GameCube/Wii再コンパイル用ランタイム（Hyperway制作）"},
@@ -1115,28 +1117,23 @@ inline constexpr Translation JAPANESE_TEXTS[] = {
     {"Game volume", "ゲームの音量"},
     {"Drawn over the game's picture. Light enough for integrated graphics.", "ゲームの映像の上に描画されます。内蔵グラフィックスでも動く軽さです。"},
     {"The game's picture as it is.", "ゲームの映像をそのまま表示します。"},
-    {"Bloom", "ブルーム"},
-    {"Lights and bright highlights glow softly.", "光や明るい部分がやわらかく輝きます。"},
-    {"Chromatic aberration", "色収差"},
-    {"Red and blue drift apart toward the edges, as through a camera lens.", "カメラのレンズのように、画面の端に向かって赤と青がずれます。"},
-    {"Vivid colors", "鮮やかな色"},
-    {"Richer colors and a little more contrast.", "色がより鮮やかになり、コントラストが少し上がります。"},
-    {"Sharpen", "シャープ"},
-    {"Details and edges stand out more.", "細部や輪郭がくっきりします。"},
-    {"Smooth edges (FXAA)", "エッジを滑らかに（FXAA）"},
-    {"Softens jagged edges.", "ギザギザした輪郭を滑らかにします。"},
+    {"Remaster", "リマスター"},
+    {"Crisper detail, richer colors, glowing lights and soft shadows in the corners, like a remaster.",
+     "ディテールがくっきりし、色が豊かになり、光が輝き、隅にやわらかな影が付きます。リマスターのような見た目です。"},
+    {"Anime outline", "アニメ風の輪郭"},
+    {"Clean ink lines and flat, bright colors, like an anime. The lines go round everything on screen, not only the characters.",
+     "すっきりした線と、平らで鮮やかな色で、アニメのような見た目になります。線はキャラクターだけでなく、画面のすべてに付きます。"},
     {"CRT", "CRT"},
     {"Scanlines and darker corners, like an old TV.", "古いテレビのような走査線と暗い四隅。"},
-    {"Outline", "輪郭線"},
-    {"Dark lines along the edges, like a cartoon. They go round everything on screen, not only the characters.", "アニメのように輪郭に暗い線を引きます。キャラクターだけでなく、画面のすべてに線が付きます。"},
     // Mods & expansions page
     {"Mods & expansions", "MODと拡張"},
     {"Open Mods & expansions", "「MODと拡張」を開く"},
     {"Mods change the game or add to it when it starts, without touching your copy of it.", "MODはゲームの起動時に内容を変えたり追加したりします。あなたのゲームのコピーは変更しません。"},
     {"INSTALLED MODS", "導入済みのMOD"},
     {"No mods installed yet.", "MODはまだ導入されていません。"},
-    {"Mod packages (.mgm) go in this folder and load when the game starts:", ".mgm形式のMODパッケージをこのフォルダーに入れると、ゲームの起動時に読み込まれます："},
-    {"Mod support is experimental: SR-ZGS doesn't have mods of its own yet.", "MODへの対応は実験的です。SR-ZGS用のMODはまだありません。"},
+    {"Mod packages (.mgm) go in this folder and load when the game starts:", "MODパッケージ（.mgm）をこのフォルダーに入れると、ゲームの起動時に読み込まれます："},
+    {"Mod support is experimental: there are no mods made for Sonic Riders: Source yet.",
+     "MODへの対応は実験的です。Sonic\u00A0Riders:\u00A0Source用のMODはまだありません。"},
     {"EXPANSIONS", "拡張コンテンツ"},
     {"PLANNED", "予定"},
     {"Story campaigns, characters, tracks and more, made by the community, without changing the original game files.", "ストーリー、キャラクター、コースなど、コミュニティが作るコンテンツ。元のゲームファイルは変更しません。"},

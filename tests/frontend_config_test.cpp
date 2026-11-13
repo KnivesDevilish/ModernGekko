@@ -5,6 +5,7 @@
 #include <fstream>
 #include <iterator>
 #include <string>
+#include <utility>
 
 #ifdef MODERNGEKKO_GAMECUBE_CONTROLLERS
 constexpr const char *CONTROLLER_CONFIG_NAME = "GCPadNew.ini";
@@ -428,16 +429,16 @@ int main() {
     const auto defaults = moderngekko::frontend::LoadConfig(effect, true);
     if (!defaults || defaults.effect != "none" || defaults.game_volume != 100)
       return 45;
-    effect_config.effect = "chromatic";
+    effect_config.effect = "crt";
     effect_config.game_volume = 35;
     if (!moderngekko::frontend::SaveConfig(effect, effect_config, &error))
       return 46;
     const auto loaded = moderngekko::frontend::LoadConfig(effect, false);
-    if (loaded.effect != "chromatic" || loaded.game_volume != 35)
+    if (loaded.effect != "crt" || loaded.game_volume != 35)
       return 47;
     // The short SaveConfig the Settings page uses keeps them.
     if (!moderngekko::frontend::SaveConfig(effect, "1920x1080", true, controller, &error) ||
-        moderngekko::frontend::LoadConfig(effect, false).effect != "chromatic" ||
+        moderngekko::frontend::LoadConfig(effect, false).effect != "crt" ||
         moderngekko::frontend::LoadConfig(effect, false).game_volume != 35)
       return 48;
     effect_config.game_volume = 101;
@@ -464,6 +465,18 @@ int main() {
     }
     if (moderngekko::frontend::FindEffect("sepia"))
       return 54;
+    // Effects earlier versions had become remaster or none as config.ini is
+    // read; one no version had stays as written.
+    for (const auto &[before, now] :
+         {std::pair<const char *, const char *>{"bloom", "remaster"}, {"vivid", "remaster"},
+          {"sharpen", "remaster"}, {"chromatic", "none"}, {"fxaa", "none"},
+          {"outline", "outline"}, {"sepia", "sepia"}}) {
+      std::ofstream(effect / "config.ini", std::ios::trunc)
+          << "[Video]\nresolution=1920x1080\neffect=" << before << '\n';
+      const auto read = moderngekko::frontend::LoadConfig(effect, false);
+      if (!read || read.effect != now)
+        return 55;
+    }
   }
   // Screenshots: 3840x2160 by default, kept, the game's own with "game", the
   // default for a value this build doesn't list, and a value with spaces

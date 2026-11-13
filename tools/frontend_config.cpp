@@ -239,26 +239,34 @@ const std::vector<EffectOption> &SupportedEffects() {
   static const std::vector<EffectOption> effects = {
       {MODERNGEKKO_UI_TEXT("None"), "none", "",
        MODERNGEKKO_UI_TEXT("The game's picture as it is.")},
-      {MODERNGEKKO_UI_TEXT("Bloom"), "bloom", "ModernGekko/bloom",
-       MODERNGEKKO_UI_TEXT("Lights and bright highlights glow softly.")},
-      {MODERNGEKKO_UI_TEXT("Chromatic aberration"), "chromatic",
-       "ModernGekko/chromatic_aberration",
-       MODERNGEKKO_UI_TEXT("Red and blue drift apart toward the edges, as "
-                           "through a camera lens.")},
-      {MODERNGEKKO_UI_TEXT("Vivid colors"), "vivid", "ModernGekko/vivid",
-       MODERNGEKKO_UI_TEXT("Richer colors and a little more contrast.")},
-      {MODERNGEKKO_UI_TEXT("Sharpen"), "sharpen", "ModernGekko/sharpen",
-       MODERNGEKKO_UI_TEXT("Details and edges stand out more.")},
-      {MODERNGEKKO_UI_TEXT("Outline"), "outline", "ModernGekko/outline",
-       MODERNGEKKO_UI_TEXT("Dark lines along the edges, like a cartoon. They "
-                           "go round everything on screen, not only the "
-                           "characters.")},
-      {MODERNGEKKO_UI_TEXT("Smooth edges (FXAA)"), "fxaa", "FXAA",
-       MODERNGEKKO_UI_TEXT("Softens jagged edges.")},
+      {MODERNGEKKO_UI_TEXT("Remaster"), "remaster", "ModernGekko/remaster",
+       MODERNGEKKO_UI_TEXT("Crisper detail, richer colors, glowing lights and "
+                           "soft shadows in the corners, like a remaster.")},
+      {MODERNGEKKO_UI_TEXT("Anime outline"), "outline", "ModernGekko/outline",
+       MODERNGEKKO_UI_TEXT("Clean ink lines and flat, bright colors, like an "
+                           "anime. The lines go round everything on screen, "
+                           "not only the characters.")},
       {MODERNGEKKO_UI_TEXT("CRT"), "crt", "ModernGekko/crt",
        MODERNGEKKO_UI_TEXT("Scanlines and darker corners, like an old TV.")},
   };
   return effects;
+}
+
+// Effects earlier versions had: Remaster has what bloom, vivid and sharpen
+// did, so they become it; the others become none.
+std::string_view CurrentEffect(std::string_view value) {
+  static constexpr std::array<std::array<std::string_view, 2>, 5> RETIRED = {{
+      {"bloom", "remaster"},
+      {"vivid", "remaster"},
+      {"sharpen", "remaster"},
+      {"chromatic", "none"},
+      {"fxaa", "none"},
+  }};
+  for (const auto &[before, now] : RETIRED) {
+    if (value == before)
+      return now;
+  }
+  return value;
 }
 
 const EffectOption *FindEffect(std::string_view value) {
@@ -469,8 +477,9 @@ ConfigResult LoadConfig(const fs::path &user_directory,
       if (config.language.empty())
         return {.error = "language must be auto, en, es or ja"};
     } else if (key == "effect") {
-      // Kept as written: an effect this build lacks is shown as none.
-      config.effect = value;
+      // Kept as written (an effect this build lacks is shown as none), but
+      // for those earlier versions had.
+      config.effect = CurrentEffect(value);
       if (config.effect.empty() ||
           config.effect.find_first_of(" \t\r\n=") != std::string::npos)
         return {.error = "effect must be none or the name of an effect"};
@@ -713,8 +722,7 @@ bool SaveConfig(const fs::path &user_directory, const ConfigResult &config,
        << "custom_aspect=" << custom_aspect->width << ':' << custom_aspect->height << '\n'
        << "# Pictures beside a 4:3 game: none, random or a border's id\n"
        << "border=" << game_border << '\n'
-       << "# Picture effect: none, bloom, chromatic, vivid, sharpen, outline, fxaa\n"
-       << "# or crt\n"
+       << "# Picture effect: none, remaster, outline (anime) or crt\n"
        << "effect=" << config.effect << '\n'
        << "# Screenshots (F9 or the in-game menu): game, 1920x1080, 2560x1440,\n"
        << "# 3840x2160 or 5120x2880, never below the game's own resolution\n"
@@ -886,7 +894,7 @@ bool GenerateControllerConfig(const fs::path &user_directory,
               "D-Pad/Right = `Pad E`\n"
               "Rumble/Motor = `Motor L` | `Motor R`\n"
               // Not GameCube inputs, and Dolphin ignores them: the left
-              // trigger is kept as the extra C button of the SR-ZGS controller
+              // trigger is kept as the extra C button of the SR-Source controller
               // drawing, and Back and Guide (Select and Home on most pads) as
               // its − and triangle buttons, for mods. The launcher's tester
               // shows them.

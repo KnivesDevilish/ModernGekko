@@ -130,6 +130,10 @@ const std::vector<CustomAspect> &CustomAspectPresets();
 const std::vector<EffectOption> &SupportedEffects();
 // The effect of config.ini's value; nullptr for one this build doesn't have.
 const EffectOption *FindEffect(std::string_view value);
+// An effect value config.ini may have from an earlier version, as this one
+// calls it: bloom, vivid and sharpen are remaster now, chromatic and fxaa
+// none. Any other value comes back as it is.
+std::string_view CurrentEffect(std::string_view value);
 // Automatic first, then sizes from small to large.
 const std::vector<WindowSizeOption> &SupportedWindowSizes();
 // The width and height of config.ini's value; 0 and 0 (fit the screen) for
