@@ -6,6 +6,10 @@
 // and that picture goes on the page like the flat banner, with its rounded
 // corners. Without the folder, or with nothing in it to draw, the page shows
 // the flat banner.
+//
+// The Netplay lobby uses the same class for its background (Resources/
+// lobby-background/): DrawCover fills the whole window with the layers, as a
+// picture scaled to cover it, leaning with the mouse anywhere in the window.
 #pragma once
 
 #include "launcher_banner_layout.hpp"
@@ -153,6 +157,46 @@ public:
     ImGui::Dummy(size);
   }
 
+  // The layers over the whole render output, behind everything else: scaled
+  // to cover it (cut evenly at the sides, or at the top and bottom), drawn
+  // with the renderer. Call it before drawing anything else in the frame.
+  void DrawCover(SDL_Renderer* renderer, double now)
+  {
+    int output_wide = 0;
+    int output_high = 0;
+    if (m_width <= 0 || m_height <= 0 ||
+        !SDL_GetCurrentRenderOutputSize(renderer, &output_wide, &output_high) ||
+        output_wide <= 0 || output_high <= 0)
+      return;
+    const float cover = std::max(static_cast<float>(output_wide) / m_width,
+                                 static_cast<float>(output_high) / m_height);
+    const int pixels_wide = std::max(output_wide, static_cast<int>(std::ceil(m_width * cover)));
+    const int pixels_high = std::max(output_high, static_cast<int>(std::ceil(m_height * cover)));
+
+    if (m_started < 0.0)
+    {
+      m_started = now;
+      m_last = now;
+    }
+    const float seconds = static_cast<float>(now - m_started);
+    // The mouse leans it from anywhere in the window.
+    const ImGuiIO& io = ImGui::GetIO();
+    const bool inside = ImGui::IsMousePosValid() && io.DisplaySize.x > 0.0f &&
+                        io.DisplaySize.y > 0.0f;
+    const banner_motion::Shift target = banner_motion::Lean(
+        inside, inside ? io.MousePos.x / (io.DisplaySize.x * 0.5f) - 1.0f : 0.0f,
+        inside ? io.MousePos.y / (io.DisplaySize.y * 0.5f) - 1.0f : 0.0f, seconds);
+    m_lean = banner_motion::Follow(m_lean, target, static_cast<float>(now - m_last));
+    m_last = now;
+
+    if (!Compose(renderer, pixels_wide, pixels_high, seconds))
+      return;
+    const SDL_FRect source{static_cast<float>(pixels_wide - output_wide) * 0.5f,
+                           static_cast<float>(pixels_high - output_high) * 0.5f,
+                           static_cast<float>(output_wide), static_cast<float>(output_high)};
+    SDL_RenderTexture(renderer, m_target, &source, nullptr);
+  }
+
 private:
   struct Picture
   {
@@ -271,8 +315,10 @@ private:
   void DrawLayer(SDL_Renderer* renderer, const Picture& picture, float zoom, float shift_x,
                  float shift_y, bool waves, float seconds, float to_target)
   {
-    const int columns = waves ? 40 : 1;
-    const int rows = waves ? 10 : 1;
+    // A still layer is four quads, not one: SDL's software renderer (the
+    // last resort when no other works) left a lone quad out when tested.
+    const int columns = waves ? 40 : 2;
+    const int rows = waves ? 10 : 2;
     m_vertices.clear();
     m_indices.clear();
     const float middle_x = m_width * 0.5f;

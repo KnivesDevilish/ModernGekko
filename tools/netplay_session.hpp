@@ -23,9 +23,17 @@ enum class NetplayExitCode {
   GameRunning = 14,
   ServerFull = 15,
   NicknameRejected = 16,
-  // Joining with an invite code: no room answered to the code (mistyped,
-  // closed, or the host unreachable), or the invite server did not answer.
+  // Joining with an invite code: no room has that code (mistyped, or the
+  // room was closed).
   InviteCodeFailed = 17,
+  // The room exists, but its host's computer did not answer the invite
+  // server.
+  InviteHostSilent = 18,
+  // The room exists and its host answered, but the two computers could not
+  // reach each other (their connections don't allow it).
+  InviteConnectionBlocked = 19,
+  // The invite server did not answer this computer.
+  InviteServerUnreachable = 20,
 };
 
 struct NetplayOptions {

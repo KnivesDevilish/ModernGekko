@@ -1,6 +1,7 @@
 #include "netplay_session.hpp"
 
 #include "game_files_hash.hpp"
+#include "launcher_banner.hpp"
 #include "launcher_handoff.hpp"
 #include "launcher_music.hpp"
 #include "launcher_text.hpp"
@@ -8,6 +9,7 @@
 #include "netplay_address.hpp"
 #include "netplay_compatibility.hpp"
 #include "netplay_lobby_ui.hpp"
+#include "netplay_router.hpp"
 #include "runner_alerts.hpp"
 #include "runner_exit_code.hpp"
 
@@ -122,6 +124,25 @@ const char *TraversalFailureText(Common::TraversalClient::FailureReason reason) 
   return "unknown failure";
 }
 
+// Why joining with an invite code failed. Dolphin's alert says it when the
+// invite server answered for the room (its text, in English: Dolphin's
+// texts aren't translated here): "Invalid host" when no room has the code,
+// "Traversal server timed out connecting to the host" when the room's host
+// didn't answer the invite server. With no such alert, either the invite
+// server never answered this computer, or it did and the host answered too,
+// but the two computers couldn't reach each other: some connections (a
+// shared address from the internet provider, mobile data) don't let them.
+NetplayExitCode InviteFailure(const std::string &alert,
+                              bool invite_server_answered) {
+  if (alert == "Invalid host")
+    return NetplayExitCode::InviteCodeFailed;
+  if (alert.find("timed out connecting to the host") != std::string::npos)
+    return NetplayExitCode::InviteHostSilent;
+  if (!invite_server_answered)
+    return NetplayExitCode::InviteServerUnreachable;
+  return NetplayExitCode::InviteConnectionBlocked;
+}
+
 // The address this computer reaches the internet from, the one its router
 // knows it by: a UDP socket "connected" to a public address sends nothing,
 // but the system picks the address it would send from. Empty without a
@@ -220,6 +241,17 @@ public:
     return m_invite_code;
   }
   bool InviteServerFailed() const { return m_invite_server_failed.load(); }
+
+  // Host: the room's UDP port on the router, opened while the room is open
+  // (netplay_router.hpp), and closed with CloseRouterPort before networking
+  // shuts down.
+  void OpenRouterPort(u16 port) {
+    m_router_port = std::make_unique<RouterPortOpener>(port);
+  }
+  void CloseRouterPort() { m_router_port.reset(); }
+  RouterPort RouterPortState() const {
+    return m_router_port ? m_router_port->State() : RouterPort::Unknown;
+  }
 
   void ClearReadyState() {
     if (m_client)
@@ -393,6 +425,7 @@ private:
   std::atomic<bool> m_connection_lost{false};
   std::atomic<bool> m_invite_server_failed{false};
   std::string m_invite_code;
+  std::unique_ptr<RouterPortOpener> m_router_port;
   std::atomic<u32> m_buffer_size{5};
   std::unique_ptr<BootSessionData> m_boot_data;
   std::string m_error;
@@ -497,9 +530,12 @@ public:
     m_scale = display_scale > 0.0f ? display_scale : 1.0f;
     // The artwork's height sets the window's proportions; a small screen
     // gets a smaller window, and the lobby scrolls if it must. The size
-    // can't be changed after.
-    int width = static_cast<int>(1000 * m_scale);
-    int height = static_cast<int>(640 * m_scale);
+    // can't be changed after. With the background in layers, 16:9 like its
+    // pictures, and a little larger: the lobby shares it with the picture.
+    const bool layered = fs::exists(ExecutableDirectory() / "Resources" /
+                                    "lobby-background" / "layout.txt");
+    int width = static_cast<int>((layered ? 1200 : 1000) * m_scale);
+    int height = static_cast<int>((layered ? 675 : 640) * m_scale);
     SDL_Rect usable{};
     if (SDL_GetDisplayUsableBounds(display, &usable) && usable.w > 0 &&
         usable.h > 0) {
@@ -536,10 +572,15 @@ public:
     ImGui_ImplSDLRenderer3_Init(m_renderer);
     m_art = ui::LoadLauncherImage(m_renderer, release_directory,
                                   "lobby-art.png", "lobby art");
-    // Behind everything, with a floor that slides as in the launcher.
-    m_background = ui::LoadLauncherImage(m_renderer, release_directory,
-                                         "lobby-background.png",
-                                         "lobby background", true);
+    // Behind everything: the background in layers (Resources/
+    // lobby-background/, its flag waving as in the PLAY banner) or, without
+    // them, the flat picture, with a floor that slides as in the launcher.
+    if (!m_layers.Load(m_renderer,
+                       release_directory / "Resources" / "lobby-background",
+                       LOBBY_LAYERS_LARGEST_WIDTH))
+      m_background = ui::LoadLauncherImage(m_renderer, release_directory,
+                                           "lobby-background.png",
+                                           "lobby background", true);
     // Resources/lobby-music.mp3 loops while the lobby is open; the game
     // has its own sound.
     m_music.Play(release_directory / "Resources" / "lobby-music.mp3",
@@ -553,7 +594,12 @@ public:
   float Scale() const { return m_scale; }
   ImFont *Bold() const { return m_fonts.bold; }
   const LauncherImage &Art() const { return m_art; }
-  bool HasBackground() const { return m_background.texture != nullptr; }
+  bool HasBackground() const {
+    return m_layers.Loaded() || m_background.texture != nullptr;
+  }
+  // A light background in layers: the lobby goes on a dark card beside the
+  // picture, to be read.
+  bool HasLayeredBackground() const { return m_layers.Loaded(); }
 
   void Close() {
     if (!m_open)
@@ -565,6 +611,7 @@ public:
     if (m_art.texture)
       SDL_DestroyTexture(m_art.texture);
     m_art = {};
+    m_layers.Unload();
     if (m_background.texture)
       SDL_DestroyTexture(m_background.texture);
     m_background = {};
@@ -598,8 +645,11 @@ public:
                        io.DisplayFramebufferScale.y);
     SDL_SetRenderDrawColor(m_renderer, 8, 8, 9, 255);
     SDL_RenderClear(m_renderer);
-    ui::RenderBackground(m_renderer, m_background,
-                         static_cast<double>(SDL_GetTicksNS()) / 1e9);
+    const double now = static_cast<double>(SDL_GetTicksNS()) / 1e9;
+    if (m_layers.Loaded())
+      m_layers.DrawCover(m_renderer, now);
+    else
+      ui::RenderBackground(m_renderer, m_background, now);
     ImGui_ImplSDLRenderer3_RenderDrawData(ImGui::GetDrawData(), m_renderer);
     SDL_RenderPresent(m_renderer);
     // The lobby can be seen: the launcher steps aside.
@@ -611,7 +661,11 @@ private:
   SDL_Renderer *m_renderer = nullptr;
   float m_scale = 1.0f;
   LauncherFonts m_fonts;
+  // The layers' pictures are shrunk to this width at most (they are made
+  // 1920 wide; a 4K screen gets them as they are, scaled up).
+  static constexpr float LOBBY_LAYERS_LARGEST_WIDTH = 3840.0f;
   LauncherImage m_art;
+  ui::LayeredBanner m_layers;
   LauncherImage m_background;
   MusicPlayer m_music{LOBBY_APP_NAME};
   bool m_open = false;
@@ -735,6 +789,7 @@ bool RunLobbyWindow(RuntimeConfig &runtime_config,
     view.buffer = ui.BufferSize();
     view.automatic_buffer = server && options.buffer == "auto";
     view.invite_code = options.invite_code;
+    view.router_port = server ? ui.RouterPortState() : RouterPort::Unknown;
     if (options.invite_code) {
       // A joining player's address is the host's code.
       view.code = server ? ui.InviteCode() : options.address;
@@ -794,7 +849,8 @@ bool RunLobbyWindow(RuntimeConfig &runtime_config,
 
     const LobbyActions actions =
         DrawLobby(view, lobby_state, window.Art(), window.Bold(),
-                  window.Scale(), window.HasBackground());
+                  window.Scale(), window.HasBackground(),
+                  window.HasLayeredBackground());
     if (actions.toggled_controller >= 0 &&
         static_cast<std::size_t>(actions.toggled_controller) < available.size())
       ToggleController(available[actions.toggled_controller], runtime_config,
@@ -961,6 +1017,7 @@ int RunNetplayLobby(RuntimeConfig runtime_config, ConfigResult frontend_config,
     // out connecting to the host"...), and the launcher explains the
     // failure.
     const auto connect_started = std::chrono::steady_clock::now();
+    TakeQuietAlert();
     QuietAlerts() = true;
     client = std::make_unique<NetPlay::NetPlayClient>(
         options.address, options.port, &ui, options.nickname,
@@ -978,6 +1035,26 @@ int RunNetplayLobby(RuntimeConfig runtime_config, ConfigResult frontend_config,
   if (!client->IsConnected()) {
     const NetPlay::ConnectionError connection_error =
         client->GetConnectionError();
+    // With an invite code: whether the invite server ever answered this
+    // computer, and Dolphin's alert, if one came, tell why no one let it in.
+    const bool invite_server_answered =
+        Common::g_TraversalClient &&
+        Common::g_TraversalClient->GetState() ==
+            Common::TraversalClient::State::Connected;
+    const NetplayExitCode invite_failure =
+        InviteFailure(TakeQuietAlert(), invite_server_answered);
+    if (options.invite_code &&
+        connection_error == NetPlay::ConnectionError::NoError)
+      std::cerr << "netplay: invite code: "
+                << (invite_failure == NetplayExitCode::InviteCodeFailed
+                        ? "no room has it"
+                    : invite_failure == NetplayExitCode::InviteHostSilent
+                        ? "the room's host did not answer the invite server"
+                    : invite_failure == NetplayExitCode::InviteServerUnreachable
+                        ? "the invite server did not answer"
+                        : "the room answered, but the two computers could not "
+                          "reach each other")
+                << '\n';
     client.reset();
     server.reset();
     detail::SetExternalUICommon(false);
@@ -997,12 +1074,16 @@ int RunNetplayLobby(RuntimeConfig runtime_config, ConfigResult frontend_config,
       return static_cast<int>(NetplayExitCode::NicknameRejected);
     case NetPlay::ConnectionError::NoError:
       return static_cast<int>(options.invite_code
-                                  ? NetplayExitCode::InviteCodeFailed
+                                  ? invite_failure
                                   : NetplayExitCode::HostUnavailable);
     }
   }
   ui.SetClient(client.get());
   std::cerr << "netplay: connected; opening lobby\n";
+  // Friends in other houses reach the host through its router: asked to open
+  // the room's port meanwhile, in the background.
+  if (server)
+    ui.OpenRouterPort(server->GetPort());
 
   int result = 0;
   bool remain = true;
@@ -1036,6 +1117,7 @@ int RunNetplayLobby(RuntimeConfig runtime_config, ConfigResult frontend_config,
 
   client.reset();
   server.reset();
+  ui.CloseRouterPort();
   detail::SetExternalUICommon(false);
   UICommon::Shutdown();
   return result;

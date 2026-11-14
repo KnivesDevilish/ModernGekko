@@ -18,6 +18,7 @@
 #include "launcher_transition.hpp"
 #include "launcher_user_folder.hpp"
 #include "launcher_save.hpp"
+#include "launcher_splash.hpp"
 #include "launcher_ui.hpp"
 #include "launcher_update.hpp"
 #include "moderngekko/game.hpp"
@@ -2758,6 +2759,16 @@ int main(int argc, char** argv)
     return 1;
   }
   SDL_SetRenderVSync(renderer, 1);
+  // The launcher's opening (launcher_splash.hpp): the window shows its colour
+  // at once, and the rest from the launcher's first frame.
+  const SplashArt splash_art = LoadSplashArt(renderer, release_directory);
+  ClearToSplash(renderer, splash_art);
+  LauncherSplash splash;
+#if defined(MODERNGEKKO_PUBLISHER)
+  const std::string splash_credit = Format(Tr("Developed by %s"), MODERNGEKKO_PUBLISHER);
+#else
+  const std::string splash_credit;
+#endif
 
   IMGUI_CHECKVERSION();
   ImGui::CreateContext();
@@ -3373,9 +3384,13 @@ int main(int argc, char** argv)
   LoadingLogo loading_logo;
   // The music's volume as it fades out while the game starts.
   int music_level = config.music_volume;
-  // Why the game didn't start or failed, shown once the launcher is back.
+  // Why the game didn't start or failed, shown once the launcher is back, in
+  // a window of the launcher's own (a system message box doesn't wrap long
+  // lines everywhere: on Windows it can stretch across the screen). The log,
+  // when the game wrote one, gets a button that opens its folder.
   std::string session_error_title;
   std::string session_error;
+  fs::path session_error_log;
   // Starts the game (PLAY, Host or Join). The launcher goes black, unless it
   // is already (`from_black`: the game selection screen ends in black), and
   // the main loop waits for the game. False, with a message for when the
@@ -3390,6 +3405,7 @@ int main(int argc, char** argv)
     {
       session_error_title = Tr("Launch failed");
       session_error = launch_error;
+      session_error_log.clear();
       transition.Back(now);
       return false;
     }
@@ -3523,6 +3539,7 @@ int main(int argc, char** argv)
       session_error_title = Tr("Launch failed");
       session_error = Format(Tr("Could not start %s: %s"), SiblingRunner(argv[0]).string().c_str(),
                              process_error.c_str());
+      session_error_log.clear();
       transition.Back(now);
       return false;
     }
@@ -3604,21 +3621,31 @@ int main(int argc, char** argv)
         launch_error = Tr("The nickname was rejected by the host.");
         break;
       case moderngekko::frontend::NetplayExitCode::InviteCodeFailed:
-        launch_error = Tr("No room answered to that invite code. Check that it is typed "
-                          "right and that the host's room is still open. In the same "
-                          "house, use Direct IP with the host's At home address: invite "
-                          "codes often fail there. If it keeps failing, your connection "
-                          "may not allow invite codes: try Direct IP with Tailscale.");
+        launch_error = Tr("No room has that invite code. Check that it is typed right and "
+                          "that the host's room is still open.");
+        break;
+      case moderngekko::frontend::NetplayExitCode::InviteHostSilent:
+        launch_error = Tr("The room exists, but the host's computer did not answer. The "
+                          "host can close the room, open it again and share the new code.");
+        break;
+      case moderngekko::frontend::NetplayExitCode::InviteConnectionBlocked:
+        launch_error = Tr("The room exists, but your two connections could not reach each "
+                          "other. Some internet providers and mobile data don't allow it. "
+                          "Try with the other player hosting. In the same house, use "
+                          "Direct IP with the At home address.");
+        break;
+      case moderngekko::frontend::NetplayExitCode::InviteServerUnreachable:
+        launch_error = Tr("The invite server did not answer. Check your internet connection "
+                          "and try again.");
         break;
       default:
-        launch_error = Tr("Could not reach the host. Check the address and the UDP port: "
-                          "in the same house, use the address the host's lobby shows "
-                          "under At home. If they are right, the host's firewall is "
-                          "probably blocking the game: on Windows, the host can allow it "
-                          "in Host Netplay; on Linux, the host opens the UDP port (the "
-                          "README says how).");
+        launch_error = Tr("Could not reach the host. Check the address and the UDP port. If "
+                          "they are right, the host's firewall or router is blocking the game "
+                          "(on Windows, the host can allow it in Host Netplay), or try an "
+                          "invite code.");
         break;
       }
+      session_error_title = Tr("Could not join");
     }
     else if (mode == LaunchMode::Host)
     {
@@ -3641,10 +3668,10 @@ int main(int argc, char** argv)
     {
       launch_error = Format(Tr("The game process exited with code %d."), exit_code);
     }
-    if (ended.log_written)
-      launch_error += Format(Tr("\n\nDetails were written to:\n%s"), ended.log_path.string().c_str());
-    session_error_title = Tr("Session failed");
+    if (!(waited && mode == LaunchMode::Join))
+      session_error_title = Tr("Session failed");
     session_error = std::move(launch_error);
+    session_error_log = ended.log_written ? ended.log_path : fs::path();
     result = 1;
   };
   // Shows a page the way its sidebar item does, with what opening it reads
@@ -3722,6 +3749,7 @@ int main(int argc, char** argv)
     SDL_FlushEvents(SDL_EVENT_FIRST, SDL_EVENT_LAST);
     refresh_controllers();
   };
+  splash.Start(static_cast<double>(SDL_GetTicksNS()) / 1e9);
   while (!done)
   {
     bool controllers_changed = false;
@@ -3808,15 +3836,6 @@ int main(int argc, char** argv)
         after_game();
       }
     }
-    // Why the game failed, once the launcher is back.
-    if (!session.process && !session_error.empty() &&
-        !transition.Active(static_cast<double>(SDL_GetTicksNS()) / 1e9))
-    {
-      SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, session_error_title.c_str(),
-                               session_error.c_str(), window);
-      session_error.clear();
-      pad_waits_for_release = true;
-    }
     // All black (the loading screen): the pages aren't drawn.
     {
       const double now = static_cast<double>(SDL_GetTicksNS()) / 1e9;
@@ -3851,9 +3870,10 @@ int main(int argc, char** argv)
     }
     page_by_shoulder = false;
     const bool testing_controls = current_page == LauncherPage::Controls && controls_testing;
-    // While the launcher goes to black or comes back from it, nothing in it
-    // answers.
-    const bool fading = transition.Active(static_cast<double>(SDL_GetTicksNS()) / 1e9);
+    // While the launcher goes to black or comes back from it, or opens,
+    // nothing in it answers.
+    const bool fading = transition.Active(static_cast<double>(SDL_GetTicksNS()) / 1e9) ||
+                        splash.Active(static_cast<double>(SDL_GetTicksNS()) / 1e9);
     if (fading)
       io.ConfigFlags |= ImGuiConfigFlags_NoMouse;
     else
@@ -3929,6 +3949,16 @@ int main(int argc, char** argv)
         last_input = LastInput::Mouse;
       if (!pad_down)
         pad_waits_for_release = false;
+      // Any key, click or button skips the opening; a gamepad's then moves
+      // nothing until it is let go.
+      const double now = static_cast<double>(SDL_GetTicksNS()) / 1e9;
+      if (splash.Active(now) && !splash.Leaving(now) &&
+          (pad_pressed || key_pressed || ImGui::IsMouseClicked(ImGuiMouseButton_Left) ||
+           ImGui::IsMouseClicked(ImGuiMouseButton_Right)))
+      {
+        splash.Skip(now);
+        pad_waits_for_release = pad_waits_for_release || pad_pressed;
+      }
     }
     // Escape or B in a window of ours (Netplay, the complete save's
     // question) is its Cancel. Not when it ends typing in a text box.
@@ -5900,6 +5930,49 @@ int main(int argc, char** argv)
       }
     }
 
+    // Why the game failed, once the launcher is back: a window of the
+    // launcher's, as narrow as its other questions, over everything else.
+    if (!session.process && !session_error.empty() && !fading &&
+        !ImGui::IsPopupOpen("##session_error"))
+      ImGui::OpenPopup("##session_error");
+    ImGui::SetNextWindowPos(ImGui::GetMainViewport()->GetCenter(), ImGuiCond_Appearing,
+                            ImVec2(0.5f, 0.5f));
+    ImGui::SetNextWindowSize(ImVec2(460 * scale, 0.0f));
+    if (ImGui::BeginPopupModal("##session_error", nullptr,
+                               ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoTitleBar))
+    {
+      ImGui::PushFont(fonts.bold, 0.0f);
+      ImGui::TextUnformatted(session_error_title.c_str());
+      ImGui::PopFont();
+      ImGui::Spacing();
+      ImGui::PushTextWrapPos(0.0f);
+      ImGui::TextUnformatted(session_error.c_str());
+      ImGui::PopTextWrapPos();
+      ImGui::Spacing();
+      bool close = false;
+      if (ImGui::IsWindowAppearing())
+        ImGui::SetKeyboardFocusHere();
+      if (ImGui::Button(Tr("OK")) || popup_cancel)
+        close = true;
+      // The details are in the log: its folder opens, for the player to
+      // look at it or attach it to a report.
+      if (!session_error_log.empty())
+      {
+        ImGui::SameLine();
+        if (ImGui::Button(Tr("Open the log folder")))
+          OpenFolder(session_error_log.parent_path());
+      }
+      if (close)
+      {
+        ImGui::CloseCurrentPopup();
+        session_error.clear();
+        session_error_log.clear();
+        // The gamepad's A or B, still held, moves nothing behind it.
+        pad_waits_for_release = true;
+      }
+      ImGui::EndPopup();
+    }
+
     // The launcher going to black before the game, or coming back after.
     if (fading)
     {
@@ -5907,6 +5980,10 @@ int main(int argc, char** argv)
       const double now = static_cast<double>(SDL_GetTicksNS()) / 1e9;
       DrawLoadingScreen(ImGui::GetForegroundDrawList(), viewport->Pos, viewport->Size, transition,
                         now, loading_logo, scale, loading_text(now));
+      // Or opening.
+      DrawLauncherSplash(ImGui::GetForegroundDrawList(), viewport->Pos, viewport->Size, splash,
+                         now, splash_art, scale, fonts.bold, MODERNGEKKO_FRONTEND_NAME,
+                         splash_credit);
     }
 
     ImGui::Render();
@@ -5962,6 +6039,8 @@ int main(int argc, char** argv)
     SDL_DestroyTexture(background.texture);
   // Its thread stops and its pictures go before the renderer.
   screenshot_gallery.reset();
+  if (splash_art.texture)
+    SDL_DestroyTexture(splash_art.texture);
   SDL_DestroyRenderer(renderer);
   SDL_DestroyWindow(window);
   SDL_Quit();

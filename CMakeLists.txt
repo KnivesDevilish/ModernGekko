@@ -48,7 +48,8 @@ string(REPLACE ";" "|" MODERNGEKKO_PREVIOUS_USER_DIRECTORY_NAMES_DEFINITION
 # Windows launcher says it is in its details and the Task Manager.
 set(MODERNGEKKO_LAUNCHER_TITLE "" CACHE STRING
     "Launcher window title (the frontend name when empty)")
-# Who makes the build, in the Windows executables' details.
+# Who makes the build, in the Windows executables' details and on the
+# launcher's opening ("Developed by ...").
 set(MODERNGEKKO_PUBLISHER "" CACHE STRING
     "Publisher in the Windows executables' details (Properties > Details)")
 set(MODERNGEKKO_REQUIRED_DISC_ID "" CACHE STRING
@@ -120,6 +121,12 @@ set(MODERNGEKKO_LOBBY_MUSIC "" CACHE FILEPATH
     "Optional MP3 that loops while the Netplay lobby is open")
 set(MODERNGEKKO_LOBBY_BACKGROUND "" CACHE FILEPATH
     "Optional picture behind the Netplay lobby")
+# A folder with the lobby's background in layers, that move: layout.txt and its
+# pictures, as the PLAY banner's (tools/launcher_banner_layout.hpp), copied to
+# Resources/lobby-background. With it the lobby shows it, with the lobby on a
+# dark card beside its left part, instead of MODERNGEKKO_LOBBY_BACKGROUND.
+set(MODERNGEKKO_LOBBY_BACKGROUND_LAYERS "" CACHE PATH
+    "Optional folder with the Netplay lobby's background in layers (layout.txt and its PNGs)")
 set(MODERNGEKKO_LAUNCHER_PATCH_NOTES "" CACHE FILEPATH
     "Optional UTF-8 text shown in the PLAY page's PATCH NOTES panel")
 # A folder with borders.txt and its pictures (format in tools/game_borders.hpp):
@@ -264,7 +271,15 @@ if(MODERNGEKKO_ENABLE_DOLPHIN_RUNTIME)
     set(USE_RETRO_ACHIEVEMENTS OFF CACHE BOOL "" FORCE)
     set(USE_DISCORD_PRESENCE OFF CACHE BOOL "" FORCE)
     set(USE_MGBA OFF CACHE BOOL "" FORCE)
-    set(USE_UPNP OFF CACHE BOOL "" FORCE)
+    # UPnP: the Netplay host asks its router to open the room's UDP port
+    # (tools/netplay_router.cpp), with the vendored Dolphin's own miniupnpc,
+    # when that submodule is there; without it, Netplay just doesn't ask.
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/vendor/dolphin/Externals/miniupnpc/miniupnp/miniupnpc/CMakeLists.txt")
+        set(USE_UPNP ON CACHE BOOL "" FORCE)
+        set(USE_SYSTEM_MINIUPNPC OFF CACHE BOOL "" FORCE)
+    else()
+        set(USE_UPNP OFF CACHE BOOL "" FORCE)
+    endif()
     set(ENCODE_FRAMEDUMPS OFF CACHE BOOL "" FORCE)
     set(ENABLE_LLVM OFF CACHE BOOL "" FORCE)
     # Cubeb is Dolphin's only audio backend on macOS
@@ -615,6 +630,7 @@ if(MODERNGEKKO_ENABLE_DOLPHIN_RUNTIME)
     add_executable(moderngekko-run
         tools/moderngekko_run.cpp
         tools/netplay_compatibility.cpp
+        tools/netplay_router.cpp
         tools/netplay_session.cpp
         tools/frontend_config.cpp
         tools/dol_patch.cpp
@@ -649,6 +665,10 @@ if(MODERNGEKKO_ENABLE_DOLPHIN_RUNTIME)
     endif()
     target_link_libraries(moderngekko-run PRIVATE
         ModernGekko::Runtime core uicommon imgui ${_moderngekko_sdl_target})
+    if(TARGET Miniupnpc::miniupnpc)
+        target_link_libraries(moderngekko-run PRIVATE Miniupnpc::miniupnpc)
+        target_compile_definitions(moderngekko-run PRIVATE MODERNGEKKO_UPNP=1)
+    endif()
     set_target_properties(moderngekko-run PROPERTIES
         OUTPUT_NAME "${MODERNGEKKO_RUNNER_OUTPUT_NAME}")
     # The Netplay lobby uses the launcher's UTF-8 translations.
@@ -736,6 +756,10 @@ if(MODERNGEKKO_ENABLE_DOLPHIN_RUNTIME)
     # grid floor in it slides as in the launcher (tools/moving_background.hpp).
     moderngekko_add_resource(moderngekko-run "${MODERNGEKKO_LOBBY_BACKGROUND}"
                              lobby-background.png)
+    # Resources/lobby-background: the same in layers, that move
+    # (tools/launcher_banner.hpp); shown instead when it is there.
+    moderngekko_add_resource_folder(moderngekko-run "${MODERNGEKKO_LOBBY_BACKGROUND_LAYERS}"
+                                    lobby-background)
     # And plays Resources/lobby-music.mp3 (decoded by tools/third_party/dr_mp3.h,
     # see moderngekko_use_music_output for where the sound goes).
     moderngekko_add_resource(moderngekko-run "${MODERNGEKKO_LOBBY_MUSIC}" lobby-music.mp3)
@@ -808,6 +832,10 @@ if(MODERNGEKKO_ENABLE_DOLPHIN_RUNTIME)
     if(MODERNGEKKO_LAUNCHER_TITLE)
         target_compile_definitions(moderngekko-launcher PRIVATE
             MODERNGEKKO_LAUNCHER_TITLE="${MODERNGEKKO_LAUNCHER_TITLE}")
+    endif()
+    if(MODERNGEKKO_PUBLISHER)
+        target_compile_definitions(moderngekko-launcher PRIVATE
+            MODERNGEKKO_PUBLISHER="${MODERNGEKKO_PUBLISHER}")
     endif()
     if(MODERNGEKKO_PREVIOUS_USER_DIRECTORY_NAMES)
         target_compile_definitions(moderngekko-launcher PRIVATE

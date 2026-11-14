@@ -12,6 +12,7 @@
 #include "launcher_text.hpp"
 #include "launcher_ui.hpp"
 #include "netplay_address.hpp"
+#include "netplay_router.hpp"
 
 #include <imgui.h>
 
@@ -64,6 +65,7 @@ struct LobbyView
   std::string code;                     // the room's code; empty while the host waits for it
   bool invite_server_failed = false;    // host: the invite server stopped answering
   std::vector<LobbyAddress> addresses;  // host with an address: this computer's addresses
+  RouterPort router_port = RouterPort::Unknown;  // host: what its router did with the port
   std::string host_address;             // client with an address: the one it connected to
   std::array<LobbySeat, 4> seats;       // P1 to P4
   std::vector<LobbySeat> without_seat;  // connected players who hold no seat
@@ -273,11 +275,81 @@ inline bool DrawLobbyButton(const char* label, ImVec2 size, LobbyButtonLook look
   return clicked;
 }
 
+// Host: whether friends in other houses can reach this computer, from what
+// its router said (netplay_router.hpp). Nothing when no router answered.
+inline void DrawRouterPortLine(RouterPort router_port)
+{
+  switch (router_port)
+  {
+  case RouterPort::Checking:
+    ImGui::TextDisabled("%s", Tr("Checking your router..."));
+    break;
+  case RouterPort::Opened:
+    ImGui::TextColored(LAUNCHER_ACCENT, "%s",
+                       Tr("Your router opened the port: friends can reach you."));
+    break;
+  case RouterPort::Shared:
+    ImGui::TextColored(LOBBY_AMBER, "%s",
+                       Tr("Shared connection (CGNAT): if friends can't get in, let another "
+                          "player host."));
+    break;
+  case RouterPort::Refused:
+    ImGui::TextColored(LOBBY_AMBER, "%s",
+                       Tr("Your router kept the port closed: if friends can't get in, let "
+                          "another player host."));
+    break;
+  case RouterPort::Unknown:
+    break;
+  }
+}
+
+// The lobby's title, large and dark, over the light background's left part
+// (`width` wide, from the cursor; the background puts its picture under it):
+// centred in that width, the top of its capitals level with the top of the
+// card beside it, and leaning forward, as the game's own titles do. A narrow
+// window gets a smaller title.
+inline void DrawLobbyTitle(float width, ImFont* bold)
+{
+  static constexpr const char* TITLE = "NETPLAY";
+  static constexpr float LEAN = 0.2f;  // sideways per pixel up (about 11 degrees)
+  const ImVec2 origin = ImGui::GetCursorScreenPos();
+  float size = ImGui::GetStyle().FontSizeBase * 3.6f;
+  ImGui::PushFont(bold, size);
+  const float widest = width * 0.85f;
+  if (const float wide = ImGui::CalcTextSize(TITLE).x; wide > widest)
+  {
+    ImGui::PopFont();
+    size *= widest / wide;
+    ImGui::PushFont(bold, size);
+  }
+  const ImFontGlyph* capital = ImGui::GetFontBaked()->FindGlyphNoFallback('N');
+  const float capitals_top = capital ? capital->Y0 : 0.0f;
+  const float baseline = capital ? capital->Y1 : ImGui::GetFontSize() * 0.8f;
+  const ImVec2 extent = ImGui::CalcTextSize(TITLE);
+  // Leaning moves the top of the capitals right; half of that back, so the
+  // title still looks centred.
+  const ImVec2 position(origin.x + (width - extent.x) * 0.5f -
+                            (baseline - capitals_top) * LEAN * 0.5f,
+                        origin.y - capitals_top);
+  ImDrawList* draw_list = ImGui::GetWindowDrawList();
+  const int first_vertex = draw_list->VtxBuffer.Size;
+  draw_list->AddText(position, IM_COL32(17, 17, 19, 255), TITLE);
+  // The lean: each point of the letters goes right by how far it is above
+  // the baseline.
+  for (int i = first_vertex; i < draw_list->VtxBuffer.Size; ++i)
+    draw_list->VtxBuffer[i].pos.x += (position.y + baseline - draw_list->VtxBuffer[i].pos.y) * LEAN;
+  ImGui::PopFont();
+}
+
 // The whole lobby window, filling the SDL window. over_background: a
 // background picture is drawn under it (lobby-background.png), so the
-// window lets it show; the panels keep their colour.
+// window lets it show; the panels keep their colour. on_card: that
+// background is the light one in layers (lobby-background/): its left part
+// is left to be seen, with the lobby's title over it, and the lobby goes on
+// a dark card beside it, where its text can be read.
 inline LobbyActions DrawLobby(const LobbyView& view, LobbyState& state, const LauncherImage& art,
-                              ImFont* bold, float scale, bool over_background = false)
+                              ImFont* bold, float scale, bool over_background = false,
+                              bool on_card = false)
 {
   LobbyActions actions;
   const ImGuiStyle& style = ImGui::GetStyle();
@@ -286,15 +358,24 @@ inline LobbyActions DrawLobby(const LobbyView& view, LobbyState& state, const La
   ImGui::SetNextWindowSize(viewport->WorkSize);
   if (over_background)
     ImGui::SetNextWindowBgAlpha(0.0f);
+  // On the card: a margin all round, so the background frames it; thinner
+  // in a short window (a small screen), where the lobby needs the height.
+  const bool roomy = viewport->WorkSize.y >= 660.0f * scale;
+  const float margin = (roomy ? 28.0f : 12.0f) * scale;
+  if (on_card)
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(margin, margin));
   ImGui::Begin("Netplay", nullptr,
                ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove |
                    ImGuiWindowFlags_NoSavedSettings);
+  if (on_card)
+    ImGui::PopStyleVar();
 
   // Left: the artwork, as tall as the window. A narrow window shrinks it
   // (never crops it) so the lobby keeps a usable width, and hides it when it
   // would be too small to make out.
   const float height = ImGui::GetContentRegionAvail().y;
   const float gap = 18.0f * scale;
+  bool art_drawn = false;
   if (art.texture && art.aspect > 0.0f)
   {
     const float room = ImGui::GetContentRegionAvail().x - gap - 480.0f * scale;
@@ -309,28 +390,79 @@ inline LobbyActions DrawLobby(const LobbyView& view, LobbyState& state, const La
           ImVec2(1.0f, 1.0f), IM_COL32_WHITE, style.ChildRounding);
       ImGui::Dummy(ImVec2(size.x, height));
       ImGui::SameLine(0.0f, gap);
+      art_drawn = true;
+    }
+  }
+  // On the card, without artwork: the background's left part, with its
+  // picture, stays clear, while the lobby keeps a usable width. The title
+  // goes there, over the picture, and not on the card as well.
+  bool title_outside = false;
+  if (on_card && !art_drawn)
+  {
+    const float available = ImGui::GetContentRegionAvail().x;
+    const float open = std::min(available * 0.4f, available - 560.0f * scale - gap);
+    if (open >= 120.0f * scale)
+    {
+      DrawLobbyTitle(open, bold);
+      ImGui::Dummy(ImVec2(open, height));
+      ImGui::SameLine(0.0f, gap);
+      title_outside = true;
     }
   }
 
-  // Right: the lobby.
-  ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
-  ImGui::BeginChild("##lobby", ImVec2(0.0f, height), ImGuiChildFlags_NavFlattened);
+  // Right: the lobby, on the background or on its card.
+  const ImVec2 card_padding = roomy ? ImVec2(22.0f * scale, 18.0f * scale)
+                                    : ImVec2(16.0f * scale, 10.0f * scale);
+  if (on_card)
+  {
+    ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.067f, 0.067f, 0.075f, 0.88f));
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, card_padding);
+    ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 14.0f * scale);
+  }
+  else
+  {
+    ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
+  }
+  ImGui::BeginChild("##lobby", ImVec2(0.0f, height),
+                    ImGuiChildFlags_NavFlattened |
+                        (on_card ? ImGuiChildFlags_AlwaysUseWindowPadding : 0));
+  if (on_card)
+    ImGui::PopStyleVar(2);
   ImGui::PopStyleColor();
 
-  ImGui::PushFont(bold, style.FontSizeBase * 1.35f);
-  ImGui::AlignTextToFramePadding();
-  ImGui::TextUnformatted("Netplay");
-  ImGui::PopFont();
-  ImGui::SameLine();
-  DrawStatusPill(view.hosting ? Tr("HOST") : Tr("CONNECTED"), LAUNCHER_ACCENT, scale, true);
+  const char* role = view.hosting ? Tr("HOST") : Tr("CONNECTED");
   const std::string core = view.hosting
                                ? Format(Tr("CPU core for every player: %s"), view.cpu_core.c_str())
                                : std::string(Tr("CPU core: the host's choice"));
   const std::string buffer = Format(Tr("Input buffer: %u frames%s"), view.buffer,
                                     view.automatic_buffer ? " (auto)" : "");
-  ImGui::PushTextWrapPos(0.0f);
-  ImGui::TextDisabled("%s  \xC2\xB7  %s", core.c_str(), buffer.c_str());
-  ImGui::PopTextWrapPos();
+  if (title_outside)
+  {
+    // The title is beside the card: the card starts with the settings, and
+    // the role at their right.
+    const ImVec2 line = ImGui::GetCursorPos();
+    DrawStatusPill(role, LAUNCHER_ACCENT, scale, true);
+    const float role_left = ImGui::GetItemRectMin().x - ImGui::GetWindowPos().x;
+    const float below_role = ImGui::GetCursorPosY();
+    ImGui::SetCursorPos(line);
+    ImGui::AlignTextToFramePadding();
+    ImGui::PushTextWrapPos(role_left - style.ItemSpacing.x * 2.0f);
+    ImGui::TextDisabled("%s  \xC2\xB7  %s", core.c_str(), buffer.c_str());
+    ImGui::PopTextWrapPos();
+    ImGui::SetCursorPosY(std::max(ImGui::GetCursorPosY(), below_role));
+  }
+  else
+  {
+    ImGui::PushFont(bold, style.FontSizeBase * 1.35f);
+    ImGui::AlignTextToFramePadding();
+    ImGui::TextUnformatted("Netplay");
+    ImGui::PopFont();
+    ImGui::SameLine();
+    DrawStatusPill(role, LAUNCHER_ACCENT, scale, true);
+    ImGui::PushTextWrapPos(0.0f);
+    ImGui::TextDisabled("%s  \xC2\xB7  %s", core.c_str(), buffer.c_str());
+    ImGui::PopTextWrapPos();
+  }
   ImGui::Spacing();
 
   if (view.hosting && view.invite_code)
@@ -353,6 +485,7 @@ inline LobbyActions DrawLobby(const LobbyView& view, LobbyState& state, const La
       DrawInviteCodeRow(view.code, true, state, bold, scale);
       ImGui::TextDisabled("%s", Tr("Your friends type it in Join Netplay, under Invite code. "
                                    "Anyone who sees it can join: keep it off your stream."));
+      DrawRouterPortLine(view.router_port);
     }
     else
     {
@@ -378,6 +511,8 @@ inline LobbyActions DrawLobby(const LobbyView& view, LobbyState& state, const La
                                   ? Tr("No network found. Connect this computer to your Wi-Fi "
                                        "or to Tailscale.")
                                   : Tr("Your friends type this address in Join Netplay."));
+    if (!view.addresses.empty())
+      DrawRouterPortLine(view.router_port);
     ImGui::PopTextWrapPos();
     EndSection();
   }
@@ -468,8 +603,10 @@ inline LobbyActions DrawLobby(const LobbyView& view, LobbyState& state, const La
           ImGui::CalcTextSize(text->c_str(), nullptr, false, wrap_width).y + style.ItemSpacing.y;
   }
   const float buttons_height = 46.0f * scale;
-  ImGui::SetCursorPosY(std::max(ImGui::GetCursorPosY(), ImGui::GetWindowHeight() - buttons_height -
-                                                            style.ItemSpacing.y - notes_height));
+  // On the card, its padding stays below them.
+  const float bottom = ImGui::GetWindowHeight() - (on_card ? card_padding.y : 0.0f);
+  ImGui::SetCursorPosY(std::max(ImGui::GetCursorPosY(),
+                                bottom - buttons_height - style.ItemSpacing.y - notes_height));
 
   const char* ready_label = view.local_ready ? Tr("READY  \xC2\xB7  CANCEL") : Tr("I'M READY");
   const LobbyButtonLook ready_look =

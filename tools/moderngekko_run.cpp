@@ -85,8 +85,10 @@ bool HandleAlert(const char *caption, const char *text, bool yes_no,
   });
   if (lower.find("video backend") != std::string::npos)
     s_graphics_failed = true;
-  if (moderngekko::frontend::QuietAlerts())
+  if (moderngekko::frontend::QuietAlerts()) {
+    moderngekko::frontend::RememberQuietAlert(message);
     return false;
+  }
   constexpr std::string_view graphics[] = {"video backend", "vulkan",
                                            "direct3d", "d3d", "opengl"};
   if (std::ranges::any_of(graphics, [&](std::string_view word) {

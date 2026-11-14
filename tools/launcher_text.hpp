@@ -383,23 +383,29 @@ inline constexpr Translation SPANISH_TEXTS[] = {
     {"The host has already started the game.", "El anfitrión ya empezó la partida."},
     {"The netplay server is full.", "El servidor de Netplay está lleno."},
     {"The nickname was rejected by the host.", "El anfitrión rechazó el apodo."},
-    {"No room answered to that invite code. Check that it is typed right and that the host's "
-     "room is still open. In the same house, use Direct IP with the host's At home address: "
-     "invite codes often fail there. If it keeps failing, your connection may not allow invite "
-     "codes: try Direct IP with Tailscale.",
-     "Ninguna sala respondió a ese código de invitación. Revisa que esté bien escrito y que la "
-     "sala del anfitrión siga abierta. En la misma casa, usa IP directa con la dirección En casa "
-     "del anfitrión: ahí los códigos de invitación suelen fallar. Si sigue fallando, puede que "
-     "tu conexión no permita códigos de invitación: prueba IP directa con Tailscale."},
-    {"Could not reach the host. Check the address and the UDP port: in the same house, use the "
-     "address the host's lobby shows under At home. If they are right, the host's firewall is "
-     "probably blocking the game: on Windows, the host can allow it in Host Netplay; on Linux, "
-     "the host opens the UDP port (the README says how).",
-     "No se pudo contactar con el anfitrión. Revisa la dirección y el puerto UDP: en la misma "
-     "casa, usa la dirección que la sala del anfitrión muestra en En casa. Si están bien, lo más "
-     "probable es que el firewall del anfitrión esté bloqueando el juego: en Windows, el "
-     "anfitrión puede permitirlo en Crear Netplay; en Linux, el anfitrión abre el puerto UDP (el "
-     "README explica cómo)."},
+    {"No room has that invite code. Check that it is typed right and that the host's room is "
+     "still open.",
+     "No hay ninguna sala con ese código de invitación. Revisa que esté bien escrito y que la "
+     "sala del anfitrión siga abierta."},
+    {"The room exists, but the host's computer did not answer. The host can close the room, "
+     "open it again and share the new code.",
+     "La sala existe, pero el equipo del anfitrión no respondió. El anfitrión puede cerrar la "
+     "sala, abrirla otra vez y compartir el código nuevo."},
+    {"The room exists, but your two connections could not reach each other. Some internet "
+     "providers and mobile data don't allow it. Try with the other player hosting. In the "
+     "same house, use Direct IP with the At home address.",
+     "La sala existe, pero sus dos conexiones no lograron comunicarse. Algunas compañías de "
+     "internet y los datos móviles no lo permiten. Prueben con el otro jugador como "
+     "anfitrión. En la misma casa, usen IP directa con la dirección En casa."},
+    {"The invite server did not answer. Check your internet connection and try again.",
+     "El servidor de invitaciones no respondió. Revisa tu conexión a internet y vuelve a "
+     "intentarlo."},
+    {"Could not reach the host. Check the address and the UDP port. If they are right, the "
+     "host's firewall or router is blocking the game (on Windows, the host can allow it in "
+     "Host Netplay), or try an invite code.",
+     "No se pudo contactar con el anfitrión. Revisa la dirección y el puerto UDP. Si están "
+     "bien, el firewall o el router del anfitrión está bloqueando el juego (en Windows, el "
+     "anfitrión puede permitirlo en Crear Netplay), o prueben con un código de invitación."},
     {"If your friends can't connect, the Windows firewall may be blocking the game. Windows asks "
      "for permission to change it.",
      "Si tus amigos no pueden conectarse, puede que el firewall de Windows esté bloqueando el "
@@ -425,7 +431,10 @@ inline constexpr Translation SPANISH_TEXTS[] = {
      "soporten. Elige otro en Ajustes, en GRÁFICOS, y pulsa JUGAR otra vez."},
     {"On Windows, Direct3D 11 works on almost every PC.",
      "En Windows, Direct3D 11 funciona en casi cualquier PC."},
-    {"\n\nDetails were written to:\n%s", "\n\nLos detalles se guardaron en:\n%s"},
+    {"Could not join", "No se pudo entrar a la sala"},
+    {"Open the log folder", "Abrir la carpeta del registro"},
+    {"OK", "Aceptar"},
+    {"Developed by %s", "Desarrollado por %s"},
     {"Session failed", "La sesión falló"},
     {"Checking the game files: %d%%", "Comprobando los archivos del juego: %d%%"},
     {"Only the first time: Netplay makes sure every player has the same game.",
@@ -451,6 +460,13 @@ inline constexpr Translation SPANISH_TEXTS[] = {
      "it off your stream.",
      "Tus amigos lo escriben en Unirse a Netplay, en Código de invitación. Quien lo vea puede "
      "entrar: no lo muestres en directo."},
+    {"Checking your router...", "Consultando a tu router..."},
+    {"Your router opened the port: friends can reach you.",
+     "Tu router abrió el puerto: tus amigos pueden llegar a ti."},
+    {"Shared connection (CGNAT): if friends can't get in, let another player host.",
+     "Conexión compartida (CGNAT): si no logran entrar, que hospede otro jugador."},
+    {"Your router kept the port closed: if friends can't get in, let another player host.",
+     "Tu router no abrió el puerto: si no logran entrar, que hospede otro jugador."},
     {"Asking the invite server for a code...", "Pidiendo un código al servidor de invitaciones..."},
     {"The invite server did not answer. Check the internet connection, or close the room and "
      "host with Direct IP.",
@@ -919,24 +935,31 @@ inline constexpr Translation JAPANESE_TEXTS[] = {
     {"The host has already started the game.", "ホストはすでにゲームを開始しています。"},
     {"The netplay server is full.", "ネットプレイのサーバーが満員です。"},
     {"The nickname was rejected by the host.", "ホストにニックネームを拒否されました。"},
-    {"No room answered to that invite code. Check that it is typed right and that the host's "
-     "room is still open. In the same house, use Direct IP with the host's At home address: "
-     "invite codes often fail there. If it keeps failing, your connection may not allow invite "
-     "codes: try Direct IP with Tailscale.",
-     "その招待コードに応答するルームがありませんでした。入力が正しいか、ホストのルーム"
-     "がまだ開いているか確認してください。同じ家の中では、ホストの「自宅」のアドレスで"
-     "IP直接接続を使ってください。招待コードはそこではよく失敗します。それでも失敗する"
-     "場合は、お使いの接続が招待コードに対応していない可能性があります。TailscaleでのI"
-     "P直接接続をお試しください。"},
-    {"Could not reach the host. Check the address and the UDP port: in the same house, use the "
-     "address the host's lobby shows under At home. If they are right, the host's firewall is "
-     "probably blocking the game: on Windows, the host can allow it in Host Netplay; on Linux, "
-     "the host opens the UDP port (the README says how).",
-     "ホストに接続できませんでした。アドレスとUDPポートを確認してください。同じ家の中では"
-     "、ホストのロビーの「自宅」に表示されるアドレスを使ってください。正しい場合は、ホスト"
-     "のファイアウォールがゲームをブロックしている可能性が高いです。Windowsでは、ホストが"
-     "「ネットプレイを作成」で許可できます。Linuxでは、ホストがUDPポートを開きます（方法は"
-     "READMEにあります）。"},
+    {"No room has that invite code. Check that it is typed right and that the host's room is "
+     "still open.",
+     "その招待コードのルームはありません。入力が正しいか、ホストのルームがまだ開いてい"
+     "るか確認してください。"},
+    {"The room exists, but the host's computer did not answer. The host can close the room, "
+     "open it again and share the new code.",
+     "ルームはありますが、ホストのPCが応答しませんでした。ホストはルームを閉じて開き"
+     "直し、新しいコードを共有してください。"},
+    {"The room exists, but your two connections could not reach each other. Some internet "
+     "providers and mobile data don't allow it. Try with the other player hosting. In the "
+     "same house, use Direct IP with the At home address.",
+     "ルームはありますが、2人のPCがお互いに接続できませんでした。インターネットのプ"
+     "ロバイダーやモバイルデータによっては、これができません。もう1人のプレイヤーがホ"
+     "ストになって試してください。同じ家の中では、「自宅」のアドレスでIP直接接続を使っ"
+     "てください。"},
+    {"The invite server did not answer. Check your internet connection and try again.",
+     "招待サーバーから応答がありません。インターネット接続を確認して、もう一度お試しく"
+     "ださい。"},
+    {"Could not reach the host. Check the address and the UDP port. If they are right, the "
+     "host's firewall or router is blocking the game (on Windows, the host can allow it in "
+     "Host Netplay), or try an invite code.",
+     "ホストに接続できませんでした。アドレスとUDPポートを確認してください。正しい場"
+     "合は、ホストのファイアウォールかルーターがゲームをブロックしています"
+     "（Windowsでは、ホストが「ネットプレイを作成」で許可できます）。招待コードも"
+     "お試しください。"},
     {"If your friends can't connect, the Windows firewall may be blocking the game. Windows asks "
      "for permission to change it.",
      "友達が接続できない場合は、Windowsのファイアウォールがゲームをブロックしている可能性"
@@ -964,7 +987,10 @@ inline constexpr Translation JAPANESE_TEXTS[] = {
      "ください。"},
     {"On Windows, Direct3D 11 works on almost every PC.",
      "Windowsでは、Direct3D 11はほとんどのPCで動作します。"},
-    {"\n\nDetails were written to:\n%s", "\n\n詳細の保存先：\n%s"},
+    {"Could not join", "参加できませんでした"},
+    {"Open the log folder", "ログのフォルダーを開く"},
+    {"OK", "OK"},
+    {"Developed by %s", "開発：%s"},
     {"Session failed", "セッションに失敗しました"},
     {"Checking the game files: %d%%", "ゲームファイルを確認しています：%d%%"},
     {"Only the first time: Netplay makes sure every player has the same game.",
@@ -988,6 +1014,14 @@ inline constexpr Translation JAPANESE_TEXTS[] = {
      "it off your stream.",
      "友達は「ネットプレイに参加」の招待コード欄にこれを入力します。見た人は誰でも参加"
      "できるので、配信には映さないでください。"},
+    {"Checking your router...", "ルーターを確認しています..."},
+    {"Your router opened the port: friends can reach you.", "ルーターがポートを開きました。友達も接続できます。"},
+    {"Shared connection (CGNAT): if friends can't get in, let another player host.",
+     "接続が共有されています（CGNAT）。入れない場合は、ほかの人がホストになってく"
+     "ださい。"},
+    {"Your router kept the port closed: if friends can't get in, let another player host.",
+     "ルーターがポートを開きませんでした。入れない場合は、ほかの人がホストになってくだ"
+     "さい。"},
     {"Asking the invite server for a code...", "招待サーバーにコードを問い合わせ中..."},
     {"The invite server did not answer. Check the internet connection, or close the room and "
      "host with Direct IP.",
