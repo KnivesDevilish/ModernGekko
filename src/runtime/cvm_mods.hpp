@@ -7,6 +7,10 @@
 //
 //   files/Image2.cvm/B11_OPTION.ADX
 //
+// Data patches (data_patches.hpp) can change values in a file inside an
+// archive too ("Image2.cvm/_MAIN.REL@0x10:f32 = 1"): their patched copy goes
+// in the same way, after the mods' files.
+//
 // A .cvm is a CRI header (CVMH, then ZONE) followed by an ISO 9660 image
 // whose directory says where each file is. The archive is never copied (they
 // are over a gigabyte): the plan below is a list of writes into it, made as
@@ -32,6 +36,7 @@
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <utility>
 #include <vector>
 
 namespace moderngekko::cvm_mods
@@ -232,6 +237,51 @@ inline std::optional<Index> ReadIndex(const std::filesystem::path& cvm, std::str
     }
   }
   return index;
+}
+
+// A path inside one of the game's archives, "<archive>.cvm/<file>": the
+// archive's name and the file's path inside it. Nothing when it isn't one.
+inline std::optional<std::pair<std::string, std::string>> SplitInside(std::string_view path)
+{
+  const std::size_t slash = path.find('/');
+  if (slash == std::string_view::npos || slash + 1 >= path.size())
+    return std::nullopt;
+  const std::string archive(path.substr(0, slash));
+  if (archive.size() < 5 || detail::Lower(archive.substr(archive.size() - 4)) != ".cvm")
+    return std::nullopt;
+  return std::pair{archive, std::string(path.substr(slash + 1))};
+}
+
+// The bytes of the file `inner` inside the archive at `cvm`, where its index
+// says. Nothing, with why, when it has no such file, or one over `max_size`.
+inline std::optional<std::vector<std::uint8_t>> ReadInner(const std::filesystem::path& cvm,
+                                                          std::string_view inner,
+                                                          std::uint64_t max_size, std::string* why)
+{
+  using namespace detail;
+  const auto index = ReadIndex(cvm, why);
+  if (!index)
+    return std::nullopt;
+  const auto entry = index->files.find(Lower(inner));
+  if (entry == index->files.end())
+  {
+    *why = "has no file " + std::string(inner);
+    return std::nullopt;
+  }
+  if (entry->second.size > max_size)
+  {
+    *why = "has " + std::string(inner) + ", but it is too big";
+    return std::nullopt;
+  }
+  std::ifstream file(cvm, std::ios::binary);
+  std::vector<std::uint8_t> data =
+      ReadAt(file, index->iso + static_cast<std::uint64_t>(entry->second.lba) * SECTOR, entry->second.size);
+  if (data.size() != entry->second.size)
+  {
+    *why = "can't be read";
+    return std::nullopt;
+  }
+  return data;
 }
 
 // The writes that put `replacements` (in the order the mods apply: a later

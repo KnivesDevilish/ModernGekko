@@ -675,7 +675,11 @@ void PlatformWayland::HandleHotkey(xkb_keysym_t symbol)
 #endif
   else if (symbol == XKB_KEY_F9)
   {
-    moderngekko::detail::TakeScreenshot();
+    // Shift+F9: a memory snapshot as well, when they are on.
+    if (ModifierActive(XKB_MOD_NAME_SHIFT) && moderngekko::detail::MemorySnapshotsOn())
+      moderngekko::detail::TakeMemorySnapshot();
+    else
+      moderngekko::detail::TakeScreenshot();
   }
 #if MODERNGEKKO_SAVESTATES
   else if (symbol == XKB_KEY_F11)

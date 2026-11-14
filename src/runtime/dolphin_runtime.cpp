@@ -214,14 +214,17 @@ FileModPatches(const std::vector<std::filesystem::path> &mods, bool static_recom
 }
 
 // The mods' files inside the game's .cvm archives (cvm_mods.hpp): a mod's
-// files/<archive>.cvm/ folder. For each archive, the writes that put them in
-// as disc patches: the files themselves from the mods' folders, and the
-// small changes to its index and header from Cache/cvm/<disc ID>/.
+// files/<archive>.cvm/ folder, then `extra` (the data patches' copies, by
+// archive, lowercase). For each archive, the writes that put them in as disc
+// patches: the files themselves from where they are, and the small changes
+// to its index and header from Cache/cvm/<disc ID>/.
 std::vector<DiscIO::Riivolution::Patch>
 CvmModPatches(const std::vector<std::filesystem::path> &mods,
               const std::filesystem::path &game_root,
               const std::filesystem::path &user_directory,
-              const std::string &disc_id) {
+              const std::string &disc_id,
+              const std::map<std::string, std::vector<moderngekko::cvm_mods::Replacement>>
+                  &extra) {
   namespace fs = std::filesystem;
   namespace cvm = moderngekko::cvm_mods;
   using cvm::detail::Lower;
@@ -263,6 +266,10 @@ CvmModPatches(const std::vector<std::filesystem::path> &mods,
     }
     ec.clear();
   }
+  // The data patches' copies last: they already start from the mods' files.
+  for (const auto &[key, replacements] : extra)
+    for (const cvm::Replacement &replacement : replacements)
+      inside[key].push_back(replacement);
 
   for (const auto &[key, replacements] : inside) {
     if (const auto whole = replaced_whole.find(key); whole != replaced_whole.end()) {
@@ -338,10 +345,17 @@ CvmModPatches(const std::vector<std::filesystem::path> &mods,
   return patches;
 }
 
-// The mods' data patches (data_patches.hpp): each patches.ini read, the
-// patched copies of the files they change made in Cache/patched/<disc ID>/,
-// and those copies as one more file patch, after the mods' own files.
-std::optional<DiscIO::Riivolution::Patch>
+// The data patches' copies: of files under files/, as one more file patch
+// (after the mods' own files), and of files inside .cvm archives, by archive
+// (lowercase), for CvmModPatches to put in.
+struct DataPatched {
+  std::optional<DiscIO::Riivolution::Patch> files;
+  std::map<std::string, std::vector<moderngekko::cvm_mods::Replacement>> inside_cvm;
+};
+
+// The mods' data patches (data_patches.hpp): each patches.ini read, and the
+// patched copies of the files they change made in Cache/patched/<disc ID>/.
+DataPatched
 DataPatchFiles(const std::vector<std::filesystem::path> &mods,
                const std::filesystem::path &game_root,
                const std::filesystem::path &user_directory,
@@ -366,10 +380,11 @@ DataPatchFiles(const std::vector<std::filesystem::path> &mods,
   }
   const fs::path out = user_directory / "Cache" / "patched" /
                        (disc_id.empty() ? std::string("game") : disc_id);
+  DataPatched result;
   if (with_patches.empty()) {
     std::error_code ec;
     fs::remove_all(out, ec);
-    return std::nullopt;
+    return result;
   }
   const dp::Built built =
       dp::BuildPatchedFiles(with_patches, game_root / "files", out, static_recomp);
@@ -378,8 +393,6 @@ DataPatchFiles(const std::vector<std::filesystem::path> &mods,
   for (std::size_t i = 0; i < with_patches.size(); ++i)
     std::cerr << "mods: " << with_patches[i].id << ": "
               << built.applied_by_mod[i] << " data patch(es)\n";
-  if (built.files.empty())
-    return std::nullopt;
   DiscIO::Riivolution::Patch patch;
   patch.m_id = "data-patches";
   const std::string root = PathToString(out);
@@ -387,6 +400,12 @@ DataPatchFiles(const std::vector<std::filesystem::path> &mods,
       std::make_shared<DiscIO::Riivolution::FileDataLoaderHostFS>(
           root, root + "/patches.ini", "");
   for (const std::string &file : built.files) {
+    if (const auto inside = moderngekko::cvm_mods::SplitInside(file)) {
+      result.inside_cvm[moderngekko::cvm_mods::detail::Lower(inside->first)].push_back(
+          {inside->second, out / fs::path(std::u8string(file.begin(), file.end())),
+           "data patches"});
+      continue;
+    }
     DiscIO::Riivolution::File patched;
     patched.m_disc = "/" + file;
     patched.m_external = "/" + file;
@@ -394,7 +413,9 @@ DataPatchFiles(const std::vector<std::filesystem::path> &mods,
     patched.m_resize = true;
     patch.m_file_patches.push_back(std::move(patched));
   }
-  return patch;
+  if (!patch.m_file_patches.empty())
+    result.files = std::move(patch);
+  return result;
 }
 } // namespace
 
@@ -1280,18 +1301,21 @@ RuntimeRunResult Runtime::Run() {
         SelectCPUCore() == PowerPC::CPUCore::StaticRecomp;
     std::vector<DiscIO::Riivolution::Patch> patches =
         FileModPatches(m_impl->config.file_mods, static_recomp);
+    // The data patches' copies first, as the archives take the ones of files
+    // inside them.
+    DataPatched data = DataPatchFiles(
+        m_impl->config.file_mods, m_impl->config.game_root,
+        m_impl->config.user_directory, m_impl->metadata.disc_id, static_recomp);
     // Then the files inside the .cvm archives: their places are worked out
     // from the game's archives.
     for (DiscIO::Riivolution::Patch &patch :
          CvmModPatches(m_impl->config.file_mods, m_impl->config.game_root,
-                       m_impl->config.user_directory, m_impl->metadata.disc_id))
+                       m_impl->config.user_directory, m_impl->metadata.disc_id,
+                       data.inside_cvm))
       patches.push_back(std::move(patch));
     // Data patches last: their copies already start from the mods' files.
-    if (auto data = DataPatchFiles(m_impl->config.file_mods,
-                                   m_impl->config.game_root,
-                                   m_impl->config.user_directory,
-                                   m_impl->metadata.disc_id, static_recomp))
-      patches.push_back(std::move(*data));
+    if (data.files)
+      patches.push_back(std::move(*data.files));
     AddRiivolutionPatches(boot.get(), std::move(patches));
   }
   m_impl->state_hook =

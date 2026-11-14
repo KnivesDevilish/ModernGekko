@@ -428,6 +428,7 @@ if(MODERNGEKKO_ENABLE_DOLPHIN_RUNTIME)
         src/runtime/game_border.cpp
         src/runtime/game_menu.cpp
         src/runtime/screenshot.cpp
+        src/runtime/memory_snapshot.cpp
         tools/automation_protocol.cpp
         vendor/dolphin/Source/Core/DolphinNoGUI/Platform.cpp
         vendor/dolphin/Source/Core/DolphinNoGUI/PlatformHeadless.cpp

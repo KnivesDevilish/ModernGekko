@@ -8,10 +8,12 @@
 #include <fstream>
 #include <iterator>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace fs = std::filesystem;
 namespace dp = moderngekko::data_patches;
+namespace cvm = moderngekko::cvm_mods;
 
 namespace
 {
@@ -37,6 +39,59 @@ bool HasProblem(const std::vector<dp::Problem>& problems, const std::string& whe
     if (problem.where == where && problem.why.find(part) != std::string::npos)
       return true;
   return false;
+}
+
+// A directory record, as ISO 9660 writes it.
+Bytes Record(const std::string& name, std::uint32_t lba, std::uint32_t size, bool folder)
+{
+  const std::size_t length = 33 + name.size() + (name.size() % 2 == 0 ? 1 : 0);
+  Bytes r(length, 0);
+  r[0] = static_cast<std::uint8_t>(length);
+  cvm::detail::PutBoth32(&r, 2, lba);
+  cvm::detail::PutBoth32(&r, 10, size);
+  r[25] = folder ? 2 : 0;
+  r[32] = static_cast<std::uint8_t>(name.size());
+  std::copy(name.begin(), name.end(), r.begin() + 33);
+  return r;
+}
+
+// A .cvm (as tests/cvm_mods_test.cpp makes them): CVMH and ZONE headers, then
+// an ISO image with these files in its root directory.
+Bytes Archive(const std::vector<std::pair<std::string, Bytes>>& files)
+{
+  constexpr std::uint64_t S = cvm::SECTOR;
+  const std::uint64_t iso = 0x1800;
+  std::uint32_t next = 19;  // 16 PVD, 17 terminator, 18 root
+  std::vector<std::uint32_t> lbas;
+  Bytes root;
+  for (const Bytes& r : {Record(std::string(1, '\0'), 18, S, true), Record(std::string(1, '\1'), 18, S, true)})
+    root.insert(root.end(), r.begin(), r.end());
+  for (const auto& [name, data] : files)
+  {
+    lbas.push_back(next);
+    const Bytes r = Record(name + ";1", next, static_cast<std::uint32_t>(data.size()), false);
+    root.insert(root.end(), r.begin(), r.end());
+    next += static_cast<std::uint32_t>(cvm::detail::AlignUp(data.size(), S) / S);
+  }
+  const std::uint64_t total = iso + next * S;
+  Bytes o(total, 0);
+  std::copy_n("CVMH", 4, o.begin());
+  cvm::detail::PutBE(&o, 0x1C, total, 8);
+  std::copy_n("ZONE", 4, o.begin() + 0x800);
+  cvm::detail::PutBE(&o, 0x804, total - 0x80C, 8);
+  cvm::detail::PutBE(&o, 0x830, total - iso, 8);
+  const std::uint64_t pvd = iso + 16 * S;
+  o[pvd] = 1;
+  std::copy_n("CD001", 5, o.begin() + static_cast<std::ptrdiff_t>(pvd + 1));
+  cvm::detail::PutBoth32(&o, static_cast<std::size_t>(pvd + 80), next);
+  o[pvd + 129] = 0x08;
+  const Bytes root_record = Record(std::string(1, '\0'), 18, S, true);
+  std::copy(root_record.begin(), root_record.end(), o.begin() + static_cast<std::ptrdiff_t>(pvd + 156));
+  std::copy(root.begin(), root.end(), o.begin() + static_cast<std::ptrdiff_t>(iso + 18 * S));
+  for (std::size_t i = 0; i < files.size(); ++i)
+    std::copy(files[i].second.begin(), files[i].second.end(),
+              o.begin() + static_cast<std::ptrdiff_t>(iso + lbas[i] * S));
+  return o;
 }
 
 // A REL module: 2 sections, code at 0x100-0x200 and data at 0x200-0x400.
@@ -261,6 +316,74 @@ int main()
   built = dp::BuildPatchedFiles({huge}, game, out, false);
   if (!built.files.empty() || !HasProblem(built.problems, "huge: patches.ini line 1", "too big"))
     return 16;
+
+  // Files inside a .cvm (Zero Gravity): from the archive, or from a mod's
+  // files/<archive>.cvm/ copy; the patched copy goes in like a mod's file.
+  {
+    const fs::path zg = base / "zg" / "files";
+    const fs::path zg_out = base / "Cache" / "patched" / "RS9E8P";
+    Bytes param(0x40, 0);
+    param[0x10] = 0x3F;  // 161 km/h: 0x3F3ED098
+    param[0x11] = 0x3E;
+    param[0x12] = 0xD0;
+    param[0x13] = 0x98;
+    Bytes zg_rel = FakeRel();
+    zg_rel[0x210] = 0x42;
+    const Bytes archive = Archive({{"PARAM.BIN", param}, {"_MAIN.REL", zg_rel}, {"OTHER.ADX", Bytes(3000, 0x77)}});
+    Write(zg / "Image2.cvm", archive);
+    problems.clear();
+    dp::ModPatches speed{"speed", base / "Mods" / "speed",
+                         dp::Parse("Image2.cvm/PARAM.BIN@0x10:f32 += 80 km/h\n"
+                                   "image2.CVM/param.bin@0x14:u8 = 7\n"
+                                   "Image2.cvm/NONE.BIN@0:u8 = 1\n"
+                                   "Image3.cvm/X.BIN@0:u8 = 1\n"
+                                   "Image2.cvm/_MAIN.REL@0x120:u8 = 7\n"
+                                   "Image2.cvm/_MAIN.REL@0x211:u8 = 9\n",
+                                   "RS9E8P", &problems)};
+    if (!problems.empty() || speed.patches.size() != 6)
+      return 22;
+    built = dp::BuildPatchedFiles({speed}, zg, zg_out, true);
+    Bytes param_expected = param;
+    param_expected[0x10] = 0x3F;  // 241 km/h: 0x3F8ED098
+    param_expected[0x11] = 0x8E;
+    param_expected[0x12] = 0xD0;
+    param_expected[0x13] = 0x98;
+    param_expected[0x14] = 7;
+    Bytes rel_expected = zg_rel;
+    rel_expected[0x211] = 9;
+    if (built.files != std::vector<std::string>{"Image2.cvm/PARAM.BIN", "Image2.cvm/_MAIN.REL"} ||
+        built.applied != 3 || Read(zg_out / "Image2.cvm" / "PARAM.BIN") != param_expected ||
+        Read(zg_out / "Image2.cvm" / "_MAIN.REL") != rel_expected || built.problems.size() != 3 ||
+        !HasProblem(built.problems, "speed: patches.ini line 3", "Image2.cvm has no file NONE.BIN") ||
+        !HasProblem(built.problems, "speed: patches.ini line 4", "no file Image3.cvm/X.BIN") ||
+        !HasProblem(built.problems, "speed: patches.ini line 5", "StaticRecomp"))
+      return 23;
+    // The patched copy put into the archive (as the runtime does): it takes
+    // the original's place, and the other files stay as they were.
+    const cvm::Plan plan = cvm::PlanReplacements(
+        zg / "Image2.cvm", "Image2.cvm",
+        {{"PARAM.BIN", zg_out / "Image2.cvm" / "PARAM.BIN", "data patches"}});
+    Bytes changed = archive;
+    cvm::ApplyTo(&changed, plan.writes);
+    Write(base / "zg-changed.cvm", changed);
+    std::string why;
+    if (plan.in_place != 1 || !plan.problems.empty() ||
+        cvm::ReadInner(base / "zg-changed.cvm", "param.bin", dp::MAX_FILE, &why) != param_expected ||
+        cvm::ReadInner(base / "zg-changed.cvm", "OTHER.ADX", dp::MAX_FILE, &why) != Bytes(3000, 0x77))
+      return 24;
+    // A mod's own copy is the starting point (a module's isn't, under
+    // StaticRecomp), and the archive is never touched.
+    Write(base / "Mods" / "speed" / "files" / "Image2.cvm" / "PARAM.BIN", Bytes(0x40, 0x01));
+    Write(base / "Mods" / "speed" / "files" / "Image2.cvm" / "_MAIN.REL", Bytes(0x400, 0x55));
+    built = dp::BuildPatchedFiles({speed}, zg, zg_out, true);
+    const Bytes from_mod = Read(zg_out / "Image2.cvm" / "PARAM.BIN");
+    if (from_mod.size() != 0x40 || from_mod[0x14] != 7 || from_mod[0x20] != 0x01 ||
+        Read(zg_out / "Image2.cvm" / "_MAIN.REL") != rel_expected || Read(zg / "Image2.cvm") != archive)
+      return 25;
+    built = dp::BuildPatchedFiles({speed}, zg, zg_out, false);
+    if (Read(zg_out / "Image2.cvm" / "_MAIN.REL")[0x10] != 0x55)
+      return 26;
+  }
 
   // Nothing applies: no copy, and the old copies go.
   built = dp::BuildPatchedFiles({}, game, out, false);

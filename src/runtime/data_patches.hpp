@@ -10,6 +10,8 @@
 //   gear.HighBooster.acceleration = 0.0009
 //   # Any game: a value at a place in a file under files/
 //   _Main.rel@0x1EA2C0:f32 = 1.2
+//   # ...or in a file inside one of its .cvm archives (Zero Gravity)
+//   Image2.cvm/_MAIN.REL@0x10:f32 = 1.2
 //
 // Raw keys are <file>@<offset>:<type>, the type one of u8 u16 u32 s8 s16
 // s32 f32 (big-endian, as the consoles store them) or bytes (the value in
@@ -34,8 +36,10 @@
 // out: the recompiled module is the game's own code.
 //
 // A file over MAX_FILE (a whole .cvm archive, say) isn't patched this way:
-// its copy would be too big. Files inside a .cvm go in a files/<name>.cvm/
-// folder instead (cvm_mods.hpp).
+// its copy would be too big. A file inside a .cvm is, from the archive (or
+// from the last mod's files/<archive>.cvm/<file>): its patched copy, in
+// Cache/patched/<disc ID>/<archive>.cvm/, goes into the archive as a mod's
+// file would (cvm_mods.hpp).
 //
 // Apart from the standard library, so tests/data_patches_test.cpp can check it.
 
@@ -57,6 +61,8 @@
 #include <system_error>
 #include <vector>
 
+#include "cvm_mods.hpp"
+
 namespace moderngekko::data_patches
 {
 // One change: `bytes` written at `offset` in files/<file>.
@@ -69,7 +75,7 @@ enum class Op
 
 struct Patch
 {
-  std::string file;  // under files/, with '/'
+  std::string file;  // under files/, with '/' ("Image2.cvm/x.bin": inside an archive)
   std::uint32_t offset = 0;
   std::vector<std::uint8_t> bytes;  // for Set; for Add and Multiply, as many as the type has
   std::string sha1;   // when not empty, the file must be this one (lowercase hex)
@@ -762,12 +768,26 @@ inline Built BuildPatchedFiles(const std::vector<ModPatches>& mods,
   for (const std::string& file : files)
   {
     const bool code_file = EndsWithNoCase(file, ".rel") || EndsWithNoCase(file, ".dol");
-    // The game's file, with its capitals; the copy goes at the same path.
-    const auto in_game = FindNoCase(game_files, file);
-    const fs::path relative =
-        in_game ? *in_game : fs::path(std::u8string(file.begin(), file.end()));
+    const auto problem = [&](const ModPatches& mod, const Patch& patch, std::string why) {
+      built.problems.push_back({mod.id + ": " + patch.where, std::move(why)});
+    };
+    const auto all_fail = [&](const std::string& why) {
+      for (const ModPatches& mod : mods)
+        for (const Patch& patch : mod.patches)
+          if (EqualNoCase(patch.file, file))
+            problem(mod, patch, why);
+    };
+    // A file inside an archive: "<archive>.cvm/<file>".
+    const auto inside = cvm_mods::SplitInside(file);
+    // The game's file (or archive), with its capitals; the copy goes at the
+    // same path.
+    const auto in_game = FindNoCase(game_files, inside ? inside->first : file);
+    fs::path relative = in_game ? *in_game : fs::path(std::u8string(file.begin(), file.end()));
+    if (inside)
+      relative = (in_game ? *in_game : fs::path(std::u8string(inside->first.begin(), inside->first.end()))) /
+                 fs::path(std::u8string(inside->second.begin(), inside->second.end()));
     std::optional<fs::path> base;
-    if (in_game)
+    if (in_game && !inside)
       base = game_files / *in_game;
     if (!(static_recomp && code_file))
       for (const ModPatches& mod : mods)
@@ -775,23 +795,27 @@ inline Built BuildPatchedFiles(const std::vector<ModPatches>& mods,
           base = mod.folder / "files" / *in_mod;
     if (base && fs::file_size(*base, ec) > MAX_FILE)
     {
-      for (const ModPatches& mod : mods)
-        for (const Patch& patch : mod.patches)
-          if (EqualNoCase(patch.file, file))
-            built.problems.push_back({mod.id + ": " + patch.where,
-                                      file + " is too big for data patches (over 64 MB)"});
+      all_fail(file + " is too big for data patches (over 64 MB)");
       continue;
     }
-    auto data = base ? ReadFile(*base) : std::nullopt;
-    const auto problem = [&](const ModPatches& mod, const Patch& patch, std::string why) {
-      built.problems.push_back({mod.id + ": " + patch.where, std::move(why)});
-    };
+    std::optional<std::vector<std::uint8_t>> data;
+    if (base)
+    {
+      data = ReadFile(*base);
+    }
+    else if (inside && in_game)
+    {
+      std::string why;
+      data = cvm_mods::ReadInner(game_files / *in_game, inside->second, MAX_FILE, &why);
+      if (!data)
+      {
+        all_fail(inside->first + " " + why);
+        continue;
+      }
+    }
     if (!data)
     {
-      for (const ModPatches& mod : mods)
-        for (const Patch& patch : mod.patches)
-          if (EqualNoCase(patch.file, file))
-            problem(mod, patch, "the game has no file " + file);
+      all_fail("the game has no file " + file);
       continue;
     }
     const std::string sha1 = Sha1(*data);

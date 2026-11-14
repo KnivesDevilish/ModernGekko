@@ -522,7 +522,13 @@ void PlatformX11::ProcessEvents()
       }
 #endif
       else if (key == XK_F9)
-        moderngekko::detail::TakeScreenshot();
+      {
+        // Shift+F9: a memory snapshot as well, when they are on.
+        if ((event.xkey.state & ShiftMask) && moderngekko::detail::MemorySnapshotsOn())
+          moderngekko::detail::TakeMemorySnapshot();
+        else
+          moderngekko::detail::TakeScreenshot();
+      }
 #if MODERNGEKKO_SAVESTATES
       else if (key == XK_F11)
         State::LoadLastSaved(Core::System::GetInstance());

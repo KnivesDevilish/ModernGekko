@@ -12,4 +12,8 @@ void TakeScreenshot();
 // From a screenshot's start until the game is back as it was: the window's
 // pause key waits, and the in-game menu takes no presses.
 bool ScreenshotBusy();
+// Shift+F9, while MODERNGEKKO_MEMORY_SNAPSHOTS is set: the game's memory to
+// a file, and F9's screenshot (memory_snapshot.cpp). On the host thread.
+bool MemorySnapshotsOn();
+void TakeMemorySnapshot();
 }  // namespace moderngekko::detail

@@ -511,9 +511,15 @@ LRESULT PlatformWin32::WndProc(const HWND hwnd, const UINT msg, const WPARAM wPa
 #endif
     if (wParam == VK_F9)
     {
-      // One screenshot per press, not one per auto-repeat.
+      // One screenshot per press, not one per auto-repeat. Shift+F9: a
+      // memory snapshot as well, when they are on.
       if (!IsRepeat(lParam))
-        moderngekko::detail::TakeScreenshot();
+      {
+        if ((GetKeyState(VK_SHIFT) & 0x8000) != 0 && moderngekko::detail::MemorySnapshotsOn())
+          moderngekko::detail::TakeMemorySnapshot();
+        else
+          moderngekko::detail::TakeScreenshot();
+      }
       return 0;
     }
     else if (wParam == VK_F11)
