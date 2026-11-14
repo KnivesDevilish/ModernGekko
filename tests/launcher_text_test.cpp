@@ -29,6 +29,7 @@ namespace
 constexpr const char* SOURCES[] = {
     "tools/moderngekko_launcher.cpp",
     "tools/frontend_config.cpp",
+    "tools/file_mods.hpp",
     "tools/launcher_summary.hpp",
     "tools/launcher_ui.hpp",
     "tools/launcher_gallery.hpp",
@@ -297,7 +298,7 @@ int main()
       Tr(std::string("Not played yet")) != "Sin jugar a\xC3\xBA" "n" ||
       Tr(std::string("12 h 34 min")) != "12 h 34 min")
     result = result ? result : 5;
-  if (Format(Tr("%d installed"), 3) != "3 instalados" ||
+  if (Format(Tr("%d on"), 3) != "3 activados" ||
       Format(Tr("GAME READY \xC2\xB7 %s"), "RS9E8P") != "JUEGO LISTO \xC2\xB7 RS9E8P")
     result = result ? result : 7;
   ActiveLanguage() = Language::Japanese;

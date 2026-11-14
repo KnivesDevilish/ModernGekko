@@ -545,6 +545,12 @@ ConfigResult LoadConfig(const fs::path &user_directory,
         return {.error = "invite_server must be a host name, optionally "
                          "followed by :port"};
       config.invite_server = raw_value;
+    } else if (key == "mod") {
+      // A mod's folder name; the same one twice counts once.
+      if (!raw_value.empty() &&
+          std::find(config.mods.begin(), config.mods.end(), raw_value) ==
+              config.mods.end())
+        config.mods.push_back(raw_value);
     }
   }
   if (config.resolution.empty())
@@ -745,7 +751,15 @@ bool SaveConfig(const fs::path &user_directory, const ConfigResult &config,
        << "# code (an invite code) or ip (the host's address)\n"
        << "connection=" << config.netplay_connection << '\n'
        << "# The server that hands out invite codes: host or host:port\n"
-       << "invite_server=" << config.invite_server << '\n';
+       << "invite_server=" << config.invite_server << '\n'
+       << "[Mods]\n"
+       << "# The mods turned on, by the name of their folder in Mods, one\n"
+       << "# mod= line each; a later one's files win over an earlier one's\n";
+  for (const std::string &mod : config.mods) {
+    if (mod.empty() || mod.find_first_of("\r\n") != std::string::npos)
+      continue;
+    file << "mod=" << mod << '\n';
+  }
   return true;
 }
 

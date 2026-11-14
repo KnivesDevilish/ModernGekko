@@ -187,6 +187,12 @@ struct RuntimeConfig
   std::filesystem::path user_directory;
   ModuleSource module;
   std::vector<std::filesystem::path> mod_directories;
+  // File mods, in the order they apply: folders whose files/ takes the place
+  // of the game's files at the same paths, or adds to them, as the disc
+  // boots. The extracted game is never written. Under StaticRecomp a mod's
+  // code (.rel and .dol files) is left out: the recompiled module was made
+  // from the game's own.
+  std::vector<std::filesystem::path> file_mods;
   GraphicsSettings graphics;
   AudioSettings audio;
   InputSettings input;

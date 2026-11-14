@@ -1112,6 +1112,34 @@ if(BUILD_TESTING)
     target_compile_features(moderngekko_frontend_config_test PRIVATE cxx_std_23)
     add_test(NAME moderngekko.frontend_config COMMAND moderngekko_frontend_config_test)
 
+    add_executable(moderngekko_file_mods_test
+        tests/file_mods_test.cpp)
+    target_include_directories(moderngekko_file_mods_test PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/tools")
+    target_compile_features(moderngekko_file_mods_test PRIVATE cxx_std_23)
+    add_test(NAME moderngekko.file_mods COMMAND moderngekko_file_mods_test)
+
+    add_executable(moderngekko_texture_mods_test
+        tests/texture_mods_test.cpp)
+    target_include_directories(moderngekko_texture_mods_test PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/runtime")
+    target_compile_features(moderngekko_texture_mods_test PRIVATE cxx_std_23)
+    add_test(NAME moderngekko.texture_mods COMMAND moderngekko_texture_mods_test)
+
+    add_executable(moderngekko_data_patches_test
+        tests/data_patches_test.cpp)
+    target_include_directories(moderngekko_data_patches_test PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/runtime")
+    target_compile_features(moderngekko_data_patches_test PRIVATE cxx_std_23)
+    add_test(NAME moderngekko.data_patches COMMAND moderngekko_data_patches_test)
+
+    add_executable(moderngekko_cvm_mods_test
+        tests/cvm_mods_test.cpp)
+    target_include_directories(moderngekko_cvm_mods_test PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/runtime")
+    target_compile_features(moderngekko_cvm_mods_test PRIVATE cxx_std_23)
+    add_test(NAME moderngekko.cvm_mods COMMAND moderngekko_cvm_mods_test)
+
     add_executable(moderngekko_launcher_games_test
         tests/launcher_games_test.cpp)
     target_include_directories(moderngekko_launcher_games_test PRIVATE

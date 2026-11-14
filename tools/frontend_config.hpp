@@ -108,6 +108,9 @@ struct ConfigResult {
   // The invite server, "host" or "host:port": Dolphin's public traversal
   // server unless config.ini names another one.
   std::string invite_server = "stun.dolphin-emu.org";
+  // The file mods turned on (tools/file_mods.hpp), by folder name, in the
+  // order they apply: config.ini's [Mods] mod= lines, one each.
+  std::vector<std::string> mods;
   std::string error;
 
   explicit operator bool() const { return error.empty(); }

@@ -85,6 +85,9 @@ inline constexpr Translation SPANISH_TEXTS[] = {
     {"Invite codes", "Códigos de invitación"},
     {"Dolphin's public server (stun.dolphin-emu.org)",
      "Servidor público de Dolphin (stun.dolphin-emu.org)"},
+    {"The Tournament Edition team (RidersBoulevard): the layout of the Extreme Gear table",
+     "El equipo de Tournament Edition (RidersBoulevard): cómo está hecha la tabla de las "
+     "Extreme Gear"},
     {"An invite code has 8 characters (numbers and letters a-f).",
      "El código tiene 8 caracteres (números y letras a-f)."},
     {"Every player needs the same Sonic Riders: Source release and game files. Everyone plays "
@@ -126,8 +129,6 @@ inline constexpr Translation SPANISH_TEXTS[] = {
     {"%s \xC2\xB7 Full", "%s · Completa"},
     {"%s \xC2\xB7 Win", "%s · Vent."},
     {"None", "Ninguno"},
-    {"1 installed", "1 instalado"},
-    {"%d installed", "%d instalados"},
     {"Mods go in %s", "Los mods van en %s"},
 
     // Settings page
@@ -374,10 +375,11 @@ inline constexpr Translation SPANISH_TEXTS[] = {
      "release.",
      "El anfitrión usa una versión de Netplay incompatible. Los dos jugadores deben usar la "
      "misma versión."},
-    {"The extracted game or recomp module does not match the host. Both players need the same "
-     "game revision and release.",
-     "El juego extraído o el módulo recompilado no coinciden con los del anfitrión. Los dos "
-     "jugadores necesitan la misma revisión del juego y la misma versión."},
+    {"The extracted game, the mods turned on or the recomp module don't match the host's. Every "
+     "player needs the same game revision, release and mods.",
+     "El juego extraído, los mods activados o el módulo recompilado no coinciden con los del "
+     "anfitrión. Todos los jugadores necesitan la misma revisión del juego, la misma versión y "
+     "los mismos mods."},
     {"All four controller slots are already occupied.",
      "Los cuatro puestos de mando ya están ocupados."},
     {"The host has already started the game.", "El anfitrión ya empezó la partida."},
@@ -603,9 +605,24 @@ inline constexpr Translation SPANISH_TEXTS[] = {
     {"Mods change the game or add to it when it starts, without touching your copy of it.", "Los mods cambian el juego o le añaden cosas al iniciarlo, sin tocar tu copia."},
     {"INSTALLED MODS", "MODS INSTALADOS"},
     {"No mods installed yet.", "Todavía no hay mods instalados."},
-    {"Mod packages (.mgm) go in this folder and load when the game starts:", "Los paquetes de mods (.mgm) van en esta carpeta y se cargan al iniciar el juego:"},
-    {"Mod support is experimental: there are no mods made for Sonic Riders: Source yet.",
-     "El soporte de mods es experimental: todavía no hay mods hechos para Sonic Riders: Source."},
+    {"1 on", "1 activado"},
+    {"%d on", "%d activados"},
+    {"Code mods (.mgm), always loaded", "Mods de código (.mgm), siempre cargados"},
+    {"%s can't be used: %s", "%s no se puede usar: %s"},
+    {"Each mod is a folder in this one, with a mod.ini and a files folder, a textures folder, a "
+     "patches.ini or several of them; the README says how to make one. In Netplay, every player "
+     "needs the same mods on, except texture packs.",
+     "Cada mod es una carpeta dentro de esta, con un mod.ini y una carpeta files, una carpeta "
+     "textures, un patches.ini o varios de ellos; el README explica cómo hacer uno. En Netplay, "
+     "todos los jugadores necesitan los mismos mods activados, salvo los paquetes de texturas."},
+    {"Refresh", "Actualizar"},
+    {"it has no mod.ini", "no tiene mod.ini"},
+    {"its mod.ini doesn't say which game it is for (game=RS9E8P, for example)",
+     "su mod.ini no dice para qué juego es (por ejemplo, game=RS9E8P)"},
+    {"it has no files folder, textures folder or patches.ini",
+     "no tiene carpeta files, carpeta textures ni patches.ini"},
+    {"Textures", "Texturas"},
+    {"Data patches", "Parches"},
     {"EXPANSIONS", "EXPANSIONES"},
     {"PLANNED", "PLANEADO"},
     {"Story campaigns, characters, tracks and more, made by the community, without changing the original game files.", "Campañas de historia, personajes, pistas y más, creados por la comunidad, sin modificar los archivos originales del juego."},
@@ -663,6 +680,8 @@ inline constexpr Translation JAPANESE_TEXTS[] = {
     {"Invite code", "招待コード"},
     {"Invite codes", "招待コード"},
     {"Dolphin's public server (stun.dolphin-emu.org)", "Dolphinの公開サーバー（stun.dolphin-emu.org）"},
+    {"The Tournament Edition team (RidersBoulevard): the layout of the Extreme Gear table",
+     "Tournament Editionの制作チーム（RidersBoulevard）：Extreme Gearの表の作り"},
     {"An invite code has 8 characters (numbers and letters a-f).", "招待コードは8文字です（数字とa〜fの英字）。"},
     {"Every player needs the same Sonic Riders: Source release and game files. Everyone plays "
      "with the host's CPU core.",
@@ -700,8 +719,6 @@ inline constexpr Translation JAPANESE_TEXTS[] = {
     {"%s \xC2\xB7 Full", "%s · 全画面"},
     {"%s \xC2\xB7 Win", "%s · ウィンドウ"},
     {"None", "なし"},
-    {"1 installed", "1個導入済み"},
-    {"%d installed", "%d個導入済み"},
     {"Mods go in %s", "MODは %s に入れてください"},
     // Settings page
     {"Changes are saved right away and apply the next time you press PLAY.",
@@ -927,10 +944,10 @@ inline constexpr Translation JAPANESE_TEXTS[] = {
      "release.",
      "ホストのネットプレイ版と互換性がありません。両方のプレイヤーが同じバージョンを使"
      "う必要があります。"},
-    {"The extracted game or recomp module does not match the host. Both players need the same "
-     "game revision and release.",
-     "展開したゲームまたは再コンパイルモジュールがホストと一致しません。両方のプレイヤ"
-     "ーに同じゲームのリビジョンとバージョンが必要です。"},
+    {"The extracted game, the mods turned on or the recomp module don't match the host's. Every "
+     "player needs the same game revision, release and mods.",
+     "展開したゲーム、有効なMOD、または再コンパイルモジュールがホストと一致しません。全員"
+     "に同じゲームのリビジョン、バージョン、MODが必要です。"},
     {"All four controller slots are already occupied.", "4つのコントローラー枠はすべて埋まっています。"},
     {"The host has already started the game.", "ホストはすでにゲームを開始しています。"},
     {"The netplay server is full.", "ネットプレイのサーバーが満員です。"},
@@ -1155,9 +1172,24 @@ inline constexpr Translation JAPANESE_TEXTS[] = {
     {"Mods change the game or add to it when it starts, without touching your copy of it.", "MODはゲームの起動時に内容を変えたり追加したりします。あなたのゲームのコピーは変更しません。"},
     {"INSTALLED MODS", "導入済みのMOD"},
     {"No mods installed yet.", "MODはまだ導入されていません。"},
-    {"Mod packages (.mgm) go in this folder and load when the game starts:", "MODパッケージ（.mgm）をこのフォルダーに入れると、ゲームの起動時に読み込まれます："},
-    {"Mod support is experimental: there are no mods made for Sonic Riders: Source yet.",
-     "MODへの対応は実験的です。Sonic\u00A0Riders:\u00A0Source用のMODはまだありません。"},
+    {"1 on", "1個有効"},
+    {"%d on", "%d個有効"},
+    {"Code mods (.mgm), always loaded", "コードのMOD（.mgm）：常に読み込まれます"},
+    {"%s can't be used: %s", "%sは使えません：%s"},
+    {"Each mod is a folder in this one, with a mod.ini and a files folder, a textures folder, a "
+     "patches.ini or several of them; the README says how to make one. In Netplay, every player "
+     "needs the same mods on, except texture packs.",
+     "MODはこのフォルダーの中のフォルダーで、mod.iniと、filesフォルダー、textures"
+     "フォルダー、patches.iniのどれか（いくつでも）が入っています。作り方はREADMEにあります。"
+     "ネットプレイでは、全員が同じMODを有効にする必要があります（テクスチャのMODは別です）。"},
+    {"Refresh", "再読み込み"},
+    {"it has no mod.ini", "mod.iniがありません"},
+    {"its mod.ini doesn't say which game it is for (game=RS9E8P, for example)",
+     "mod.iniにどのゲーム用か書かれていません（game=RS9E8Pのように）"},
+    {"it has no files folder, textures folder or patches.ini",
+     "filesフォルダーもtexturesフォルダーもpatches.iniもありません"},
+    {"Textures", "テクスチャ"},
+    {"Data patches", "データパッチ"},
     {"EXPANSIONS", "拡張コンテンツ"},
     {"PLANNED", "予定"},
     {"Story campaigns, characters, tracks and more, made by the community, without changing the original game files.", "ストーリー、キャラクター、コースなど、コミュニティが作るコンテンツ。元のゲームファイルは変更しません。"},

@@ -22,6 +22,8 @@
 #include "Core/PowerPC/StaticRecomp/StaticRecompModuleSource.h"
 #include "Core/State.h"
 #include "Core/System.h"
+#include "DiscIO/RiivolutionParser.h"
+#include "DiscIO/RiivolutionPatcher.h"
 #include "DolphinNoGUI/Platform.h"
 #include "InputCommon/ControllerEmu/ControllerEmu.h"
 #include "InputCommon/ControllerInterface/ControllerInterface.h"
@@ -40,14 +42,21 @@
 #if MODERNGEKKO_HAS_PULSE
 #include "pulse_volume.hpp"
 #endif
+#include "cvm_mods.hpp"
+#include "data_patches.hpp"
 #include "screenshot.hpp"
+#include "texture_mods.hpp"
 #include "window_size.hpp"
 #include "moderngekko/cpu_state.h"
 #include "moderngekko/mod_loader.hpp"
 #include "moderngekko/module_loader.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <charconv>
+#include <filesystem>
+#include <map>
+#include <memory>
 #include <array>
 #include <atomic>
 #include <chrono>
@@ -127,6 +136,265 @@ PowerPC::CPUCore SelectCPUCore() {
 #else
   return PowerPC::CPUCore::JIT64;
 #endif
+}
+// RuntimeConfig::file_mods as Dolphin's file patches (the ones Riivolution
+// packs use): each file under a mod's files/ replaces, or adds, the disc's
+// file at the same path. The patched disc is built in memory as the game
+// boots; nothing is written to the extracted game.
+std::vector<DiscIO::Riivolution::Patch>
+FileModPatches(const std::vector<std::filesystem::path> &mods, bool static_recomp) {
+  namespace fs = std::filesystem;
+  std::vector<DiscIO::Riivolution::Patch> patches;
+  for (const fs::path &mod : mods) {
+    const fs::path files = mod / "files";
+    std::error_code ec;
+    if (!fs::is_directory(files, ec)) {
+      // A texture pack or a mod of data patches has no files: those load
+      // apart.
+      if (!moderngekko::texture_mods::HasTextures(mod) &&
+          !fs::is_regular_file(mod / "patches.ini", ec))
+        std::cerr << "mods: " << PathToString(mod.filename())
+                  << ": no files folder, left out\n";
+      continue;
+    }
+    DiscIO::Riivolution::Patch patch;
+    patch.m_id = PathToString(mod.filename());
+    // Paths starting with '/' are read from this folder.
+    const std::string root = PathToString(files);
+    patch.m_file_data_loader =
+        std::make_shared<DiscIO::Riivolution::FileDataLoaderHostFS>(
+            root, root + "/mod.ini", "");
+    std::size_t code_left_out = 0;
+    std::size_t inside_cvm = 0;
+    for (fs::recursive_directory_iterator
+             it(files, fs::directory_options::skip_permission_denied, ec),
+         end;
+         !ec && it != end; it.increment(ec)) {
+      std::error_code entry_ec;
+      if (!it->is_regular_file(entry_ec))
+        continue;
+      std::string relative = PathToString(it->path().lexically_relative(files));
+      std::replace(relative.begin(), relative.end(), '\\', '/');
+      // Files in a folder named after a .cvm go inside that archive
+      // (CvmModPatches).
+      if (const std::size_t slash = relative.find('/');
+          slash != std::string::npos && slash >= 4 &&
+          moderngekko::cvm_mods::detail::Lower(relative.substr(slash - 4, 4)) == ".cvm") {
+        ++inside_cvm;
+        continue;
+      }
+      std::string extension = PathToString(it->path().extension());
+      std::transform(extension.begin(), extension.end(), extension.begin(),
+                     [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+      if (static_recomp && (extension == ".rel" || extension == ".dol")) {
+        ++code_left_out;
+        continue;
+      }
+      DiscIO::Riivolution::File file;
+      file.m_disc = "/" + relative;
+      file.m_external = "/" + relative;
+      file.m_create = true;
+      file.m_resize = true;
+      patch.m_file_patches.push_back(std::move(file));
+    }
+    // A mod with only files inside .cvm archives: CvmModPatches says how many.
+    if (!patch.m_file_patches.empty() || code_left_out != 0 || inside_cvm == 0) {
+      std::cerr << "mods: " << patch.m_id << ": " << patch.m_file_patches.size()
+                << " file(s)";
+      if (code_left_out != 0)
+        std::cerr << ", " << code_left_out
+                  << " code file(s) left out (StaticRecomp runs the game's own "
+                     "code; JIT64 runs the mod's)";
+      std::cerr << '\n';
+    }
+    if (!patch.m_file_patches.empty())
+      patches.push_back(std::move(patch));
+  }
+  return patches;
+}
+
+// The mods' files inside the game's .cvm archives (cvm_mods.hpp): a mod's
+// files/<archive>.cvm/ folder. For each archive, the writes that put them in
+// as disc patches: the files themselves from the mods' folders, and the
+// small changes to its index and header from Cache/cvm/<disc ID>/.
+std::vector<DiscIO::Riivolution::Patch>
+CvmModPatches(const std::vector<std::filesystem::path> &mods,
+              const std::filesystem::path &game_root,
+              const std::filesystem::path &user_directory,
+              const std::string &disc_id) {
+  namespace fs = std::filesystem;
+  namespace cvm = moderngekko::cvm_mods;
+  using cvm::detail::Lower;
+  std::vector<DiscIO::Riivolution::Patch> patches;
+  const fs::path cache = user_directory / "Cache" / "cvm" /
+                         (disc_id.empty() ? std::string("game") : disc_id);
+  std::error_code ec;
+  fs::remove_all(cache, ec);
+
+  // Per archive (by its name, any capitals): the files, in mod order, and
+  // whether a mod replaces the whole archive.
+  std::map<std::string, std::vector<cvm::Replacement>> inside;
+  std::map<std::string, std::string> replaced_whole;
+  for (const fs::path &mod : mods) {
+    const std::string id = PathToString(mod.filename());
+    for (fs::directory_iterator it(mod / "files", ec), end; !ec && it != end;
+         it.increment(ec)) {
+      const std::string name = PathToString(it->path().filename());
+      if (name.size() < 5 || Lower(name.substr(name.size() - 4)) != ".cvm")
+        continue;
+      std::error_code entry_ec;
+      if (it->is_regular_file(entry_ec)) {
+        replaced_whole[Lower(name)] = id;
+        continue;
+      }
+      if (!it->is_directory(entry_ec))
+        continue;
+      for (fs::recursive_directory_iterator
+               file(it->path(), fs::directory_options::skip_permission_denied, entry_ec),
+           done;
+           !entry_ec && file != done; file.increment(entry_ec)) {
+        std::error_code file_ec;
+        if (!file->is_regular_file(file_ec))
+          continue;
+        std::string inner = PathToString(file->path().lexically_relative(it->path()));
+        std::replace(inner.begin(), inner.end(), '\\', '/');
+        inside[Lower(name)].push_back({inner, file->path(), id});
+      }
+    }
+    ec.clear();
+  }
+
+  for (const auto &[key, replacements] : inside) {
+    if (const auto whole = replaced_whole.find(key); whole != replaced_whole.end()) {
+      std::cerr << "mods: " << whole->second << " replaces " << key
+                << " whole: the files other mods put inside it are left out\n";
+      continue;
+    }
+    // The game's archive, with its capitals.
+    fs::path archive;
+    for (fs::directory_iterator it(game_root / "files", ec), end; !ec && it != end;
+         it.increment(ec))
+      if (Lower(PathToString(it->path().filename())) == key)
+        archive = it->path();
+    ec.clear();
+    if (archive.empty()) {
+      std::cerr << "mods: the game has no " << key << ": the files for it are left out\n";
+      continue;
+    }
+    const std::string name = PathToString(archive.filename());
+    const cvm::Plan plan = cvm::PlanReplacements(archive, name, replacements);
+    for (const cvm::Problem &problem : plan.problems)
+      std::cerr << "mods: " << problem.where << ": " << problem.why << ", left out\n";
+    if (plan.writes.empty())
+      continue;
+    std::cerr << "mods: " << name << ": " << plan.in_place + plan.at_end
+              << " file(s) inside it (" << plan.in_place << " in place, " << plan.at_end
+              << " at the end)\n";
+
+    // The mods' files, read from their folders; the small changes, from
+    // files written to the cache.
+    std::map<fs::path, DiscIO::Riivolution::Patch> by_folder;
+    const fs::path small = cache / name;
+    std::size_t count = 0;
+    for (const cvm::Write &write : plan.writes) {
+      fs::path folder;
+      std::string external;
+      if (!write.file.empty()) {
+        folder = write.file.parent_path();
+        external = "/" + PathToString(write.file.filename());
+      } else {
+        fs::create_directories(small, ec);
+        const std::string file = std::to_string(count++) + ".bin";
+        std::ofstream out(small / file, std::ios::binary | std::ios::trunc);
+        out.write(reinterpret_cast<const char *>(write.bytes.data()),
+                  static_cast<std::streamsize>(write.bytes.size()));
+        if (!out) {
+          std::cerr << "mods: " << name << ": can't write the cache, its files are left out\n";
+          by_folder.clear();
+          break;
+        }
+        folder = small;
+        external = "/" + file;
+      }
+      DiscIO::Riivolution::Patch &patch = by_folder[folder];
+      if (!patch.m_file_data_loader) {
+        patch.m_id = name;
+        const std::string root = PathToString(folder);
+        patch.m_file_data_loader =
+            std::make_shared<DiscIO::Riivolution::FileDataLoaderHostFS>(
+                root, root + "/mod.ini", "");
+      }
+      DiscIO::Riivolution::File change;
+      change.m_disc = "/" + name;
+      change.m_external = external;
+      change.m_offset = static_cast<u32>(write.offset);
+      change.m_resize = false;
+      change.m_create = false;
+      patch.m_file_patches.push_back(std::move(change));
+    }
+    for (auto &[folder, patch] : by_folder)
+      patches.push_back(std::move(patch));
+  }
+  return patches;
+}
+
+// The mods' data patches (data_patches.hpp): each patches.ini read, the
+// patched copies of the files they change made in Cache/patched/<disc ID>/,
+// and those copies as one more file patch, after the mods' own files.
+std::optional<DiscIO::Riivolution::Patch>
+DataPatchFiles(const std::vector<std::filesystem::path> &mods,
+               const std::filesystem::path &game_root,
+               const std::filesystem::path &user_directory,
+               const std::string &disc_id, bool static_recomp) {
+  namespace fs = std::filesystem;
+  namespace dp = moderngekko::data_patches;
+  std::vector<dp::ModPatches> with_patches;
+  for (const fs::path &mod : mods) {
+    std::error_code ec;
+    if (!fs::is_regular_file(mod / "patches.ini", ec))
+      continue;
+    std::ifstream file(mod / "patches.ini", std::ios::binary);
+    const std::string text((std::istreambuf_iterator<char>(file)),
+                           std::istreambuf_iterator<char>());
+    std::vector<dp::Problem> problems;
+    dp::ModPatches entry{PathToString(mod.filename()), mod,
+                         dp::Parse(text, disc_id, &problems)};
+    for (const dp::Problem &problem : problems)
+      std::cerr << "mods: " << entry.id << ": " << problem.where << ": "
+                << problem.why << ", left out\n";
+    with_patches.push_back(std::move(entry));
+  }
+  const fs::path out = user_directory / "Cache" / "patched" /
+                       (disc_id.empty() ? std::string("game") : disc_id);
+  if (with_patches.empty()) {
+    std::error_code ec;
+    fs::remove_all(out, ec);
+    return std::nullopt;
+  }
+  const dp::Built built =
+      dp::BuildPatchedFiles(with_patches, game_root / "files", out, static_recomp);
+  for (const dp::Problem &problem : built.problems)
+    std::cerr << "mods: " << problem.where << ": " << problem.why << ", left out\n";
+  for (std::size_t i = 0; i < with_patches.size(); ++i)
+    std::cerr << "mods: " << with_patches[i].id << ": "
+              << built.applied_by_mod[i] << " data patch(es)\n";
+  if (built.files.empty())
+    return std::nullopt;
+  DiscIO::Riivolution::Patch patch;
+  patch.m_id = "data-patches";
+  const std::string root = PathToString(out);
+  patch.m_file_data_loader =
+      std::make_shared<DiscIO::Riivolution::FileDataLoaderHostFS>(
+          root, root + "/patches.ini", "");
+  for (const std::string &file : built.files) {
+    DiscIO::Riivolution::File patched;
+    patched.m_disc = "/" + file;
+    patched.m_external = "/" + file;
+    patched.m_create = true;
+    patched.m_resize = true;
+    patch.m_file_patches.push_back(std::move(patched));
+  }
+  return patch;
 }
 } // namespace
 
@@ -882,6 +1150,38 @@ RuntimeCreateResult Runtime::Create(RuntimeConfig config) {
   // Dolphin's on-screen messages ("Wii Remote 1 connected", savestate
   // notices...) are not shown over the game.
   Config::SetBase(Config::MAIN_OSD_MESSAGES, false);
+  // Custom textures: only the texture packs among the mods turned on for
+  // this game, gathered into one folder (texture_mods.hpp). With none, they
+  // stay off.
+  {
+    namespace fs = std::filesystem;
+    std::vector<fs::path> texture_packs;
+    for (const fs::path &mod : impl->config.file_mods)
+      if (texture_mods::HasTextures(mod))
+        texture_packs.push_back(mod);
+    const fs::path texture_root = impl->config.user_directory / "Cache" / "textures";
+    bool custom_textures = false;
+    if (texture_packs.empty()) {
+      texture_mods::ClearTextureView(texture_root, impl->metadata.disc_id);
+    } else {
+      const texture_mods::TextureView view = texture_mods::BuildTextureView(
+          texture_packs, texture_root, impl->metadata.disc_id);
+      if (!view.error.empty()) {
+        std::cerr << "mods: textures left out: " << view.error << '\n';
+      } else {
+        std::cerr << "mods: textures: " << view.textures << " from " << view.mods
+                  << " mod(s)" << (view.reused ? ", as last time" : "");
+        if (view.copied != 0)
+          std::cerr << ", " << view.copied << " copied (no link possible)";
+        std::cerr << '\n';
+        if (view.textures != 0) {
+          File::SetUserPath(D_HIRESTEXTURES_IDX, PathToString(texture_root));
+          custom_textures = true;
+        }
+      }
+    }
+    Config::SetBase(Config::GFX_HIRES_TEXTURES, custom_textures);
+  }
 
   auto &jit = Core::System::GetInstance().GetJitInterface();
   StaticRecompModuleSource recomp_source;
@@ -974,6 +1274,25 @@ RuntimeRunResult Runtime::Run() {
     return {RuntimeExitReason::BootFailed,
             RuntimeError{RuntimeErrorCode::BootFailed,
                          "Dolphin rejected the extracted disc"}};
+  }
+  if (!m_impl->config.file_mods.empty()) {
+    const bool static_recomp =
+        SelectCPUCore() == PowerPC::CPUCore::StaticRecomp;
+    std::vector<DiscIO::Riivolution::Patch> patches =
+        FileModPatches(m_impl->config.file_mods, static_recomp);
+    // Then the files inside the .cvm archives: their places are worked out
+    // from the game's archives.
+    for (DiscIO::Riivolution::Patch &patch :
+         CvmModPatches(m_impl->config.file_mods, m_impl->config.game_root,
+                       m_impl->config.user_directory, m_impl->metadata.disc_id))
+      patches.push_back(std::move(patch));
+    // Data patches last: their copies already start from the mods' files.
+    if (auto data = DataPatchFiles(m_impl->config.file_mods,
+                                   m_impl->config.game_root,
+                                   m_impl->config.user_directory,
+                                   m_impl->metadata.disc_id, static_recomp))
+      patches.push_back(std::move(*data));
+    AddRiivolutionPatches(boot.get(), std::move(patches));
   }
   m_impl->state_hook =
       Core::AddOnStateChangedCallback([this](Core::State state) {

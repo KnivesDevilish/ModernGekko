@@ -6,6 +6,7 @@
 #include <iterator>
 #include <string>
 #include <utility>
+#include <vector>
 
 #ifdef MODERNGEKKO_GAMECUBE_CONTROLLERS
 constexpr const char *CONTROLLER_CONFIG_NAME = "GCPadNew.ini";
@@ -554,6 +555,26 @@ int main() {
       if (size.width != option.width || size.height != option.height)
         return 108;
     }
+  }
+
+  // The file mods turned on: kept in order, once each, through a save.
+  {
+    const fs::path mods = directory / "mods";
+    moderngekko::frontend::ConfigResult mods_config = loaded;
+    mods_config.mods = {"spanish-voices", "new music", "spanish-voices"};
+    if (!moderngekko::frontend::SaveConfig(mods, mods_config, &error))
+      return 120;
+    const auto reloaded = moderngekko::frontend::LoadConfig(mods, false);
+    if (!reloaded ||
+        reloaded.mods != std::vector<std::string>{"spanish-voices", "new music"})
+      return 121;
+    std::ofstream(mods / "config.ini", std::ios::trunc)
+        << "[Video]\nresolution=1920x1080\n[Mods]\nmod=b\nmod=a\nmod=\nmod=b\n";
+    const auto by_hand = moderngekko::frontend::LoadConfig(mods, false);
+    if (!by_hand || by_hand.mods != std::vector<std::string>{"b", "a"})
+      return 122;
+    if (!moderngekko::frontend::LoadConfig(directory, false).mods.empty())
+      return 123;
   }
 
   fs::remove_all(directory);

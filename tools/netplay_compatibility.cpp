@@ -2,6 +2,7 @@
 
 #include "Common/Crypto/SHA1.h"
 #include "Common/Version.h"
+#include "game_files_hash.hpp"
 #include "moderngekko/cpu_state.h"
 #include "moderngekko/mod_loader.hpp"
 #include "moderngekko/module_loader.hpp"
@@ -9,6 +10,7 @@
 #include <array>
 #include <cstdint>
 #include <fstream>
+#include <iterator>
 #include <memory>
 #include <span>
 #include <string>
@@ -71,6 +73,45 @@ std::string ModsFingerprint(const RuntimeConfig &config) {
         context->Update(
             std::span(buffer.data(), static_cast<std::size_t>(count)));
     }
+  }
+  return Common::SHA1::DigestToString(context->Finish());
+}
+
+// The file mods turned on (RuntimeConfig::file_mods), in order: each one's
+// folder name, the hash of its files/, as the game files' own (each file's
+// hash is remembered until it changes, in Cache/mods/), and its patches.ini.
+// Every player must have the same mods on, with the same files and the same
+// data patches. Texture packs (mods with only textures/) don't count: they
+// change what each player sees, not the game.
+std::string FileModsFingerprint(const RuntimeConfig &config) {
+  namespace fs = std::filesystem;
+  std::vector<fs::path> counted;
+  for (const fs::path &mod : config.file_mods) {
+    std::error_code ec;
+    if (fs::is_directory(mod / "files", ec) ||
+        fs::is_regular_file(mod / "patches.ini", ec))
+      counted.push_back(mod);
+  }
+  auto context = Common::SHA1::CreateContext();
+  HashU64(*context, counted.size());
+  for (const fs::path &mod : counted) {
+    const std::u8string name = mod.filename().u8string();
+    const std::string id(name.begin(), name.end());
+    HashString(*context, id);
+    std::error_code ec;
+    if (fs::is_directory(mod / "files", ec)) {
+      const auto files = CachedDirectorySha256(
+          mod / "files", config.user_directory / "Cache" / "mods" / (id + ".sha256"));
+      if (!files)
+        return "rejected";
+      HashString(*context, *files);
+    } else {
+      HashString(*context, "no files");
+    }
+    std::ifstream patches(mod / "patches.ini", std::ios::binary);
+    const std::string text((std::istreambuf_iterator<char>(patches)),
+                           std::istreambuf_iterator<char>());
+    HashString(*context, text);
   }
   return Common::SHA1::DigestToString(context->Finish());
 }
@@ -141,12 +182,12 @@ std::string CompatibilityFingerprint(const RuntimeConfig &config,
       module = "rejected";
     }
   }
-  return "moderngekko-netplay-8|" + Common::GetScmRevGitStr() + "|" +
+  return "moderngekko-netplay-9|" + Common::GetScmRevGitStr() + "|" +
          game.disc_id + "|" + game.dol_sha256 + "|" + game.rel_sha256 + "|" +
          game.assets_sha256 + "|" +
          std::to_string(MODERNGEKKO_MODULE_ABI_VERSION) + "|" +
          std::to_string(MODERNGEKKO_CPU_ABI_VERSION) + "|" +
          std::to_string(sizeof(CPUState)) + "|" + module + "|" +
-         ModsFingerprint(config);
+         ModsFingerprint(config) + "|" + FileModsFingerprint(config);
 }
 } // namespace moderngekko::frontend

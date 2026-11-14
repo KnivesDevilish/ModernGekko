@@ -17,6 +17,7 @@
 #include "launcher_process.hpp"
 #include "launcher_transition.hpp"
 #include "launcher_user_folder.hpp"
+#include "file_mods.hpp"
 #include "launcher_save.hpp"
 #include "launcher_splash.hpp"
 #include "launcher_ui.hpp"
@@ -994,8 +995,8 @@ std::array<SummaryTile, 4> BuildPlaySummaryTiles(const PlaySummary& summary)
 
   tiles[3] = {"##summary_mods", Tr("MODS"),
               summary.installed_mods == 0   ? std::string(Tr("None"))
-              : summary.installed_mods == 1 ? std::string(Tr("1 installed"))
-                                            : Format(Tr("%d installed"), summary.installed_mods),
+              : summary.installed_mods == 1 ? std::string(Tr("1 on"))
+                                            : Format(Tr("%d on"), summary.installed_mods),
               false,
               Format(Tr("Mods go in %s"), summary.mods_folder.c_str()) + "\n" +
                   Tr("Open Mods & expansions"),
@@ -1169,6 +1170,8 @@ void DrawWebLink(const char* label, const char* url)
 }
 
 // One "name: detail" list of the Credits page, the names in bold.
+void DimWrappedText(std::string_view text);  // below, with WrappedText
+
 void DrawCreditsRows(const char* id, std::span<const std::array<const char*, 2>> rows,
                      ImFont* bold)
 {
@@ -1184,9 +1187,9 @@ void DrawCreditsRows(const char* id, std::span<const std::array<const char*, 2>>
     ImGui::TextUnformatted(Tr(name));
     ImGui::PopFont();
     ImGui::TableNextColumn();
-    ImGui::PushTextWrapPos(0.0f);
-    ImGui::TextDisabled("%s", Tr(detail));
-    ImGui::PopTextWrapPos();
+    // Wrapped as the rest of the launcher's text: Japanese, and names such
+    // as stun.dolphin-emu.org, break where they should.
+    DimWrappedText(Tr(detail));
   }
   ImGui::EndTable();
 }
@@ -1224,7 +1227,7 @@ void DrawCreditsPage(ImFont* bold, const std::function<void()>& version_section 
   if (top_columns)
     EndPageColumns();
 
-  static constexpr std::array<std::array<const char*, 2>, 6> BUILT_ON = {{
+  static constexpr std::array<std::array<const char*, 2>, 7> BUILT_ON = {{
       {"DolRecomp", MODERNGEKKO_UI_TEXT("Static recompilation framework")},
       {"ModernGekko", MODERNGEKKO_UI_TEXT("Runtime for GameCube/Wii recomps, by Hyperway")},
       {"RecompCore", "SpecialK / aharonahdoot"},
@@ -1234,6 +1237,10 @@ void DrawCreditsPage(ImFont* bold, const std::function<void()>& version_section 
       // Netplay's invite codes come from Dolphin's traversal server.
       {MODERNGEKKO_UI_TEXT("Invite codes"),
        MODERNGEKKO_UI_TEXT("Dolphin's public server (stun.dolphin-emu.org)")},
+      // Its source (GPL v3) is where the data patches' gear.* values come from.
+      {"Sonic Riders TE",
+       MODERNGEKKO_UI_TEXT("The Tournament Edition team (RidersBoulevard): the layout of the "
+                           "Extreme Gear table")},
   }};
   // The projects get the wider column: their names come with a line each.
   const bool bottom_columns = BeginPageColumns("##credits_bottom", 0.6f);
@@ -1241,9 +1248,10 @@ void DrawCreditsPage(ImFont* bold, const std::function<void()>& version_section 
   DrawCreditsRows("##credits_built_on_rows", BUILT_ON, bold);
   EndSection();
 
-  static constexpr std::array<std::array<const char*, 2>, 6> LICENSES = {{
+  static constexpr std::array<std::array<const char*, 2>, 7> LICENSES = {{
       {"Sonic Riders: Source", "GNU GPL v3"},
       {"ModernGekko", "GNU GPL v3"},
+      {"Sonic Riders TE", "GNU GPL v3"},
       {"Dolphin", MODERNGEKKO_UI_TEXT("GNU GPL v2 or later")},
       {"SDL 3", MODERNGEKKO_UI_TEXT("zlib License")},
       {"Dear ImGui, pl_mpeg", MODERNGEKKO_UI_TEXT("MIT License")},
@@ -1388,13 +1396,24 @@ std::string ReadPatchNotes(const fs::path& path)
   return text;
 }
 
-// Text at the cursor, wrapped to the room left: one with Japanese by
-// BreakLines (launcher_line_break.hpp), as Dear ImGui would cut it anywhere,
-// even inside a name; the rest by Dear ImGui. The patch notes' lines, and the
-// choices' descriptions in Settings.
+// Whether `text` has a file name such as patches.ini: a '.' with a letter or
+// digit right after it. Dear ImGui may cut a line after that '.'.
+bool HasDottedName(std::string_view text)
+{
+  for (std::size_t i = 0; i + 1 < text.size(); ++i)
+    if (text[i] == '.' && std::isalnum(static_cast<unsigned char>(text[i + 1])))
+      return true;
+  return false;
+}
+
+// Text at the cursor, wrapped to the room left: one with Japanese, or with a
+// file name, by BreakLines (launcher_line_break.hpp), as Dear ImGui would cut
+// it anywhere, even inside a name ("patches." on one line, "ini" on the
+// next); the rest by Dear ImGui. The patch notes' lines, and the choices'
+// descriptions in Settings.
 void WrappedText(std::string_view text)
 {
-  if (!moderngekko::frontend::HasJapanese(text))
+  if (!moderngekko::frontend::HasJapanese(text) && !HasDottedName(text))
   {
     ImGui::TextUnformatted(text.data(), text.data() + text.size());
     return;
@@ -3341,9 +3360,15 @@ int main(int argc, char** argv)
   // The runner loads mods from the same two folders.
   const std::vector<fs::path> mod_folders = {release_directory / "Mods", user_directory / "Mods"};
   std::vector<fs::path> installed_mods;
+  // File mods (file_mods.hpp), read when the Mods page opens; config.ini's
+  // [Mods] says which are on.
+  std::vector<moderngekko::frontend::FileMod> file_mods;
+  std::vector<moderngekko::frontend::FileModProblem> file_mod_problems;
   const auto open_mods_page = [&] {
     current_page = LauncherPage::Mods;
     installed_mods = moderngekko::frontend::ListInstalledMods(mod_folders);
+    file_mod_problems.clear();
+    file_mods = moderngekko::frontend::ListFileMods(mod_folders, &file_mod_problems);
   };
   int result = 0;
   // Set when the player chose Quit game in the in-game menu: the launcher
@@ -3604,9 +3629,9 @@ int main(int argc, char** argv)
                           "players must use the same release.");
         break;
       case moderngekko::frontend::NetplayExitCode::CompatibilityMismatch:
-        launch_error = Tr("The extracted game or recomp module does not match the "
-                          "host. Both players need the same game revision and "
-                          "release.");
+        launch_error = Tr("The extracted game, the mods turned on or the recomp "
+                          "module don't match the host's. Every player needs the "
+                          "same game revision, release and mods.");
         break;
       case moderngekko::frontend::NetplayExitCode::RoomFull:
         launch_error = Tr("All four controller slots are already occupied.");
@@ -4625,7 +4650,15 @@ int main(int argc, char** argv)
               summary_time_played = moderngekko::frontend::ReadTimePlayed(
                   user_directory, current_metadata.metadata->disc_id);
             }
+            // Mods that load: every code mod, and the file mods turned on.
             summary_installed_mods = moderngekko::frontend::CountInstalledMods(mod_folders);
+            const auto listed_mods = moderngekko::frontend::ListFileMods(mod_folders);
+            for (const std::string& id : config.mods)
+            {
+              if (std::ranges::find(listed_mods, id, &moderngekko::frontend::FileMod::id) !=
+                  listed_mods.end())
+                ++summary_installed_mods;
+            }
             summary_stale = false;
           }
           PlaySummary summary;
@@ -5647,12 +5680,95 @@ int main(int argc, char** argv)
     const bool mods_columns =
         BeginPageColumns("##mods_columns", mods_art_upright ? 0.42f : 0.48f);
     BeginSection("##mods_installed", Tr("INSTALLED MODS"));
-    if (installed_mods.empty())
-    {
+    ImGui::PushTextWrapPos(0.0f);
+    if (file_mods.empty() && installed_mods.empty())
       ImGui::TextUnformatted(Tr("No mods installed yet."));
-    }
-    else
+    // File mods, by game, each with a switch: on, it is used the next time
+    // its game starts (config.ini's [Mods], saved at once).
+    const auto set_mod_on = [&](const std::string& id, bool on) {
+      const std::vector<std::string> previous = config.mods;
+      std::erase(config.mods, id);
+      if (on)
+        config.mods.push_back(id);
+      config.resolution = resolutions[resolution_index].text;
+      config.show_fps_in_title = show_fps_in_title;
+      config.controller = selected_controller;
+      std::string error;
+      if (!moderngekko::frontend::SaveConfig(user_directory, config, &error))
+      {
+        config.mods = previous;
+        std::lock_guard lock(dialog.mutex);
+        dialog.error = std::move(error);
+      }
+      summary_stale = true;
+    };
+    std::vector<std::string> mod_games;
+    for (const moderngekko::frontend::KnownGame& game : moderngekko::frontend::KnownGames())
+      mod_games.push_back(game.disc_id);
+    for (const moderngekko::frontend::FileMod& mod : file_mods)
     {
+      if (std::ranges::find(mod_games, mod.game) == mod_games.end())
+        mod_games.push_back(mod.game);
+    }
+    for (const std::string& game_id : mod_games)
+    {
+      bool heading = false;
+      for (const moderngekko::frontend::FileMod& mod : file_mods)
+      {
+        if (mod.game != game_id)
+          continue;
+        if (!heading)
+        {
+          // The game's name, or its ID for a game this build doesn't play.
+          const auto& games = moderngekko::frontend::KnownGames();
+          const auto known =
+              std::ranges::find(games, game_id, &moderngekko::frontend::KnownGame::disc_id);
+          ImGui::Spacing();
+          ImGui::TextDisabled("%s", known != games.end() ? known->title.c_str() : game_id.c_str());
+          heading = true;
+        }
+        bool on = std::ranges::find(config.mods, mod.id) != config.mods.end();
+        if (ImGui::Checkbox((mod.name + "##mod_" + mod.id).c_str(), &on))
+          set_mod_on(mod.id, on);
+        ImGui::SetItemTooltip("%s", moderngekko::frontend::PathText(mod.folder).c_str());
+        // Version and author beside the name when they fit there, else
+        // under it; the description under it, past the switch.
+        const float past_switch =
+            ImGui::GetFrameHeight() + ImGui::GetStyle().ItemInnerSpacing.x;
+        std::string details = mod.version;
+        if (!mod.author.empty())
+          details += (details.empty() ? "" : "  \xC2\xB7  ") + mod.author;
+        // A texture pack says so: it changes only what is drawn.
+        if (mod.has_textures)
+          details += std::string(details.empty() ? "" : "  \xC2\xB7  ") + Tr("Textures");
+        // And one with data patches: it changes values inside the game.
+        if (mod.has_patches)
+          details += std::string(details.empty() ? "" : "  \xC2\xB7  ") + Tr("Data patches");
+        bool details_shown = details.empty();
+        if (!details_shown)
+        {
+          const float right = ImGui::GetItemRectMax().x + ImGui::GetStyle().ItemSpacing.x;
+          if (right + ImGui::CalcTextSize(details.c_str()).x <=
+              ImGui::GetCursorScreenPos().x + ImGui::GetContentRegionAvail().x)
+          {
+            ImGui::SameLine();
+            ImGui::TextDisabled("%s", details.c_str());
+            details_shown = true;
+          }
+        }
+        ImGui::Indent(past_switch);
+        if (!details_shown)
+          ImGui::TextDisabled("%s", details.c_str());
+        if (!mod.description.empty())
+          DimWrappedText(mod.description);
+        ImGui::Unindent(past_switch);
+      }
+    }
+    // Code mods: always loaded, no switch.
+    if (!installed_mods.empty())
+    {
+      ImGui::Spacing();
+      ImGui::TextDisabled("%s", Tr("Code mods (.mgm), always loaded"));
       for (const fs::path& mod : installed_mods)
       {
         ImGui::Bullet();
@@ -5661,20 +5777,30 @@ int main(int argc, char** argv)
         ImGui::SetItemTooltip("%s", moderngekko::frontend::PathText(mod).c_str());
       }
     }
+    // Folders that look like mods but can't be used, and why.
+    if (!file_mod_problems.empty())
+      ImGui::Spacing();
+    for (const moderngekko::frontend::FileModProblem& problem : file_mod_problems)
+    {
+      ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.75f, 0.3f, 1.0f));
+      WrappedText(
+          Format(Tr("%s can't be used: %s"), problem.folder.c_str(), Tr(problem.why)));
+      ImGui::PopStyleColor();
+    }
     ImGui::Spacing();
-    ImGui::PushTextWrapPos(0.0f);
-    ImGui::TextDisabled("%s", Tr("Mod packages (.mgm) go in this folder and load when the game "
-                                 "starts:"));
+    DimWrappedText(Tr("Each mod is a folder in this one, with a mod.ini and a files folder, a "
+                      "textures folder, a patches.ini or several of them; the README says how to "
+                      "make one. In Netplay, every player needs the same mods on, except texture "
+                      "packs."));
     ImGui::TextUnformatted(moderngekko::frontend::PathText(user_directory / "Mods").c_str());
     ImGui::PopTextWrapPos();
     ImGui::Spacing();
     if (ImGui::Button(Tr("Open folder")))
       OpenFolder(user_directory / "Mods");
-    ImGui::Spacing();
-    ImGui::PushTextWrapPos(0.0f);
-    ImGui::TextDisabled("%s", Tr("Mod support is experimental: there are no mods made for "
-                                 "Sonic Riders: Source yet."));
-    ImGui::PopTextWrapPos();
+    ImGui::SameLine();
+    // A mod copied in while the page is open shows after this.
+    if (ImGui::Button(Tr("Refresh")))
+      open_mods_page();
     EndSection();
     if (mods_columns)
       NextPageColumn();

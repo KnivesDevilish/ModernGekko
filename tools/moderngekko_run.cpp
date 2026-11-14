@@ -1,4 +1,5 @@
 #include "cache_affinity.hpp"
+#include "file_mods.hpp"
 #include "frontend_config.hpp"
 #include "dol_patch.hpp"
 #include "game_borders.hpp"
@@ -634,6 +635,23 @@ int RunMain(int argc, char **argv) {
   if (use_default_mods) {
     config.mod_directories.push_back(executable_directory / "Mods");
     config.mod_directories.push_back(config.user_directory / "Mods");
+    // File mods (file_mods.hpp): the ones config.ini turns on that are made
+    // for this game, in its order.
+    std::vector<moderngekko::frontend::FileModProblem> mod_problems;
+    const auto file_mods = moderngekko::frontend::ListFileMods(
+        {executable_directory / "Mods", config.user_directory / "Mods"},
+        &mod_problems);
+    for (const auto &problem : mod_problems)
+      std::cerr << "mods: " << problem.folder << ": " << problem.why
+                << ", left out\n";
+    const std::string disc_id = moderngekko::frontend::ReadDiscId(config.game_root);
+    for (const auto &mod : moderngekko::frontend::EnabledFileMods(
+             file_mods, frontend_config.mods, disc_id)) {
+      std::cerr << "mods: " << mod.name
+                << (mod.version.empty() ? "" : " " + mod.version) << " ("
+                << mod.id << ") is on\n";
+      config.file_mods.push_back(mod.folder);
+    }
   }
 
   std::string solo_controller = frontend_config.controller;
