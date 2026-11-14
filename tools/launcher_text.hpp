@@ -427,6 +427,10 @@ inline constexpr Translation SPANISH_TEXTS[] = {
      "En Windows, Direct3D 11 funciona en casi cualquier PC."},
     {"\n\nDetails were written to:\n%s", "\n\nLos detalles se guardaron en:\n%s"},
     {"Session failed", "La sesión falló"},
+    {"Checking the game files: %d%%", "Comprobando los archivos del juego: %d%%"},
+    {"Only the first time: Netplay makes sure every player has the same game.",
+     "Solo la primera vez: Netplay comprueba que todos los jugadores tengan el mismo juego."},
+    {"Esc or B: cancel", "Esc o B: cancelar"},
 
     // Netplay lobby, top to bottom
     {"HOST", "ANFITRIÓN"},
@@ -962,6 +966,10 @@ inline constexpr Translation JAPANESE_TEXTS[] = {
      "Windowsでは、Direct3D 11はほとんどのPCで動作します。"},
     {"\n\nDetails were written to:\n%s", "\n\n詳細の保存先：\n%s"},
     {"Session failed", "セッションに失敗しました"},
+    {"Checking the game files: %d%%", "ゲームファイルを確認しています：%d%%"},
+    {"Only the first time: Netplay makes sure every player has the same game.",
+     "初回のみ：ネットプレイでは全員が同じゲームを持っているか確認します。"},
+    {"Esc or B: cancel", "Esc か B：キャンセル"},
     // Netplay lobby, top to bottom
     {"HOST", "ホスト"},
     {"CPU core for every player: %s", "全員のCPUコア：%s"},

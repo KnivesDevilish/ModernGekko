@@ -6,6 +6,8 @@
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <utility>
+#include <vector>
 
 namespace fs = std::filesystem;
 
@@ -78,6 +80,54 @@ int main()
   // No folder, no hash.
   if (CachedDirectorySha256(base / "missing", cache))
     return 8;
+
+  // Progress: from 0 to every byte that has to be read, never backwards.
+  std::uintmax_t all_bytes = 0;
+  for (const auto& entry : fs::recursive_directory_iterator(files))
+  {
+    if (entry.is_regular_file())
+      all_bytes += entry.file_size();
+  }
+  fs::remove(cache);
+  std::vector<std::pair<std::uintmax_t, std::uintmax_t>> reports;
+  const auto record = [&](std::uintmax_t read, std::uintmax_t to_read) {
+    reports.emplace_back(read, to_read);
+    return true;
+  };
+  const auto seventh = CachedDirectorySha256(files, cache, &rehashed, record);
+  if (!seventh || *seventh != *fifth || rehashed != 4 || reports.size() != 5 ||
+      reports.front() != std::pair<std::uintmax_t, std::uintmax_t>(0, all_bytes) ||
+      reports.back() != std::pair<std::uintmax_t, std::uintmax_t>(all_bytes, all_bytes))
+    return 9;
+  for (std::size_t i = 1; i < reports.size(); ++i)
+  {
+    if (reports[i].first < reports[i - 1].first || reports[i].second != all_bytes)
+      return 10;
+  }
+
+  // Nothing to read: no progress at all.
+  reports.clear();
+  const auto eighth = CachedDirectorySha256(files, cache, &rehashed, record);
+  if (!eighth || *eighth != *fifth || rehashed != 0 || !reports.empty())
+    return 11;
+
+  // Stopped after the first file read: no hash, but that file is kept in the
+  // cache, and the next check reads only the others.
+  fs::remove(cache);
+  const auto stopped = CachedDirectorySha256(
+      files, cache, &rehashed, [](std::uintmax_t read, std::uintmax_t) { return read == 0; });
+  if (stopped || rehashed != 1 || !fs::exists(cache))
+    return 12;
+  const auto resumed = CachedDirectorySha256(files, cache, &rehashed);
+  if (!resumed || *resumed != *fifth || rehashed != 3)
+    return 13;
+
+  // Stopped before reading anything: no hash, nothing read.
+  fs::remove(cache);
+  if (CachedDirectorySha256(files, cache, &rehashed,
+                            [](std::uintmax_t, std::uintmax_t) { return false; }) ||
+      rehashed != 0)
+    return 14;
 
   fs::remove_all(base);
   return 0;

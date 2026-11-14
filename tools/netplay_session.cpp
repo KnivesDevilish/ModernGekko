@@ -859,12 +859,34 @@ int RunNetplayLobby(RuntimeConfig runtime_config, ConfigResult frontend_config,
   // Every player's game files must match, so all of files/ is hashed. That
   // is several GB; each file's hash is remembered until the file changes, so
   // only the first lobby (or one after the files changed) reads them all.
+  // Meanwhile the launcher's loading screen shows how far it has got, and
+  // the log says it every 10%.
   const auto files_check_started = std::chrono::steady_clock::now();
   std::size_t files_read = 0;
   GameMetadata metadata = *inspected.metadata;
+  int files_percent = -1;
+  int files_logged = -1;
+  const auto files_progress = [&](std::uintmax_t read, std::uintmax_t to_read) {
+    const int percent = to_read == 0 ? 100 : static_cast<int>(read * 100 / to_read);
+    if (files_percent < 0)
+      std::cerr << "netplay: checking the game files, " << (to_read >> 20)
+                << " MB to read (only the first time, or after they change)\n";
+    if (percent != files_percent)
+    {
+      files_percent = percent;
+      TellLauncherFilesChecked(percent);
+    }
+    if (percent / 10 > files_logged / 10 && percent < 100)
+    {
+      files_logged = percent;
+      std::cerr << "netplay: game files checked: " << percent << "%\n";
+    }
+    return true;
+  };
   const auto files_hash = CachedDirectorySha256(
       metadata.root / "files",
-      runtime_config.user_directory / "Cache" / "game-files.sha256", &files_read);
+      runtime_config.user_directory / "Cache" / "game-files.sha256", &files_read,
+      files_progress);
   if (!files_hash) {
     detail::SetExternalUICommon(false);
     UICommon::Shutdown();

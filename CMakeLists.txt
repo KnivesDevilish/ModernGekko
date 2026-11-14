@@ -88,8 +88,8 @@ set(MODERNGEKKO_DISC_PREPARER_OUTPUT_NAME "" CACHE STRING
     "Optional adjacent disc preparation executable")
 set(MODERNGEKKO_DOL_PATCH_MANIFEST "" CACHE FILEPATH
     "Optional expected-word DOL patch manifest bundled with the frontend")
-set(MODERNGEKKO_GAME_SETTINGS_OVERRIDE "" CACHE FILEPATH
-    "Optional game INI copied over the bundled Dolphin settings")
+set(MODERNGEKKO_GAME_SETTINGS_OVERRIDE "" CACHE STRING
+    "Optional game INIs (;-separated), each copied over the bundled Dolphin settings of the same name")
 set(MODERNGEKKO_ACCEPTED_SOURCE_DISC_ID "" CACHE STRING
     "Source disc ID accepted by the optional disc preparer")
 set(MODERNGEKKO_LAUNCHER_BANNER "" CACHE FILEPATH
@@ -716,14 +716,16 @@ if(MODERNGEKKO_ENABLE_DOLPHIN_RUNTIME)
                     "${MODERNGEKKO_DOL_PATCH_MANIFEST}"
                     "$<TARGET_FILE_DIR:moderngekko-run>/patches/${_moderngekko_dol_patch_name}")
     endif()
-    if(MODERNGEKKO_GAME_SETTINGS_OVERRIDE)
+    # Each game INI (Sys/GameSettings/<disc ID>.ini) replaces the bundled one
+    # of the same name, or adds it.
+    foreach(_moderngekko_settings IN LISTS MODERNGEKKO_GAME_SETTINGS_OVERRIDE)
         get_filename_component(_moderngekko_settings_name
-            "${MODERNGEKKO_GAME_SETTINGS_OVERRIDE}" NAME)
+            "${_moderngekko_settings}" NAME)
         add_custom_command(TARGET moderngekko-run POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                    "${MODERNGEKKO_GAME_SETTINGS_OVERRIDE}"
+                    "${_moderngekko_settings}"
                     "$<TARGET_FILE_DIR:moderngekko-run>/Sys/GameSettings/${_moderngekko_settings_name}")
-    endif()
+    endforeach()
     # The Netplay lobby (run by moderngekko-run) draws Resources/lobby-art.png
     # next to itself on its left; without it the lobby is text only.
     moderngekko_add_resource(moderngekko-run "${MODERNGEKKO_LOBBY_ART}" lobby-art.png)
@@ -759,6 +761,7 @@ if(MODERNGEKKO_ENABLE_DOLPHIN_RUNTIME)
         tools/dol_patch.cpp
         tools/launcher_music.cpp
         tools/launcher_preview_video.cpp
+        tools/launcher_process.cpp
         tools/launcher_update.cpp
         tools/windows_firewall.cpp
         vendor/dolphin/Externals/imgui/imgui/backends/imgui_impl_sdl3.cpp

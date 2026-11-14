@@ -3,7 +3,9 @@
 // the middle, coming in as on the game selection screen and breathing, and
 // under it a row of chevrons in the launcher's green, lit one after the other
 // as if getting ready to boost. Without a logo (a build without the selection
-// screen's art), only the chevrons.
+// screen's art), only the chevrons. Under them, what the game says it is doing
+// (the Netplay lobby's first check of the game files), and once the loading
+// has gone on for a while, how to stop it.
 #pragma once
 
 #include "launcher_game_select_layout.hpp"
@@ -15,6 +17,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <string>
 
 namespace moderngekko::frontend::ui
 {
@@ -26,10 +29,23 @@ struct LoadingLogo
   float height = 0.0f;
 };
 
+// Seconds of loading before Esc or B stops it (and the screen says so): a
+// press meant for the menu the player just left doesn't count.
+inline constexpr double LOADING_CANCEL_AFTER = 3.0;
+
+// The lines under the chevrons; empty ones aren't drawn.
+struct LoadingText
+{
+  std::string status;  // what the game is doing, in white
+  std::string detail;  // why, under it, dimmer
+  std::string hint;    // how to stop, at the bottom
+};
+
 // Over the whole window (origin, size), as the transition has it now.
 inline void DrawLoadingScreen(ImDrawList* list, ImVec2 origin, ImVec2 size,
                               const GameTransition& transition, double now,
-                              const LoadingLogo& logo, float scale)
+                              const LoadingLogo& logo, float scale,
+                              const LoadingText& text = {})
 {
   using namespace game_select_motion;
   const float black = transition.Black(now);
@@ -86,5 +102,22 @@ inline void DrawLoadingScreen(ImDrawList* list, ImVec2 origin, ImVec2 size,
     list->AddPolyline(points.data(), 3, colour(0.18f + 0.82f * lit * lit), ImDrawFlags_None,
                       thickness);
   }
+
+  // The text lines, centred, in the window's font.
+  ImFont* font = ImGui::GetFont();
+  const float font_size = ImGui::GetFontSize();
+  const auto line = [&](const std::string& line_text, float y, float brightness) {
+    if (line_text.empty())
+      return;
+    const ImVec2 extent = ImGui::CalcTextSize(line_text.c_str());
+    const int level = static_cast<int>(255.0f * brightness);
+    list->AddText(font, font_size, ImVec2(centre.x - extent.x * 0.5f, y),
+                  IM_COL32(level, level, level, static_cast<int>(255.0f * row_alpha)),
+                  line_text.c_str());
+  };
+  const float text_y = row_y + height * 0.5f + 28.0f * scale;
+  line(text.status, text_y, 1.0f);
+  line(text.detail, text_y + font_size * 1.6f, 0.62f);
+  line(text.hint, origin.y + size.y - font_size - 28.0f * scale, 0.5f);
 }
 }  // namespace moderngekko::frontend::ui

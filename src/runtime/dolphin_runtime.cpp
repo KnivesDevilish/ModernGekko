@@ -892,11 +892,16 @@ RuntimeCreateResult Runtime::Create(RuntimeConfig config) {
     recomp_source = StaticRecompModuleSource::Attached(
         reinterpret_cast<const StaticRecompModuleDesc *>(
             impl->config.module.descriptor));
-  recomp_source.host_call = &ModManager::HostCall;
-  recomp_source.host_call_contains = &ModManager::HostCallContains;
-  recomp_source.host_call_range_contains =
-      &ModManager::HostCallRangeContains;
-  recomp_source.host_call_user = impl->mods.get();
+  // The mods' hooks into the game's code. StaticRecomp asks them about every
+  // address it runs (a few percent of the CPU thread), so they are only
+  // installed when a mod is loaded: without one, nothing can hook.
+  if (!impl->mods->Empty()) {
+    recomp_source.host_call = &ModManager::HostCall;
+    recomp_source.host_call_contains = &ModManager::HostCallContains;
+    recomp_source.host_call_range_contains =
+        &ModManager::HostCallRangeContains;
+    recomp_source.host_call_user = impl->mods.get();
+  }
   jit.SetStaticRecompModuleSource(std::move(recomp_source));
 
   s_runtime_active = true;

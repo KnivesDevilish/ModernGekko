@@ -45,6 +45,10 @@
 #include <windows.h>
 #endif
 
+#if defined(__linux__)
+#include <sys/prctl.h>
+#endif
+
 namespace {
 #ifndef MODERNGEKKO_RUNNER_NAME
 #define MODERNGEKKO_RUNNER_NAME "moderngekko-run"
@@ -463,6 +467,14 @@ int RunMain(int argc, char **argv) {
       return 2;
     }
   }
+#if defined(__linux__)
+  // Started by the launcher: the game ends with it. A launcher closed or
+  // stopped while the game loads (the Netplay lobby's first check of the
+  // game files can take minutes) leaves no game behind. On Windows the
+  // launcher puts the game in a job that does the same (launcher_process).
+  if (!moderngekko::frontend::LauncherReadyFile().empty())
+    prctl(PR_SET_PDEATHSIG, SIGTERM);
+#endif
   if (config.game_root.empty())
     config.game_root =
         ReadDefaultGame(config.user_directory, executable_directory);

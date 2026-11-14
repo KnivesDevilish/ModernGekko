@@ -12,7 +12,9 @@
 #include "launcher_banner.hpp"
 #include "launcher_games.hpp"
 #include "launcher_line_break.hpp"
+#include "launcher_handoff.hpp"
 #include "launcher_loading.hpp"
+#include "launcher_process.hpp"
 #include "launcher_transition.hpp"
 #include "launcher_user_folder.hpp"
 #include "launcher_save.hpp"
@@ -3352,8 +3354,19 @@ int main(int argc, char** argv)
     bool placed = false;  // where the launcher was, to come back there
     int x = 0;
     int y = 0;
+    // What the runner says it is doing while the game loads
+    // (launcher_handoff.hpp), and when the loading started.
+    fs::path progress_file;
+    double started = 0.0;
+    // The player stopped the loading (Esc, B, or closing the window): the
+    // launcher comes back without a message.
+    bool cancelled = false;
   };
   GameSession session;
+  // The loading screen's line about the game files, read from the runner's
+  // progress file a few times a second.
+  std::optional<int> files_checked;
+  double next_progress_read = 0.0;
   GameTransition transition;
   // The loading screen's logo: the game's, when the build has the game
   // selection screen's art.
@@ -3458,6 +3471,7 @@ int main(int argc, char** argv)
       ready_file = log_path.parent_path() / "game-shown";
       std::error_code ignored;
       fs::remove(ready_file, ignored);
+      fs::remove(moderngekko::frontend::LauncherProgressFile(ready_file), ignored);
       argument_storage.emplace_back("--launcher-ready-file");
       argument_storage.emplace_back(moderngekko::frontend::PathText(ready_file));
     }
@@ -3513,6 +3527,12 @@ int main(int argc, char** argv)
       return false;
     }
     session = {process, mode, log_path, !log_error, ready_file};
+    session.progress_file = moderngekko::frontend::LauncherProgressFile(ready_file);
+    session.started = static_cast<double>(SDL_GetTicksNS()) / 1e9;
+    files_checked.reset();
+    // The game ends with the launcher (launcher_process.hpp).
+    moderngekko::frontend::EndWithLauncher(
+        SDL_GetNumberProperty(SDL_GetProcessProperties(process), SDL_PROP_PROCESS_PID_NUMBER, 0));
     if (ready_file.empty())
       transition.GameShown(now);
     // Over the game's window, which opens behind it, until that has its
@@ -3530,6 +3550,8 @@ int main(int argc, char** argv)
     std::error_code ignored;
     if (!session.ready_file.empty())
       fs::remove(session.ready_file, ignored);
+    if (!session.progress_file.empty())
+      fs::remove(session.progress_file, ignored);
     const GameSession ended = session;
     session = {};
     if (waited && exit_code == moderngekko::frontend::RUNNER_EXIT_QUIT)
@@ -3548,7 +3570,7 @@ int main(int argc, char** argv)
     SDL_SetWindowAlwaysOnTop(window, false);
     transition.Back(static_cast<double>(SDL_GetTicksNS()) / 1e9);
     result = 0;
-    if (waited && exit_code == 0)
+    if ((waited && exit_code == 0) || ended.cancelled)
       return;
     const LaunchMode mode = ended.mode;
     std::string launch_error;
@@ -3647,6 +3669,27 @@ int main(int argc, char** argv)
   };
   // Back on the PLAY page after the game: what changed while it ran is read
   // again.
+  // The loading screen's lines while a game loads: how far the game files are
+  // checked (the Netplay lobby's first check can take minutes), and how to
+  // stop, once it has gone on for a while.
+  const auto loading_text = [&](double now) {
+    LoadingText text;
+    if (!session.process || session.hidden || session.cancelled)
+      return text;
+    if (now >= next_progress_read && !session.progress_file.empty())
+    {
+      files_checked = moderngekko::frontend::ReadFilesChecked(session.progress_file);
+      next_progress_read = now + 0.25;
+    }
+    if (files_checked)
+    {
+      text.status = Format(Tr("Checking the game files: %d%%"), *files_checked);
+      text.detail = Tr("Only the first time: Netplay makes sure every player has the same game.");
+    }
+    if (now - session.started >= LOADING_CANCEL_AFTER)
+      text.hint = Tr("Esc or B: cancel");
+    return text;
+  };
   const auto after_game = [&] {
     pad_waits_for_release = true;
     // The music starts over from the beginning.
@@ -3683,18 +3726,40 @@ int main(int argc, char** argv)
   {
     bool controllers_changed = false;
     SDL_Event event;
+    bool cancel_loading = false;
     while (SDL_PollEvent(&event))
     {
       ImGui_ImplSDL3_ProcessEvent(&event);
       // While a game runs the launcher waits for it, as it always has.
-      if ((event.type == SDL_EVENT_QUIT || event.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED) &&
-          !session.process)
+      const bool close = event.type == SDL_EVENT_QUIT || event.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED;
+      if (close && !session.process)
         done = true;
+      // While it loads, closing the window, or Esc or B after a few seconds
+      // (not a press meant for the menu just left), stops it and brings the
+      // launcher back.
+      if (session.process && !session.hidden && !transition.IsGameShown())
+      {
+        const bool waited_a_while =
+            static_cast<double>(SDL_GetTicksNS()) / 1e9 - session.started >= LOADING_CANCEL_AFTER;
+        const bool key = event.type == SDL_EVENT_KEY_DOWN && !event.key.repeat &&
+                         event.key.key == SDLK_ESCAPE;
+        const bool button = event.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN &&
+                            (event.gbutton.button == SDL_GAMEPAD_BUTTON_EAST ||
+                             event.gbutton.button == SDL_GAMEPAD_BUTTON_BACK);
+        if (close || (waited_a_while && (key || button)))
+          cancel_loading = true;
+      }
       if (event.type == SDL_EVENT_JOYSTICK_ADDED || event.type == SDL_EVENT_JOYSTICK_REMOVED ||
           event.type == SDL_EVENT_GAMEPAD_REMAPPED)
       {
         controllers_changed = true;
       }
+    }
+    if (cancel_loading && session.process && !session.cancelled)
+    {
+      session.cancelled = true;
+      SDL_KillProcess(session.process, true);
+      std::cout << "launcher: the player stopped the loading\n";
     }
     if (controllers_changed)
     {
@@ -3762,7 +3827,7 @@ int main(int argc, char** argv)
         ImGui::NewFrame();
         const ImGuiViewport* viewport = ImGui::GetMainViewport();
         DrawLoadingScreen(ImGui::GetForegroundDrawList(), viewport->Pos, viewport->Size,
-                          transition, now, loading_logo, scale);
+                          transition, now, loading_logo, scale, loading_text(now));
         ImGui::Render();
         SDL_SetRenderScale(renderer, io.DisplayFramebufferScale.x, io.DisplayFramebufferScale.y);
         SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
@@ -5839,8 +5904,9 @@ int main(int argc, char** argv)
     if (fading)
     {
       const ImGuiViewport* viewport = ImGui::GetMainViewport();
+      const double now = static_cast<double>(SDL_GetTicksNS()) / 1e9;
       DrawLoadingScreen(ImGui::GetForegroundDrawList(), viewport->Pos, viewport->Size, transition,
-                        static_cast<double>(SDL_GetTicksNS()) / 1e9, loading_logo, scale);
+                        now, loading_logo, scale, loading_text(now));
     }
 
     ImGui::Render();
