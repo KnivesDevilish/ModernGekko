@@ -33,6 +33,8 @@
 #include <utility>
 #include <vector>
 
+#include "text_paths.hpp"
+
 namespace moderngekko::frontend::ui
 {
 class ScreenshotGallery
@@ -203,7 +205,7 @@ private:
   // big, then scaled, so it looks smooth.
   static SDL_Surface* Shrunk(const std::filesystem::path& path, PictureSize box, bool no_bigger)
   {
-    SDL_Surface* read = SDL_LoadPNG(path.string().c_str());
+    SDL_Surface* read = SDL_LoadPNG(text::PathText(path).c_str());
     if (!read)
       return nullptr;
     SDL_Surface* picture = SDL_ConvertSurface(read, SDL_PIXELFORMAT_RGBA32);
@@ -234,18 +236,18 @@ private:
   {
     namespace fs = std::filesystem;
     std::error_code ec;
-    const fs::path cached = m_cache / (job.path.stem().string() + ".png");
+    const fs::path cached = (m_cache / job.path.stem()) += ".png";
     if (fs::is_regular_file(cached, ec) && fs::last_write_time(cached, ec) >= job.time && !ec)
     {
-      if (SDL_Surface* surface = SDL_LoadPNG(cached.string().c_str()))
+      if (SDL_Surface* surface = SDL_LoadPNG(text::PathText(cached).c_str()))
         return surface;
     }
     SDL_Surface* surface = Shrunk(job.path, job.box, true);
     if (surface)
     {
       fs::create_directories(m_cache, ec);
-      const fs::path part = cached.string() + ".part";
-      if (SDL_SavePNG(surface, part.string().c_str()))
+      const fs::path part = fs::path(cached) += ".part";
+      if (SDL_SavePNG(surface, text::PathText(part).c_str()))
         fs::rename(part, cached, ec);
       else
         fs::remove(part, ec);
@@ -553,7 +555,7 @@ private:
       }
       else
       {
-        std::filesystem::remove(m_cache / (m_deleting.stem().string() + ".png"), ec);
+        std::filesystem::remove((m_cache / m_deleting.stem()) += ".png", ec);
         // The next one (older, or else newer) is shown in its place.
         if (m_viewing && *m_viewing == m_deleting)
         {

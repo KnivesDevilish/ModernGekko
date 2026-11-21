@@ -1,4 +1,5 @@
 #include "launcher_preview_video.hpp"
+#include "text_paths.hpp"
 
 #include <cstddef>
 #include <cstdio>
@@ -221,7 +222,7 @@ std::vector<IntraFrame> CachedIntraFrames(const VideoSource& source, plm_t* plm,
 {
   static std::mutex mutex;
   static std::map<std::string, std::vector<IntraFrame>> cache;
-  const std::string key = source.file.string() + '|' + std::to_string(source.offset) + '|' +
+  const std::string key = text::PathText(source.file) + '|' + std::to_string(source.offset) + '|' +
                           std::to_string(source.length) + '|' + std::to_string(until);
   {
     std::lock_guard lock(mutex);
@@ -340,7 +341,7 @@ std::optional<VideoSource> FindVideoSource(const std::filesystem::path& root,
 {
   std::error_code ec;
   const std::size_t colon = video.find(':');
-  const std::filesystem::path file = root / std::filesystem::path(std::string(video.substr(0, colon)));
+  const std::filesystem::path file = root / text::TextPath(video.substr(0, colon));
   if (!std::filesystem::is_regular_file(file, ec))
     return std::nullopt;
   if (colon == std::string_view::npos)

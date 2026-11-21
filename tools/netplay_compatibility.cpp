@@ -3,6 +3,7 @@
 #include "Common/Crypto/SHA1.h"
 #include "Common/Version.h"
 #include "game_files_hash.hpp"
+#include "text_paths.hpp"
 #include "moderngekko/cpu_state.h"
 #include "moderngekko/mod_loader.hpp"
 #include "moderngekko/module_loader.hpp"
@@ -62,7 +63,7 @@ std::string ModsFingerprint(const RuntimeConfig &config) {
   for (const ModSource &source : sources) {
     if (source.kind != ModSource::Kind::DynamicPath)
       return "attached";
-    HashString(*context, source.path.filename().string());
+    HashString(*context, text::PathText(source.path.filename()));
     std::ifstream file(source.path, std::ios::binary);
     if (!file)
       return "rejected";
@@ -101,7 +102,7 @@ std::string FileModsFingerprint(const RuntimeConfig &config) {
     std::error_code ec;
     if (fs::is_directory(mod / "files", ec)) {
       const auto files = CachedDirectorySha256(
-          mod / "files", config.user_directory / "Cache" / "mods" / (id + ".sha256"));
+          mod / "files", config.user_directory / "Cache" / "mods" / text::TextPath(id + ".sha256"));
       if (!files)
         return "rejected";
       HashString(*context, *files);
@@ -168,7 +169,7 @@ std::string CompatibilityFingerprint(const RuntimeConfig &config,
     auto library = std::make_unique<ModuleLibrary>();
     ModuleLoadResult loaded;
     if (config.module.kind == ModuleSource::Kind::DynamicPath) {
-      loaded = library->Open(config.module.path.string(), requirements);
+      loaded = library->Open(text::SystemPathText(config.module.path), requirements);
     } else {
       loaded = library->Attach(config.module.descriptor, requirements);
     }

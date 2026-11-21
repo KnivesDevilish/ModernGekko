@@ -44,7 +44,11 @@
 #endif
 #include "cvm_mods.hpp"
 #include "data_patches.hpp"
+#include "memory_watch.hpp"
+#include "mod_hud.hpp"
+#include "mod_sounds.hpp"
 #include "screenshot.hpp"
+#include "text_paths.hpp"
 #include "texture_mods.hpp"
 #include "window_size.hpp"
 #include "moderngekko/cpu_state.h"
@@ -301,7 +305,7 @@ CvmModPatches(const std::vector<std::filesystem::path> &mods,
     // The mods' files, read from their folders; the small changes, from
     // files written to the cache.
     std::map<fs::path, DiscIO::Riivolution::Patch> by_folder;
-    const fs::path small = cache / name;
+    const fs::path small = cache / StringToPath(name);
     std::size_t count = 0;
     for (const cvm::Write &write : plan.writes) {
       fs::path folder;
@@ -532,7 +536,11 @@ void ApplyAutomationPad(const automation::PadState& pad)
 std::filesystem::path NormalizeScreenshotPath(const std::filesystem::path& path)
 {
   if (!path.has_extension())
-    return path.string() + ".png";
+  {
+    std::filesystem::path png = path;
+    png += ".png";
+    return png;
+  }
   return path;
 }
 
@@ -542,7 +550,7 @@ void SaveAutomationScreenshot(const std::filesystem::path& path)
   std::filesystem::create_directories(path.parent_path(), ec);
   const Core::CPUThreadGuard guard(Core::System::GetInstance());
   if (g_frame_dumper)
-    g_frame_dumper->SaveScreenshot(path.string());
+    g_frame_dumper->SaveScreenshot(PathToString(path));
 }
 
 std::optional<RuntimeError> ReadAutomationMemory(const std::filesystem::path& path, u32 address,
@@ -641,10 +649,10 @@ std::optional<RuntimeError> ApplyAutomationCommand(Runtime& runtime,
     break;
   case automation::CommandType::SaveState:
     std::filesystem::create_directories(command.path.parent_path());
-    State::SaveAs(system, command.path.string());
+    State::SaveAs(system, PathToString(command.path));
     break;
   case automation::CommandType::LoadState:
-    State::LoadAs(system, command.path.string());
+    State::LoadAs(system, PathToString(command.path));
     break;
   case automation::CommandType::Screenshot:
     SaveAutomationScreenshot(NormalizeScreenshotPath(command.path));
@@ -777,7 +785,7 @@ void AutomationLoop(Runtime& runtime, ImplT& impl, std::stop_token stop_token)
       if (!automation::ParseCommandFile(command_path, &command, &error))
       {
         SetAutomationError(impl.automation_state,
-                           command_path.filename().string() + ": " + error);
+                           PathToString(command_path.filename()) + ": " + error);
         MoveAutomationCommand(command_path, root, "failed");
         continue;
       }
@@ -1033,7 +1041,8 @@ RuntimeCreateResult Runtime::Create(RuntimeConfig config) {
   ModuleLoadResult module_result{};
   if (config.module.kind == ModuleSource::Kind::DynamicPath)
     module_result =
-        validation_library.Open(config.module.path.string(), requirements);
+        validation_library.Open(moderngekko::text::SystemPathText(config.module.path),
+                                requirements);
   else if (config.module.kind == ModuleSource::Kind::AttachedDescriptor)
     module_result =
         validation_library.Attach(config.module.descriptor, requirements);
@@ -1076,7 +1085,7 @@ RuntimeCreateResult Runtime::Create(RuntimeConfig config) {
                  mod.version.c_str());
 
   if (!s_external_ui_common) {
-    UICommon::SetUserDirectory(impl->config.user_directory.string());
+    UICommon::SetUserDirectory(PathToString(impl->config.user_directory));
     UICommon::Init();
     impl->ui_initialized = true;
   }
@@ -1208,7 +1217,8 @@ RuntimeCreateResult Runtime::Create(RuntimeConfig config) {
   StaticRecompModuleSource recomp_source;
   if (impl->config.module.kind == ModuleSource::Kind::DynamicPath)
     recomp_source =
-        StaticRecompModuleSource::Dynamic(impl->config.module.path.string());
+        StaticRecompModuleSource::Dynamic(
+            moderngekko::text::SystemPathText(impl->config.module.path));
   else if (impl->config.module.kind == ModuleSource::Kind::AttachedDescriptor)
     recomp_source = StaticRecompModuleSource::Attached(
         reinterpret_cast<const StaticRecompModuleDesc *>(
@@ -1453,7 +1463,37 @@ RuntimeRunResult Runtime::Run() {
       }
     });
   }
+  // The memory watch, when MODERNGEKKO_MEMORY_WATCH asks for it
+  // (memory_watch.hpp): on while the game runs.
+  std::optional<detail::MemoryWatch> memory_watch;
+  if (std::getenv("MODERNGEKKO_MEMORY_WATCH")) {
+    if (SelectCPUCore() == PowerPC::CPUCore::StaticRecomp)
+      std::cerr << "memory watch: StaticRecomp's code doesn't stop at memory "
+                   "breakpoints, so it only sees what JIT64 or the "
+                   "interpreter runs\n";
+    memory_watch.emplace();
+  }
+  // The mods' sounds (mod_sounds.hpp): their sounds.ini and WAV files, mixed
+  // into the game's sound while it runs.
+  std::unique_ptr<detail::ModSounds> mod_sounds;
+  if (!m_impl->config.headless)
+    mod_sounds = detail::ModSounds::Create(m_impl->config.file_mods);
+  // The mods' charge meters (mod_hud.hpp): their hud.ini, drawn over the game
+  // on the video thread.
+  std::unique_ptr<detail::ModHud> mod_hud;
+  Common::EventHook mod_hud_hook;
+  if (!m_impl->config.headless)
+    mod_hud = detail::ModHud::Create(m_impl->config.file_mods);
+  if (mod_hud) {
+    mod_hud_hook = GetVideoEvents().before_present_event.Register(
+        [hud = mod_hud.get()](const PresentInfo &) { hud->AddToFrame(); });
+  }
   m_impl->platform->MainLoop();
+  // Unhooked first: the video thread calls the hook until then.
+  mod_hud_hook = {};
+  mod_hud.reset();
+  mod_sounds.reset();
+  memory_watch.reset();
   // Unhooked before Dolphin stops: the video thread calls the hooks until then.
   m_impl->menu_hook = {};
   m_impl->border_hook = {};

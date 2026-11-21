@@ -26,6 +26,8 @@
 #include <unordered_map>
 #include <vector>
 
+#include "text_paths.hpp"
+
 namespace moderngekko::frontend
 {
 namespace game_files_hash_detail
@@ -82,7 +84,7 @@ inline std::optional<std::string> CachedDirectorySha256(const std::filesystem::p
     {
       Entry entry;
       entry.path = iterator->path();
-      entry.relative = fs::relative(entry.path, root, ec).generic_string();
+      entry.relative = text::GenericPathText(fs::relative(entry.path, root, ec));
       if (!ec)
         entry.size = fs::file_size(entry.path, ec);
       if (!ec)
@@ -106,7 +108,7 @@ inline std::optional<std::string> CachedDirectorySha256(const std::filesystem::p
     std::string line;
     if (input && std::getline(input, line) &&
         line == game_files_hash_detail::FILES_HASH_CACHE_HEADER && std::getline(input, line) &&
-        line == root.generic_string())
+        line == text::GenericPathText(root))
     {
       while (std::getline(input, line))
       {
@@ -146,7 +148,7 @@ inline std::optional<std::string> CachedDirectorySha256(const std::filesystem::p
   const auto write_cache = [&](std::size_t known) {
     std::ostringstream text;
     text << game_files_hash_detail::FILES_HASH_CACHE_HEADER << '\n'
-         << root.generic_string() << '\n';
+         << text::GenericPathText(root) << '\n';
     for (std::size_t i = 0; i < files.size(); ++i)
     {
       const std::string* hash = i < known ? &hashes[i] : remembered(files[i]);

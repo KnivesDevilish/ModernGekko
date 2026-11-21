@@ -41,6 +41,8 @@
 #include <string_view>
 #include <vector>
 
+#include "text_paths.hpp"
+
 namespace moderngekko::frontend::ui
 {
 enum class GameSelectSide
@@ -104,10 +106,10 @@ inline ImFont* LoadGameSelectFont(const std::filesystem::path& folder)
   const std::string text{std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>()};
   const auto layout = ParseGameSelectLayout(text);
   std::error_code ec;
-  if (!layout || layout->font.empty() || !std::filesystem::is_regular_file(folder / layout->font, ec))
+  if (!layout || layout->font.empty() || !std::filesystem::is_regular_file(folder / text::TextPath(layout->font), ec))
     return nullptr;
   ImFont* font =
-      ImGui::GetIO().Fonts->AddFontFromFileTTF((folder / layout->font).string().c_str(), 32.0f);
+      ImGui::GetIO().Fonts->AddFontFromFileTTF(text::PathText(folder / text::TextPath(layout->font)).c_str(), 32.0f);
   if (font)
     MergeJapaneseFont(true, 32.0f);
   return font;
@@ -150,7 +152,7 @@ public:
     const auto layout = ParseGameSelectLayout(text);
     if (!layout)
     {
-      std::cout << "game select: no usable " << (folder / "layout.txt").string() << '\n';
+      std::cout << "game select: no usable " << text::PathText(folder / "layout.txt") << '\n';
       return false;
     }
     m_layout = *layout;
@@ -167,7 +169,7 @@ public:
     for (const auto& [name, picture] : wanted)
     {
       const GameSelectPicture& place = m_layout.pictures.find(name)->second;
-      if (!LoadPicture(renderer, folder / place.file, name != std::string_view("frame"), shrink,
+      if (!LoadPicture(renderer, folder / text::TextPath(place.file), name != std::string_view("frame"), shrink,
                        *picture))
         return false;
       picture->x = place.x;
@@ -179,11 +181,11 @@ public:
       const auto sound = m_layout.sounds.find(GAME_SELECT_SOUND_NAMES[i]);
       if (sound == m_layout.sounds.end())
         continue;
-      m_sounds[i] = LoadSoundEffect(folder / sound->second);
+      m_sounds[i] = LoadSoundEffect(folder / text::TextPath(sound->second));
       if (!m_sounds[i])
-        std::cout << "game select: can't read " << (folder / sound->second).string() << '\n';
+        std::cout << "game select: can't read " << text::PathText(folder / text::TextPath(sound->second)) << '\n';
     }
-    std::cout << "game select: " << folder.string() << '\n';
+    std::cout << "game select: " << text::PathText(folder) << '\n';
     m_loaded = true;
     return true;
   }
@@ -542,7 +544,7 @@ private:
       if (!source)
       {
         std::cout << "game select: no intro on the " << name << ", "
-                  << (m_folders[side] / preview->video.substr(0, preview->video.find(':'))).string()
+                  << text::PathText(m_folders[side] / text::TextPath(preview->video.substr(0, preview->video.find(':'))))
                   << " has no " << preview->video << '\n';
         m_preview_broken[side] = true;
         return;
@@ -755,10 +757,10 @@ private:
   static bool LoadPicture(SDL_Renderer* renderer, const std::filesystem::path& path,
                           bool with_grey, float shrink, Picture& picture)
   {
-    SDL_Surface* loaded = SDL_LoadPNG(path.string().c_str());
+    SDL_Surface* loaded = SDL_LoadPNG(text::PathText(path).c_str());
     if (!loaded)
     {
-      std::cout << "game select: can't load " << path.string() << ": " << SDL_GetError() << '\n';
+      std::cout << "game select: can't load " << text::PathText(path) << ": " << SDL_GetError() << '\n';
       return false;
     }
     SDL_Surface* pixels = SDL_ConvertSurface(loaded, SDL_PIXELFORMAT_RGBA32);

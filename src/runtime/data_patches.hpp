@@ -3,30 +3,22 @@
 // Data patches in file mods (tools/file_mods.hpp): a mod's patches.ini
 // changes values inside the game's files (an Extreme Gear's stats, say) as
 // the game starts, without the mod carrying any of the game's files: only
-// the values its author chose. One change per line, "key = value":
+// the values its author chose. One change per line, "key = value", the key
+// being the file and the place in it:
 //
-//   # Sonic Riders (GXEE8P): an Extreme Gear's stats, by name
-//   gear.Default.level1.boostSpeed = 300 km/h
-//   gear.HighBooster.acceleration = 0.0009
-//   # Any game: a value at a place in a file under files/
-//   _Main.rel@0x1EA2C0:f32 = 1.2
+//   # A value at a place in a file under files/
+//   _Main.rel@0x1000:f32 = 1.2
 //   # ...or in a file inside one of its .cvm archives (Zero Gravity)
 //   Image2.cvm/_MAIN.REL@0x10:f32 = 1.2
 //
-// Raw keys are <file>@<offset>:<type>, the type one of u8 u16 u32 s8 s16
-// s32 f32 (big-endian, as the consoles store them) or bytes (the value in
-// hex: 3F 80 00 00). Speeds can be written in km/h (the games keep them as
-// km/h divided by 216). "+=" adds to the value the file has and "*="
-// multiplies it, and gear.*. changes every gear:
+// Keys are <file>@<offset>:<type>, the type one of u8 u16 u32 s8 s16 s32 f32
+// (big-endian, as the consoles store them) or bytes (the value in hex:
+// 3F 80 00 00). Speeds can be written in km/h (the games keep them as km/h
+// divided by 216). "+=" adds to the value the file has and "*=" multiplies
+// it:
 //
-//   gear.*.topSpeed += 80 km/h
-//   gear.*.level1.maxAir *= 1.5
-//
-// The gear table's layout (where it starts in Sonic Riders' _Main.rel, the
-// size of each gear and what each field is) comes from the GPL-3.0 source of
-// Sonic Riders Tournament Edition (github.com/RidersBoulevard/sonicriderste,
-// include/riders/gear.hpp). gear.* keys only apply to the _Main.rel of the
-// USA release they were found in, checked by its SHA-1.
+//   _Main.rel@0x1004:f32 += 80 km/h
+//   _Main.rel@0x1008:s32 *= 1.5
 //
 // As the game starts, the runtime makes a patched copy of each file named,
 // in Cache/patched/<disc ID>/ (from the game's own file, or from the last
@@ -78,7 +70,6 @@ struct Patch
   std::string file;  // under files/, with '/' ("Image2.cvm/x.bin": inside an archive)
   std::uint32_t offset = 0;
   std::vector<std::uint8_t> bytes;  // for Set; for Add and Multiply, as many as the type has
-  std::string sha1;   // when not empty, the file must be this one (lowercase hex)
   std::string where;  // "patches.ini line 3", for messages
   Op op = Op::Set;
   int type = 0;        // for Add and Multiply: the Type, as a number
@@ -91,22 +82,6 @@ struct Problem
   std::string why;
 };
 
-// Sonic Riders (USA, GXEE8P): its _Main.rel and the Extreme Gear table in it.
-inline constexpr std::string_view SONIC_RIDERS = "GXEE8P";
-inline constexpr std::string_view SONIC_RIDERS_MAIN_REL = "_Main.rel";
-inline constexpr std::string_view SONIC_RIDERS_MAIN_REL_SHA1 =
-    "1607fbb1ccabf116642c3c59ee9b21c304a1db26";
-inline constexpr std::uint32_t GEARS = 0x1EA240;
-inline constexpr std::uint32_t GEAR_SIZE = 0x1D0;
-inline constexpr std::array<std::string_view, 41> GEAR_NAMES = {
-    "Default",      "HighBooster",  "AutoSlider",  "PowerfulGear", "Fastest",    "TurboStar",
-    "SpeedBalancer", "BlueStar2",   "Access",      "Beginner",     "Accelerator", "TrapGear",
-    "LightBoard",   "SlideBooster", "Legend",      "MagicCarpet",  "AirBroom",   "Hovercraft",
-    "ChaosEmerald", "Faster",       "Gambler",     "PowerGear",    "OpaOpa",     "TheCrazy",
-    "Berserker",    "ERider",       "AirTank",     "HeavyBike",    "Destroyer",  "Omnipotence",
-    "CoverS",       "CoverF",       "CoverP",      "HangOn",       "SuperHangOn", "Darkness",
-    "Grinder",      "AdvantageS",   "AdvantageF",  "AdvantageP",   "Cannonball"};
-
 enum class Type
 {
   U8,
@@ -118,58 +93,6 @@ enum class Type
   F32,
   Bytes
 };
-
-struct GearField
-{
-  std::string_view name;
-  std::uint32_t offset;  // in the gear, or in a level's stats
-  Type type;
-};
-
-// A gear's own fields (Tournament Edition's names).
-inline constexpr std::array<GearField, 28> GEAR_FIELDS = {{
-    {"useFlags", 0x0, Type::U32},
-    {"type", 0x4, Type::U8},
-    {"model", 0x5, Type::U8},
-    {"costInGearShop", 0x6, Type::U16},
-    {"acceleration", 0xC, Type::F32},
-    {"topSpeed", 0x10, Type::F32},
-    {"offRoadSpeed", 0x14, Type::F32},
-    {"speedHandlingMultiplier", 0x18, Type::F32},
-    {"weight", 0x1C, Type::F32},
-    {"extraTypeAttributes", 0x23, Type::U8},
-    {"turningSpeedLoss", 0x24, Type::F32},
-    {"handling", 0x28, Type::F32},
-    {"backAxelHandling", 0x2C, Type::F32},
-    {"frontAxelHandling", 0x30, Type::F32},
-    {"driftRadius", 0x34, Type::F32},
-    {"driftRotation", 0x38, Type::F32},
-    {"backAxelDriftRotation", 0x3C, Type::F32},
-    {"frontAxelDriftRotation", 0x40, Type::F32},
-    {"driftDashFrames", 0x50, Type::S32},
-    {"trickAirGainMultiplier", 0x54, Type::F32},
-    {"shortcutAirGainMultiplier", 0x58, Type::F32},
-    {"QTEAirGainMultiplier", 0x5C, Type::F32},
-    {"specialFlags", 0x60, Type::U32},
-    {"jumpChargeCostMultiplier", 0x64, Type::F32},
-    {"tempoStat", 0xBC, Type::S8},
-    {"efficiencyStat", 0xBD, Type::S8},
-    {"combatStat", 0xBE, Type::S8},
-    {"weightStat", 0xBF, Type::S8},
-}};
-
-// Each level's stats (level1, level2, level3), 28 bytes apart from 0x68.
-inline constexpr std::uint32_t GEAR_LEVELS = 0x68;
-inline constexpr std::uint32_t GEAR_LEVEL_SIZE = 28;
-inline constexpr std::array<GearField, 7> GEAR_LEVEL_FIELDS = {{
-    {"maxAir", 0x0, Type::S32},
-    {"passiveAirDrain", 0x4, Type::S32},
-    {"driftingAirCost", 0x8, Type::S32},
-    {"boostCost", 0xC, Type::S32},
-    {"tornadoCost", 0x10, Type::S32},
-    {"driftDashSpeed", 0x14, Type::F32},
-    {"boostSpeed", 0x18, Type::F32},
-}};
 
 inline constexpr std::uint64_t MAX_FILE = 64ull << 20;
 
@@ -381,56 +304,6 @@ inline std::optional<std::string> CleanFilePath(std::string_view text)
   return path;
 }
 
-// SHA-1, for the files gear.* keys were made for.
-inline std::string Sha1(const std::vector<std::uint8_t>& data)
-{
-  std::uint32_t h[5] = {0x67452301, 0xEFCDAB89, 0x98BADCFE, 0x10325476, 0xC3D2E1F0};
-  std::vector<std::uint8_t> message = data;
-  const std::uint64_t bits = static_cast<std::uint64_t>(data.size()) * 8;
-  message.push_back(0x80);
-  while (message.size() % 64 != 56)
-    message.push_back(0);
-  for (int i = 7; i >= 0; --i)
-    message.push_back(static_cast<std::uint8_t>(bits >> (8 * i)));
-  for (std::size_t chunk = 0; chunk < message.size(); chunk += 64)
-  {
-    std::uint32_t w[80];
-    for (int i = 0; i < 16; ++i)
-      w[i] = static_cast<std::uint32_t>(message[chunk + 4 * i]) << 24 |
-             static_cast<std::uint32_t>(message[chunk + 4 * i + 1]) << 16 |
-             static_cast<std::uint32_t>(message[chunk + 4 * i + 2]) << 8 |
-             message[chunk + 4 * i + 3];
-    for (int i = 16; i < 80; ++i)
-      w[i] = std::rotl(w[i - 3] ^ w[i - 8] ^ w[i - 14] ^ w[i - 16], 1);
-    std::uint32_t a = h[0], b = h[1], c = h[2], d = h[3], e = h[4];
-    for (int i = 0; i < 80; ++i)
-    {
-      std::uint32_t f, k;
-      if (i < 20)
-        f = (b & c) | (~b & d), k = 0x5A827999;
-      else if (i < 40)
-        f = b ^ c ^ d, k = 0x6ED9EBA1;
-      else if (i < 60)
-        f = (b & c) | (b & d) | (c & d), k = 0x8F1BBCDC;
-      else
-        f = b ^ c ^ d, k = 0xCA62C1D6;
-      const std::uint32_t temp = std::rotl(a, 5) + f + e + k + w[i];
-      e = d;
-      d = c;
-      c = std::rotl(b, 30);
-      b = a;
-      a = temp;
-    }
-    h[0] += a, h[1] += b, h[2] += c, h[3] += d, h[4] += e;
-  }
-  static constexpr char digits[] = "0123456789abcdef";
-  std::string out;
-  for (std::uint32_t word : h)
-    for (int i = 28; i >= 0; i -= 4)
-      out.push_back(digits[(word >> i) & 0xF]);
-  return out;
-}
-
 inline std::optional<std::vector<std::uint8_t>> ReadFile(const std::filesystem::path& path)
 {
   std::ifstream file(path, std::ios::binary);
@@ -512,7 +385,7 @@ inline std::optional<std::filesystem::path> FindNoCase(const std::filesystem::pa
 
 // The changes in one mod's patches.ini text, for the game `disc_id`. Lines
 // that can't be used are named in *problems and left out.
-inline std::vector<Patch> Parse(std::string_view text, std::string_view disc_id,
+inline std::vector<Patch> Parse(std::string_view text, [[maybe_unused]] std::string_view disc_id,
                                 std::vector<Problem>* problems)
 {
   using namespace detail;
@@ -554,95 +427,35 @@ inline std::vector<Patch> Parse(std::string_view text, std::string_view disc_id,
     Patch patch;
     patch.where = where;
     patch.op = op;
-    Type type = Type::U8;
-    // The gears a gear.* key names: one, or all of them with "*".
-    std::vector<std::uint32_t> gear_offsets;
-    if (Lower(key).starts_with("gear."))
+    // <file>@<offset>:<type>
+    const std::size_t at = key.rfind('@');
+    const std::size_t colon = key.rfind(':');
+    if (at == std::string::npos || colon == std::string::npos || colon < at)
     {
-      if (disc_id != SONIC_RIDERS)
-      {
-        fail("gear.* is for Sonic Riders (GXEE8P)");
-        continue;
-      }
-      // gear.<name>.<field> or gear.<name>.level<1-3>.<field>
-      std::vector<std::string> parts;
-      std::size_t from = 5;
-      while (from <= key.size())
-      {
-        const std::size_t dot = std::min(key.find('.', from), key.size());
-        parts.push_back(key.substr(from, dot - from));
-        from = dot + 1;
-      }
-      const auto gear = std::ranges::find_if(GEAR_NAMES, [&](std::string_view name) {
-        return !parts.empty() && EqualNoCase(name, parts[0]);
-      });
-      const bool every_gear = !parts.empty() && parts[0] == "*";
-      if (gear == GEAR_NAMES.end() && !every_gear)
-      {
-        fail("there is no gear called \"" + (parts.empty() ? std::string() : parts[0]) + "\"");
-        continue;
-      }
-      std::uint32_t offset = 0;
-      const GearField* field = nullptr;
-      if (parts.size() == 2)
-      {
-        for (const GearField& candidate : GEAR_FIELDS)
-          if (EqualNoCase(candidate.name, parts[1]))
-            field = &candidate;
-      }
-      else if (parts.size() == 3 && Lower(parts[1]).starts_with("level") && parts[1].size() == 6 &&
-               parts[1][5] >= '1' && parts[1][5] <= '3')
-      {
-        offset += GEAR_LEVELS + GEAR_LEVEL_SIZE * static_cast<std::uint32_t>(parts[1][5] - '1');
-        for (const GearField& candidate : GEAR_LEVEL_FIELDS)
-          if (EqualNoCase(candidate.name, parts[2]))
-            field = &candidate;
-      }
-      if (!field)
-      {
-        fail("\"" + key + "\" isn't one of a gear's values (the README lists them)");
-        continue;
-      }
-      patch.file = std::string(SONIC_RIDERS_MAIN_REL);
-      patch.sha1 = std::string(SONIC_RIDERS_MAIN_REL_SHA1);
-      type = field->type;
-      for (std::size_t g = 0; g < GEAR_NAMES.size(); ++g)
-        if (every_gear || static_cast<std::ptrdiff_t>(g) == gear - GEAR_NAMES.begin())
-          gear_offsets.push_back(GEARS + GEAR_SIZE * static_cast<std::uint32_t>(g) + offset +
-                                 field->offset);
+      fail("\"" + key + "\" isn't <file>@<offset>:<type>");
+      continue;
     }
-    else
+    const auto file = CleanFilePath(std::string_view(key).substr(0, at));
+    const auto offset = ParseUnsigned(std::string_view(key).substr(at + 1, colon - at - 1));
+    const auto parsed_type = TypeNamed(Trim(std::string_view(key).substr(colon + 1)));
+    if (!file)
     {
-      // <file>@<offset>:<type>
-      const std::size_t at = key.rfind('@');
-      const std::size_t colon = key.rfind(':');
-      if (at == std::string::npos || colon == std::string::npos || colon < at)
-      {
-        fail("\"" + key + "\" is neither gear.<name>.<value> nor <file>@<offset>:<type>");
-        continue;
-      }
-      const auto file = CleanFilePath(std::string_view(key).substr(0, at));
-      const auto offset = ParseUnsigned(std::string_view(key).substr(at + 1, colon - at - 1));
-      const auto parsed_type = TypeNamed(Trim(std::string_view(key).substr(colon + 1)));
-      if (!file)
-      {
-        fail("the file must be a path under files/, such as _Main.rel");
-        continue;
-      }
-      if (!offset || *offset > 0xFFFFFFFFu)
-      {
-        fail("the place in the file must be a number, such as 0x1EA2C0");
-        continue;
-      }
-      if (!parsed_type)
-      {
-        fail("the type must be u8, u16, u32, s8, s16, s32, f32 or bytes");
-        continue;
-      }
-      patch.file = *file;
-      gear_offsets.push_back(static_cast<std::uint32_t>(*offset));
-      type = *parsed_type;
+      fail("the file must be a path under files/, such as _Main.rel");
+      continue;
     }
+    if (!offset || *offset > 0xFFFFFFFFu)
+    {
+      fail("the place in the file must be a number, such as 0x1000");
+      continue;
+    }
+    if (!parsed_type)
+    {
+      fail("the type must be u8, u16, u32, s8, s16, s32, f32 or bytes");
+      continue;
+    }
+    patch.file = *file;
+    patch.offset = static_cast<std::uint32_t>(*offset);
+    const Type type = *parsed_type;
     if (value.empty())
     {
       fail("it has no value");
@@ -676,12 +489,7 @@ inline std::vector<Patch> Parse(std::string_view text, std::string_view disc_id,
       patch.type = static_cast<int>(type);
       patch.bytes.assign(TypeSize(type), 0);
     }
-    for (const std::uint32_t at : gear_offsets)
-    {
-      Patch one = patch;
-      one.offset = at;
-      patches.push_back(std::move(one));
-    }
+    patches.push_back(std::move(patch));
   }
   return patches;
 }
@@ -818,7 +626,6 @@ inline Built BuildPatchedFiles(const std::vector<ModPatches>& mods,
       all_fail("the game has no file " + file);
       continue;
     }
-    const std::string sha1 = Sha1(*data);
     const auto code = static_recomp && EndsWithNoCase(file, ".rel") ? RelCodeSections(*data)
                                                                     : decltype(RelCodeSections(*data)){};
     std::size_t applied_here = 0;
@@ -829,11 +636,6 @@ inline Built BuildPatchedFiles(const std::vector<ModPatches>& mods,
         const ModPatches& mod = mods[m];
         if (!EqualNoCase(patch.file, file))
           continue;
-        if (!patch.sha1.empty() && patch.sha1 != sha1)
-        {
-          problem(mod, patch, file + " isn't the one these values were found in");
-          continue;
-        }
         const std::uint64_t end = static_cast<std::uint64_t>(patch.offset) + patch.bytes.size();
         if (end > data->size())
         {

@@ -1,6 +1,7 @@
 #include "screenshot.hpp"
 
 #include "screenshot_steps.hpp"
+#include "text_paths.hpp"
 
 #include "AudioCommon/AudioCommon.h"
 #include "Common/CommonPaths.h"
@@ -59,7 +60,7 @@ std::string NewScreenshotPath(const std::string& name)
   std::string folder = File::GetUserPath(D_SCREENSHOTS_IDX) + game + DIR_SEP_CHR;
   if (!File::CreateFullPath(folder))
     folder = File::GetUserPath(D_SCREENSHOTS_IDX);
-  return folder + NextScreenshotName(folder, name.empty() ? game : name);
+  return folder + NextScreenshotName(text::TextPath(folder), name.empty() ? game : name);
 }
 }  // namespace
 
@@ -281,7 +282,7 @@ struct HighResScreenshot::Shared
       {
         const std::string file = writing;
         lock.unlock();
-        const std::optional<PngSize> size = FinishedPngSize(file);
+        const std::optional<PngSize> size = FinishedPngSize(text::TextPath(file));
         lock.lock();
         if (size)
         {
@@ -372,7 +373,7 @@ ScreenshotStatus HighResScreenshot::Status() const
   std::lock_guard lock(m_shared->mutex);
   ScreenshotStatus status = m_shared->status;
   if (status.state == ScreenshotStatus::State::Saved && !m_shared->path.empty())
-    status.file = std::filesystem::path(m_shared->path).filename().string();
+    status.file = text::PathText(text::TextPath(m_shared->path).filename());
   return status;
 }
 

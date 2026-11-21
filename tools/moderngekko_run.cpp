@@ -12,6 +12,7 @@
 #include "netplay_session.hpp"
 #include "runner_alerts.hpp"
 #include "runner_exit_code.hpp"
+#include "text_paths.hpp"
 #include "ui_text.hpp"
 
 #include "Common/MsgHandler.h"
@@ -30,6 +31,7 @@
 #include <exception>
 #include <filesystem>
 #include <fstream>
+#include <iomanip>
 #include <iostream>
 #include <random>
 #include <string>
@@ -276,34 +278,34 @@ ReadDefaultGame(const std::filesystem::path &user_directory,
   std::getline(file, path);
   if (!path.empty() && path.back() == '\r')
     path.pop_back();
-  std::filesystem::path result(path);
+  std::filesystem::path result = moderngekko::text::TextPath(path);
   if (result.is_relative())
     result = executable_directory / result;
   return result;
 }
 
+// The folders come from the environment in Unicode (EnvironmentPath): on
+// Windows, std::getenv gives them in the system's code page, which can't
+// hold every user name.
 std::filesystem::path DefaultUserDirectory() {
+  using moderngekko::text::EnvironmentPath;
 #ifdef MODERNGEKKO_USER_DIRECTORY_IN_DOCUMENTS
 #if defined(_WIN32)
-  if (const char *user_profile = std::getenv("USERPROFILE"))
-    return std::filesystem::path(user_profile) / "Documents" /
-           MODERNGEKKO_USER_DIRECTORY_NAME;
+  if (const auto user_profile = EnvironmentPath("USERPROFILE"))
+    return *user_profile / "Documents" / MODERNGEKKO_USER_DIRECTORY_NAME;
 #endif
-  if (const char *home = std::getenv("HOME"))
-    return std::filesystem::path(home) / "Documents" /
-           MODERNGEKKO_USER_DIRECTORY_NAME;
+  if (const auto home = EnvironmentPath("HOME"))
+    return *home / "Documents" / MODERNGEKKO_USER_DIRECTORY_NAME;
 #endif
 #if defined(_WIN32)
-  if (const char *local_app_data = std::getenv("LOCALAPPDATA"))
-    return std::filesystem::path(local_app_data) /
-           MODERNGEKKO_USER_DIRECTORY_NAME;
+  if (const auto local_app_data = EnvironmentPath("LOCALAPPDATA"))
+    return *local_app_data / MODERNGEKKO_USER_DIRECTORY_NAME;
 #endif
-  if (const char *xdg = std::getenv("XDG_DATA_HOME"))
-    return std::filesystem::path(xdg) / MODERNGEKKO_USER_DIRECTORY_NAME;
-  if (const char *home = std::getenv("HOME"))
-    return std::filesystem::path(home) / ".local" / "share" /
-           MODERNGEKKO_USER_DIRECTORY_NAME;
-  return std::string(MODERNGEKKO_USER_DIRECTORY_NAME) + "-user";
+  if (const auto xdg = EnvironmentPath("XDG_DATA_HOME"))
+    return *xdg / MODERNGEKKO_USER_DIRECTORY_NAME;
+  if (const auto home = EnvironmentPath("HOME"))
+    return *home / ".local" / "share" / MODERNGEKKO_USER_DIRECTORY_NAME;
+  return moderngekko::text::TextPath(std::string(MODERNGEKKO_USER_DIRECTORY_NAME) + "-user");
 }
 
 std::string LibrarySuffix() {
@@ -317,16 +319,14 @@ std::string LibrarySuffix() {
 }
 
 std::filesystem::path ExecutableDirectory(const char *argv0) {
+  // As the system knows it (/proc/self/exe, GetModuleFileNameW); argv[0] is
+  // only a guess when it won't say.
+  const std::filesystem::path known = moderngekko::text::ExecutablePath();
+  if (!known.empty())
+    return known.parent_path();
   std::error_code ec;
-#if defined(__linux__)
-  const std::filesystem::path proc_executable =
-      std::filesystem::read_symlink("/proc/self/exe", ec);
-  if (!ec)
-    return proc_executable.parent_path();
-  ec.clear();
-#endif
   const std::filesystem::path executable =
-      std::filesystem::weakly_canonical(argv0, ec);
+      std::filesystem::weakly_canonical(moderngekko::text::TextPath(argv0), ec);
   return ec ? std::filesystem::current_path() : executable.parent_path();
 }
 } // namespace
@@ -366,11 +366,11 @@ int RunMain(int argc, char **argv) {
       return argv[++i];
     };
     if (arg == "--game")
-      config.game_root = value("--game");
+      config.game_root = moderngekko::text::TextPath(value("--game"));
     else if (arg == "--module")
-      module_path = value("--module");
+      module_path = moderngekko::text::TextPath(value("--module"));
     else if (arg == "--user-dir")
-      config.user_directory = value("--user-dir");
+      config.user_directory = moderngekko::text::TextPath(value("--user-dir"));
     else if (arg == "--title")
       config.window_title = value("--title");
     // The launcher's window, as its window system names it (an X11 window
@@ -404,7 +404,7 @@ int RunMain(int argc, char **argv) {
     else if (arg == "--audio")
       config.audio.backend = value("--audio");
     else if (arg == "--mods")
-      config.mod_directories.emplace_back(value("--mods"));
+      config.mod_directories.push_back(moderngekko::text::TextPath(value("--mods")));
     else if (arg == "--no-mods")
       use_default_mods = false;
     else if (arg == "-X11" || arg == "--x11")
@@ -414,7 +414,7 @@ int RunMain(int argc, char **argv) {
     else if (arg == "--mute")
       config.audio.mute = true;
     else if (arg == "--automation-dir")
-      config.automation.directory = value("--automation-dir");
+      config.automation.directory = moderngekko::text::TextPath(value("--automation-dir"));
     else if (arg == "--headless")
       config.headless = true;
     else if (arg == "--allow-interpreter")
@@ -483,7 +483,8 @@ int RunMain(int argc, char **argv) {
         ReadDefaultGame(config.user_directory, executable_directory);
   if (config.game_root.empty()) {
     std::cerr << "no game configured; use --game once or create "
-              << (config.user_directory / "default-game.txt") << '\n';
+              << std::quoted(moderngekko::text::PathText(config.user_directory / "default-game.txt"))
+              << '\n';
     Usage();
     return 2;
   }
@@ -730,8 +731,8 @@ int RunMain(int argc, char **argv) {
 
   // Compatibility discovery belongs to the runner, never the runtime library.
   if (module_path.empty()) {
-    if (const char *env = std::getenv("STATICRECOMP_MODULE"))
-      module_path = env;
+    if (const auto env = moderngekko::text::EnvironmentPath("STATICRECOMP_MODULE"))
+      module_path = *env;
     else {
       const std::string module_name =
           "g" + inspected.metadata->disc_id + "_recomp" + LibrarySuffix();
@@ -952,6 +953,12 @@ void PinProcessToLargestCache(int argc, char **argv) {
 }
 
 int main(int argc, char **argv) {
+  // UTF-8 arguments on every system: the launcher passes folders and names
+  // (a user folder with an accent, a nickname) that Windows' code page can't
+  // always hold (text_paths.hpp).
+  moderngekko::text::Utf8Arguments arguments(argc, argv);
+  argc = arguments.Count();
+  argv = arguments.Values();
   try {
     PinProcessToLargestCache(argc, argv);
     return RunMain(argc, argv);

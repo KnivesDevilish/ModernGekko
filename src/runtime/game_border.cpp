@@ -9,6 +9,7 @@
 #include "VideoCommon/RenderState.h"
 #include "VideoCommon/TextureConfig.h"
 #include "game_borders.hpp"
+#include "text_paths.hpp"
 
 #include <imgui.h>
 
@@ -245,7 +246,7 @@ std::unique_ptr<GameBorderOverlay> GameBorderOverlay::Create(const std::filesyst
   if (!border)
   {
     std::fprintf(stderr, "4:3 border: %s is not in %s\n", id.c_str(),
-                 (folder / "borders.txt").string().c_str());
+                 text::PathText(folder / "borders.txt").c_str());
     return nullptr;
   }
 
@@ -253,9 +254,10 @@ std::unique_ptr<GameBorderOverlay> GameBorderOverlay::Create(const std::filesyst
   const auto make_side = [&](const std::string& name, const std::optional<BorderRect>& part,
                              const BorderMotion& motion, Side* side) {
     auto [entry, added] = impl->pictures.try_emplace(name);
-    if (added && !ReadPicture(folder / name, &entry->second))
+    if (added && !ReadPicture(folder / text::TextPath(name), &entry->second))
     {
-      std::fprintf(stderr, "4:3 border: can't read %s\n", (folder / name).string().c_str());
+      std::fprintf(stderr, "4:3 border: can't read %s\n",
+                   text::PathText(folder / text::TextPath(name)).c_str());
       return false;
     }
     if (entry->second.pixels.empty())

@@ -3,6 +3,7 @@
 #if defined(MODERNGEKKO_ENABLE_DYNAMIC_MODULES)
 #include "Common/DynamicLibrary.h"
 #endif
+#include "text_paths.hpp"
 
 #include <algorithm>
 #include <array>
@@ -96,7 +97,7 @@ bool EndsWith(const std::string &text, const std::string &suffix) {
 }
 
 bool IsPackagedLibrary(const std::filesystem::path &path) {
-  return EndsWith(path.filename().string(), ".mgm" + LibrarySuffix());
+  return EndsWith(moderngekko::text::PathText(path.filename()), ".mgm" + LibrarySuffix());
 }
 }
 
@@ -197,7 +198,7 @@ ModLoadReport ModManager::Load(const std::vector<ModSource> &sources,
     const ModSource &source = sources[index];
     auto mod = std::make_unique<Impl::Mod>();
     mod->source = source.kind == ModSource::Kind::DynamicPath
-                      ? source.path.string()
+                      ? moderngekko::text::PathText(source.path)
                       : source.label;
     if (mod->source.empty())
       mod->source = "attached:" + std::to_string(index);
@@ -206,7 +207,7 @@ ModLoadReport ModManager::Load(const std::vector<ModSource> &sources,
     } else {
 #if defined(MODERNGEKKO_ENABLE_DYNAMIC_MODULES)
       mod->library = std::make_unique<Common::DynamicLibrary>();
-      if (!mod->library->Open(source.path.string().c_str())) {
+      if (!mod->library->Open(moderngekko::text::SystemPathText(source.path).c_str())) {
         issue(mod->source, "could not open the mod library");
         continue;
       }
@@ -491,7 +492,7 @@ DiscoverModSources(const std::vector<std::filesystem::path> &directories,
   const auto issue = [&](const std::filesystem::path &path,
                          std::string message) {
     if (issues)
-      issues->push_back({path.string(), std::move(message)});
+      issues->push_back({moderngekko::text::PathText(path), std::move(message)});
   };
   for (const auto &directory : directories) {
     std::error_code ec;

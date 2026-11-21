@@ -26,6 +26,7 @@
 #include "netplay_address.hpp"
 #include "netplay_session.hpp"
 #include "runner_exit_code.hpp"
+#include "text_paths.hpp"
 #include "windows_firewall.hpp"
 
 #include "DiscIO/DiscExtractor.h"
@@ -52,6 +53,7 @@
 #include <filesystem>
 #include <fstream>
 #include <functional>
+#include <iomanip>
 #include <iostream>
 #include <mutex>
 #include <optional>
@@ -67,6 +69,9 @@ namespace fs = std::filesystem;
 // Interface texts are written in English and drawn through Tr().
 using moderngekko::frontend::Format;
 using moderngekko::frontend::Tr;
+using moderngekko::text::EnvironmentPath;
+using moderngekko::text::PathText;
+using moderngekko::text::TextPath;
 
 namespace
 {
@@ -216,49 +221,57 @@ int FindController(const std::vector<ControllerOption>& controllers, std::string
   return found == controllers.end() ? -1 : static_cast<int>(found - controllers.begin());
 }
 
+// The folders come from the environment in Unicode (EnvironmentPath): on
+// Windows, std::getenv gives them in the system's code page, which can't
+// hold every user name.
 fs::path DefaultUserDirectory()
 {
 #ifdef MODERNGEKKO_USER_DIRECTORY_IN_DOCUMENTS
 #if defined(_WIN32)
-  if (const char* user_profile = std::getenv("USERPROFILE"))
-    return fs::path(user_profile) / "Documents" / MODERNGEKKO_USER_DIRECTORY_NAME;
+  if (const auto user_profile = EnvironmentPath("USERPROFILE"))
+    return *user_profile / "Documents" / MODERNGEKKO_USER_DIRECTORY_NAME;
 #endif
-  if (const char* home = std::getenv("HOME"))
-    return fs::path(home) / "Documents" / MODERNGEKKO_USER_DIRECTORY_NAME;
+  if (const auto home = EnvironmentPath("HOME"))
+    return *home / "Documents" / MODERNGEKKO_USER_DIRECTORY_NAME;
 #endif
 #if defined(_WIN32)
-  if (const char* local_app_data = std::getenv("LOCALAPPDATA"))
-    return fs::path(local_app_data) / MODERNGEKKO_USER_DIRECTORY_NAME;
+  if (const auto local_app_data = EnvironmentPath("LOCALAPPDATA"))
+    return *local_app_data / MODERNGEKKO_USER_DIRECTORY_NAME;
 #endif
-  if (const char* xdg = std::getenv("XDG_DATA_HOME"))
-    return fs::path(xdg) / MODERNGEKKO_USER_DIRECTORY_NAME;
-  if (const char* home = std::getenv("HOME"))
-    return fs::path(home) / ".local/share" / MODERNGEKKO_USER_DIRECTORY_NAME;
-  return std::string(MODERNGEKKO_USER_DIRECTORY_NAME) + "-user";
+  if (const auto xdg = EnvironmentPath("XDG_DATA_HOME"))
+    return *xdg / MODERNGEKKO_USER_DIRECTORY_NAME;
+  if (const auto home = EnvironmentPath("HOME"))
+    return *home / ".local/share" / MODERNGEKKO_USER_DIRECTORY_NAME;
+  return TextPath(std::string(MODERNGEKKO_USER_DIRECTORY_NAME) + "-user");
 }
 
 fs::path DocumentsDirectory()
 {
 #if defined(_WIN32)
-  if (const char* user_profile = std::getenv("USERPROFILE"))
-    return fs::path(user_profile) / "Documents";
+  if (const auto user_profile = EnvironmentPath("USERPROFILE"))
+    return *user_profile / "Documents";
 #endif
-  if (const char* home = std::getenv("HOME"))
-    return fs::path(home) / "Documents";
+  if (const auto home = EnvironmentPath("HOME"))
+    return *home / "Documents";
   return fs::current_path();
+}
+
+// The launcher's file as the system knows it (/proc/self/exe,
+// GetModuleFileNameW); argv[0] is only a guess when it won't say: a bare name
+// or a path from another working folder, as another program may start it.
+fs::path ExecutableFile(const char* argv0)
+{
+  const fs::path known = moderngekko::text::ExecutablePath();
+  if (!known.empty())
+    return known;
+  std::error_code ec;
+  const fs::path executable = fs::weakly_canonical(TextPath(argv0), ec);
+  return ec ? fs::current_path() / "launcher" : executable;
 }
 
 fs::path ExecutableDirectory(const char* argv0)
 {
-  std::error_code ec;
-#if defined(__linux__)
-  const fs::path proc_executable = fs::read_symlink("/proc/self/exe", ec);
-  if (!ec)
-    return proc_executable.parent_path();
-  ec.clear();
-#endif
-  const fs::path executable = fs::weakly_canonical(argv0, ec);
-  return ec ? fs::current_path() : executable.parent_path();
+  return ExecutableFile(argv0).parent_path();
 }
 
 fs::path SiblingExecutable(const fs::path& release_directory, std::string name)
@@ -266,8 +279,8 @@ fs::path SiblingExecutable(const fs::path& release_directory, std::string name)
 #if defined(_WIN32)
   name += ".exe";
 #endif
-  const fs::path sibling = release_directory / name;
-  return fs::is_regular_file(sibling) ? sibling : fs::path(name);
+  const fs::path sibling = release_directory / TextPath(name);
+  return fs::is_regular_file(sibling) ? sibling : TextPath(name);
 }
 
 bool ApplyBundledDolPatch(const fs::path& game_root, const fs::path& release_directory,
@@ -304,7 +317,7 @@ fs::path ReadDefaultGame(const fs::path& user_directory, const fs::path& release
   std::getline(file, value);
   if (!value.empty() && value.back() == '\r')
     value.pop_back();
-  fs::path game(value);
+  fs::path game = TextPath(value);
   if (game.is_relative())
     game = release_directory / game;
   return game;
@@ -329,7 +342,7 @@ bool WriteDefaultGame(const fs::path& user_directory, const fs::path& release_di
   if (!ec && !relative.empty())
     stored = relative;
 #endif
-  file << stored.string() << '\n';
+  file << PathText(stored) << '\n';
   return true;
 }
 
@@ -349,7 +362,7 @@ std::vector<fs::path> FindDiscImages()
       iterator.disable_recursion_pending();
     if (iterator->is_regular_file(ec))
     {
-      std::string extension = iterator->path().extension().string();
+      std::string extension = PathText(iterator->path().extension());
       std::ranges::transform(extension, extension.begin(),
                              [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
       if (extension == ".wbfs" || extension == ".iso" || extension == ".rvz")
@@ -367,7 +380,7 @@ std::optional<fs::path> PrepareDisc(const fs::path& image, const fs::path& user_
                                     const fs::path& release_directory, ExtractionState* state,
                                     std::string* error)
 {
-  std::unique_ptr<DiscIO::Volume> source = DiscIO::CreateVolume(image.string());
+  std::unique_ptr<DiscIO::Volume> source = DiscIO::CreateVolume(PathText(image));
   if (!source)
   {
     *error = Tr("Image rejected: the selected file is not a valid disc image.");
@@ -390,7 +403,7 @@ std::optional<fs::path> PrepareDisc(const fs::path& image, const fs::path& user_
              MODERNGEKKO_REQUIRED_DISC_ID "; selected " + source_id;
     return std::nullopt;
   }
-  const fs::path output = user_directory / "Setup" / "SonicRidersTE-2.4.6.1.iso";
+  const fs::path output = user_directory / "Setup" / (MODERNGEKKO_REQUIRED_DISC_ID ".iso");
   std::error_code ec;
   fs::create_directories(output.parent_path(), ec);
   if (ec)
@@ -400,19 +413,19 @@ std::optional<fs::path> PrepareDisc(const fs::path& image, const fs::path& user_
   }
   {
     std::lock_guard lock(state->mutex);
-    state->status = Tr("Applying Tournament Edition 2.4.6.1");
+    state->status = Tr("Preparing the disc");
   }
   const fs::path preparer =
       SiblingExecutable(release_directory, MODERNGEKKO_DISC_PREPARER_FILENAME);
   const std::array<std::string, 5> storage = {
-      preparer.string(), "--input", image.string(), "--output", output.string()};
+      PathText(preparer), "--input", PathText(image), "--output", PathText(output)};
   std::array<const char*, 6> arguments{};
   for (std::size_t i = 0; i < storage.size(); ++i)
     arguments[i] = storage[i].c_str();
   SDL_Process* process = SDL_CreateProcess(arguments.data(), false);
   if (!process)
   {
-    *error = Format(Tr("can't start Tournament Edition patcher: %s"), SDL_GetError());
+    *error = Format(Tr("can't start the disc preparer: %s"), SDL_GetError());
     return std::nullopt;
   }
   int exit_code = 1;
@@ -420,7 +433,7 @@ std::optional<fs::path> PrepareDisc(const fs::path& image, const fs::path& user_
   SDL_DestroyProcess(process);
   if (!waited || exit_code != 0)
   {
-    *error = Tr("Tournament Edition patching failed");
+    *error = Tr("Preparing the disc failed");
     return std::nullopt;
   }
   return output;
@@ -443,14 +456,14 @@ bool ExtractDisc(const fs::path& image, const fs::path& user_directory,
 
   {
     std::lock_guard lock(state->mutex);
-    state->status = Format(Tr("Opening %s"), image.filename().string().c_str());
+    state->status = Format(Tr("Opening %s"), PathText(image.filename()).c_str());
   }
   std::string preparation_error;
   const std::optional<fs::path> prepared =
       PrepareDisc(image, user_directory, release_directory, state, &preparation_error);
   if (!prepared)
     return fail(std::move(preparation_error));
-  std::unique_ptr<DiscIO::Volume> volume = DiscIO::CreateVolume(prepared->string());
+  std::unique_ptr<DiscIO::Volume> volume = DiscIO::CreateVolume(PathText(*prepared));
   if (!volume)
     return fail(Tr("Image rejected: the prepared disc image could not be opened."));
 
@@ -503,7 +516,7 @@ bool ExtractDisc(const fs::path& image, const fs::path& user_directory,
     std::lock_guard lock(state->mutex);
     state->status = Tr("Extracting system data");
   }
-  if (!DiscIO::ExportSystemData(*volume, partition, staging.string()))
+  if (!DiscIO::ExportSystemData(*volume, partition, PathText(staging)))
   {
     fs::remove_all(staging, ec);
     return fail(Tr("The disc's system data could not be extracted."));
@@ -515,7 +528,7 @@ bool ExtractDisc(const fs::path& image, const fs::path& user_directory,
     state->status = Tr("Extracting game files");
   }
   DiscIO::ExportDirectory(*volume, partition, filesystem->GetRoot(), true, "",
-                          (staging / "files").string(),
+                          PathText(staging / "files"),
                           [state](const std::string& path)
                           {
                             ++state->completed;
@@ -570,13 +583,12 @@ void SDLCALL FileDialogCallback(void* userdata, const char* const* filelist, int
   if (!filelist)
     state->error = SDL_GetError();
   else if (filelist[0])
-    state->selected = filelist[0];
+    state->selected = TextPath(filelist[0]);  // SDL gives UTF-8
 }
 
 fs::path SiblingRunner(const char* argv0)
 {
-  std::error_code ec;
-  const fs::path self = fs::weakly_canonical(argv0, ec);
+  const fs::path self = ExecutableFile(argv0);
   fs::path runner = MODERNGEKKO_RUNNER_FILENAME;
 #if defined(_WIN32)
   runner += ".exe";
@@ -1227,7 +1239,7 @@ void DrawCreditsPage(ImFont* bold, const std::function<void()>& version_section 
   if (top_columns)
     EndPageColumns();
 
-  static constexpr std::array<std::array<const char*, 2>, 7> BUILT_ON = {{
+  static constexpr std::array<std::array<const char*, 2>, 6> BUILT_ON = {{
       {"DolRecomp", MODERNGEKKO_UI_TEXT("Static recompilation framework")},
       {"ModernGekko", MODERNGEKKO_UI_TEXT("Runtime for GameCube/Wii recomps, by Hyperway")},
       {"RecompCore", "SpecialK / aharonahdoot"},
@@ -1237,10 +1249,6 @@ void DrawCreditsPage(ImFont* bold, const std::function<void()>& version_section 
       // Netplay's invite codes come from Dolphin's traversal server.
       {MODERNGEKKO_UI_TEXT("Invite codes"),
        MODERNGEKKO_UI_TEXT("Dolphin's public server (stun.dolphin-emu.org)")},
-      // Its source (GPL v3) is where the data patches' gear.* values come from.
-      {"Sonic Riders TE",
-       MODERNGEKKO_UI_TEXT("The Tournament Edition team (RidersBoulevard): the layout of the "
-                           "Extreme Gear table")},
   }};
   // The projects get the wider column: their names come with a line each.
   const bool bottom_columns = BeginPageColumns("##credits_bottom", 0.6f);
@@ -1248,10 +1256,9 @@ void DrawCreditsPage(ImFont* bold, const std::function<void()>& version_section 
   DrawCreditsRows("##credits_built_on_rows", BUILT_ON, bold);
   EndSection();
 
-  static constexpr std::array<std::array<const char*, 2>, 7> LICENSES = {{
+  static constexpr std::array<std::array<const char*, 2>, 6> LICENSES = {{
       {"Sonic Riders: Source", "GNU GPL v3"},
       {"ModernGekko", "GNU GPL v3"},
-      {"Sonic Riders TE", "GNU GPL v3"},
       {"Dolphin", MODERNGEKKO_UI_TEXT("GNU GPL v2 or later")},
       {"SDL 3", MODERNGEKKO_UI_TEXT("zlib License")},
       {"Dear ImGui, pl_mpeg", MODERNGEKKO_UI_TEXT("MIT License")},
@@ -1546,7 +1553,7 @@ bool RetargetControllerProfile(const fs::path& profile, std::string_view device,
     std::ifstream input(profile);
     if (!input)
     {
-      *error = "can't read " + profile.string();
+      *error = "can't read " + PathText(profile);
       return false;
     }
     for (std::string line; std::getline(input, line);)
@@ -1576,7 +1583,7 @@ bool RetargetControllerProfile(const fs::path& profile, std::string_view device,
   }
   if (!section_line)
   {
-    *error = profile.filename().string() + " has no " + std::string(CONTROLLER_PROFILE_SECTION) +
+    *error = PathText(profile.filename()) + " has no " + std::string(CONTROLLER_PROFILE_SECTION) +
              " section";
     return false;
   }
@@ -1589,7 +1596,7 @@ bool RetargetControllerProfile(const fs::path& profile, std::string_view device,
   fs::copy_file(profile, backup, fs::copy_options::overwrite_existing, ec);
   if (ec)
   {
-    *error = "can't back up " + profile.string() + ": " + ec.message();
+    *error = "can't back up " + PathText(profile) + ": " + ec.message();
     return false;
   }
   fs::path temporary = profile;
@@ -1600,14 +1607,14 @@ bool RetargetControllerProfile(const fs::path& profile, std::string_view device,
       output << line << '\n';
     if (!output)
     {
-      *error = "can't write " + temporary.string();
+      *error = "can't write " + PathText(temporary);
       return false;
     }
   }
   fs::rename(temporary, profile, ec);
   if (ec)
   {
-    *error = "can't replace " + profile.string() + ": " + ec.message();
+    *error = "can't replace " + PathText(profile) + ": " + ec.message();
     return false;
   }
   return true;
@@ -2682,6 +2689,11 @@ void DrawControllerTester(ControllerTester& tester, const LauncherImage& control
 
 int main(int argc, char** argv)
 {
+  // UTF-8 arguments on every system (text_paths.hpp): on Windows, main() gets
+  // them in the system's code page.
+  moderngekko::text::Utf8Arguments utf8_arguments(argc, argv);
+  argc = utf8_arguments.Count();
+  argv = utf8_arguments.Values();
   bool use_wayland = false;
   std::optional<fs::path> extract_only;
   for (int i = 1; i < argc; ++i)
@@ -2691,7 +2703,7 @@ int main(int argc, char** argv)
     else if (std::string_view(argv[i]) == "--wayland")
       use_wayland = true;
     else if (std::string_view(argv[i]) == "--extract" && i + 1 < argc)
-      extract_only = argv[++i];
+      extract_only = TextPath(argv[++i]);
   }
 
   // A renamed project's players keep their folder: the one of the earlier
@@ -2702,10 +2714,10 @@ int main(int argc, char** argv)
             DefaultUserDirectory(),
             moderngekko::frontend::SplitFolderNames(MODERNGEKKO_PREVIOUS_USER_DIRECTORY_NAMES));
     if (!settled.moved_from.empty())
-      std::cout << "user folder: moved " << settled.moved_from.string() << " to "
-                << settled.folder.string() << '\n';
+      std::cout << "user folder: moved " << PathText(settled.moved_from) << " to "
+                << PathText(settled.folder) << '\n';
     if (!settled.error.empty())
-      std::cerr << "user folder: can't move " << settled.folder.string() << " to its new name ("
+      std::cerr << "user folder: can't move " << PathText(settled.folder) << " to its new name ("
                 << settled.error << "); using it where it is\n";
     return settled.folder;
   }();
@@ -2720,7 +2732,7 @@ int main(int argc, char** argv)
     if (!success)
       std::cerr << "extraction failed: " << extraction.error << '\n';
     else
-      std::cout << extraction.status << ": " << *extraction.finished_game << '\n';
+      std::cout << extraction.status << ": " << std::quoted(PathText(*extraction.finished_game)) << '\n';
     return success ? 0 : 1;
   }
 
@@ -3434,9 +3446,11 @@ int main(int argc, char** argv)
       transition.Back(now);
       return false;
     }
-    std::vector<std::string> argument_storage = {SiblingRunner(argv[0]).string(), "--game",
-                                                 current_game.string(), "--user-dir",
-                                                 user_directory.string()};
+    // UTF-8, as SDL_CreateProcess takes them (the runner reads them back as
+    // UTF-8 too, text_paths.hpp).
+    std::vector<std::string> argument_storage = {PathText(SiblingRunner(argv[0])), "--game",
+                                                 PathText(current_game), "--user-dir",
+                                                 PathText(user_directory)};
     // With more than one game, the window takes the name of the one chosen.
     if (moderngekko::frontend::PlaysSeveralGames() && current_metadata)
     {
@@ -3522,7 +3536,7 @@ int main(int argc, char** argv)
       arguments.push_back(argument.c_str());
     arguments.push_back(nullptr);
     SDL_IOStream* log_stream =
-        log_error ? nullptr : SDL_IOFromFile(log_path.string().c_str(), "w");
+        log_error ? nullptr : SDL_IOFromFile(PathText(log_path).c_str(), "w");
     SDL_Process* process = nullptr;
     std::string process_error;
     if (log_stream)
@@ -3562,7 +3576,7 @@ int main(int argc, char** argv)
     if (!process)
     {
       session_error_title = Tr("Launch failed");
-      session_error = Format(Tr("Could not start %s: %s"), SiblingRunner(argv[0]).string().c_str(),
+      session_error = Format(Tr("Could not start %s: %s"), PathText(SiblingRunner(argv[0])).c_str(),
                              process_error.c_str());
       session_error_log.clear();
       transition.Back(now);
@@ -5422,7 +5436,7 @@ int main(int argc, char** argv)
                        false);
         ImGui::PushTextWrapPos(0.0f);
         if (slot.metadata)
-          ImGui::TextDisabled("%s", slot.root.string().c_str());
+          ImGui::TextDisabled("%s", PathText(slot.root).c_str());
         else
           ImGui::TextDisabled("%s", Tr("Select its disc image below and extract it."));
         ImGui::PopTextWrapPos();
@@ -5440,7 +5454,7 @@ int main(int argc, char** argv)
       ImGui::Spacing();
       ImGui::TextUnformatted(current_metadata.metadata->game_name.c_str());
       ImGui::PushTextWrapPos(0.0f);
-      ImGui::TextDisabled("%s", current_game.string().c_str());
+      ImGui::TextDisabled("%s", PathText(current_game).c_str());
       ImGui::PopTextWrapPos();
     }
     else
@@ -5453,7 +5467,7 @@ int main(int argc, char** argv)
     }
     BeginSection("##files_image", Tr("DISC IMAGE"));
     if (selected_image)
-      ImGui::TextWrapped("%s", selected_image->string().c_str());
+      ImGui::TextWrapped("%s", PathText(*selected_image).c_str());
     else
       ImGui::TextDisabled("%s", Tr("No ISO, WBFS, or RVZ selected"));
     ImGui::Spacing();
@@ -5466,7 +5480,7 @@ int main(int argc, char** argv)
         static SDL_DialogFileFilter filters[] = {
             {"", "iso;wbfs;rvz"}, {"ISO", "iso"}, {"WBFS", "wbfs"}, {"RVZ", "rvz"}};
         filters[0].name = Tr("Disc images");
-        const std::string documents = DocumentsDirectory().string();
+        const std::string documents = PathText(DocumentsDirectory());
         SDL_ShowOpenFileDialog(FileDialogCallback, &dialog, window, filters,
                                static_cast<int>(std::size(filters)), documents.c_str(), false);
       }
@@ -5625,7 +5639,7 @@ int main(int argc, char** argv)
           case moderngekko::frontend::SaveError::None:
             save.message =
                 MODERNGEKKO_UI_TEXT("Complete save installed. Your own save is kept in %s.");
-            save.message_detail = result.backup.string();
+            save.message_detail = PathText(result.backup);
             break;
           case moderngekko::frontend::SaveError::Backup:
             save.message =
@@ -5730,38 +5744,35 @@ int main(int argc, char** argv)
         bool on = std::ranges::find(config.mods, mod.id) != config.mods.end();
         if (ImGui::Checkbox((mod.name + "##mod_" + mod.id).c_str(), &on))
           set_mod_on(mod.id, on);
-        ImGui::SetItemTooltip("%s", moderngekko::frontend::PathText(mod.folder).c_str());
-        // Version and author beside the name when they fit there, else
-        // under it; the description under it, past the switch.
-        const float past_switch =
-            ImGui::GetFrameHeight() + ImGui::GetStyle().ItemInnerSpacing.x;
-        std::string details = mod.version;
-        if (!mod.author.empty())
-          details += (details.empty() ? "" : "  \xC2\xB7  ") + mod.author;
-        // A texture pack says so: it changes only what is drawn.
-        if (mod.has_textures)
-          details += std::string(details.empty() ? "" : "  \xC2\xB7  ") + Tr("Textures");
-        // And one with data patches: it changes values inside the game.
-        if (mod.has_patches)
-          details += std::string(details.empty() ? "" : "  \xC2\xB7  ") + Tr("Data patches");
-        bool details_shown = details.empty();
-        if (!details_shown)
+        // One line per mod, its switch and name: the rest shows in a card
+        // while the mouse, or the controller's selection, is on it.
+        if (ImGui::BeginItemTooltip())
         {
-          const float right = ImGui::GetItemRectMax().x + ImGui::GetStyle().ItemSpacing.x;
-          if (right + ImGui::CalcTextSize(details.c_str()).x <=
-              ImGui::GetCursorScreenPos().x + ImGui::GetContentRegionAvail().x)
-          {
-            ImGui::SameLine();
+          std::string details = mod.version;
+          if (!mod.author.empty())
+            details += (details.empty() ? "" : "  \xC2\xB7  ") + mod.author;
+          // A texture pack says so: it changes only what is drawn.
+          if (mod.has_textures)
+            details += std::string(details.empty() ? "" : "  \xC2\xB7  ") + Tr("Textures");
+          // And one with data patches: it changes values inside the game.
+          if (mod.has_patches)
+            details += std::string(details.empty() ? "" : "  \xC2\xB7  ") + Tr("Data patches");
+          ImGui::PushTextWrapPos(ImGui::GetFontSize() * 26.0f);
+          ImGui::PushFont(fonts.bold, 0.0f);
+          ImGui::TextUnformatted(mod.name.c_str());
+          ImGui::PopFont();
+          if (!details.empty())
             ImGui::TextDisabled("%s", details.c_str());
-            details_shown = true;
+          if (!mod.description.empty())
+          {
+            ImGui::Spacing();
+            ImGui::TextUnformatted(mod.description.c_str());
           }
+          ImGui::Spacing();
+          ImGui::TextDisabled("%s", moderngekko::frontend::PathText(mod.folder).c_str());
+          ImGui::PopTextWrapPos();
+          ImGui::EndTooltip();
         }
-        ImGui::Indent(past_switch);
-        if (!details_shown)
-          ImGui::TextDisabled("%s", details.c_str());
-        if (!mod.description.empty())
-          DimWrappedText(mod.description);
-        ImGui::Unindent(past_switch);
       }
     }
     // Code mods: always loaded, no switch.

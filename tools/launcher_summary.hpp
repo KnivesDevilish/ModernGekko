@@ -17,6 +17,8 @@
 #include <system_error>
 #include <vector>
 
+#include "text_paths.hpp"
+
 namespace moderngekko::frontend
 {
 namespace fs = std::filesystem;
@@ -121,7 +123,7 @@ inline std::vector<fs::path> ListInstalledMods(const std::vector<fs::path>& dire
           it->is_directory(entry_ec) && path.extension() == ".mgm" &&
           fs::is_regular_file(path / ("mod" + std::string(suffix)), entry_ec);
       const bool package_file =
-          it->is_regular_file(entry_ec) && path.filename().string().ends_with(packaged_suffix);
+          it->is_regular_file(entry_ec) && text::PathText(path.filename()).ends_with(packaged_suffix);
       if (!package_folder && !package_file)
         continue;
       std::error_code canonical_ec;
@@ -143,7 +145,7 @@ inline int CountInstalledMods(const std::vector<fs::path>& directories)
 // speed.mgm and for speed.mgm.so (.dll, .dylib).
 inline std::string ModPackageName(const fs::path& package)
 {
-  std::string name = package.filename().string();
+  std::string name = text::PathText(package.filename());
   const std::string packaged_suffix = ".mgm" + std::string(summary_detail::ModLibrarySuffix());
   if (name.ends_with(packaged_suffix))
     name.resize(name.size() - packaged_suffix.size());

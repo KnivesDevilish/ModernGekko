@@ -419,9 +419,12 @@ target_link_libraries(moderngekko_dolphin_video PUBLIC fmt::fmt)
 target_link_libraries(moderngekko_legacy PUBLIC ModernGekko::ABI fmt::fmt)
 target_compile_features(moderngekko_legacy PUBLIC cxx_std_23)
 target_include_directories(moderngekko_legacy PRIVATE
-    "${CMAKE_CURRENT_SOURCE_DIR}/vendor/dolphin_legacy")
+    "${CMAKE_CURRENT_SOURCE_DIR}/vendor/dolphin_legacy"
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools")
 
 target_link_libraries(moderngekko PUBLIC ModernGekko::ABI PRIVATE fmt::fmt)
+# tools/text_paths.hpp: how paths become text and back (UTF-8 on every system).
+target_include_directories(moderngekko PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/tools")
 if(MODERNGEKKO_ENABLE_DOLPHIN_RUNTIME)
     target_sources(moderngekko PRIVATE
         src/runtime/dolphin_runtime.cpp
@@ -429,6 +432,9 @@ if(MODERNGEKKO_ENABLE_DOLPHIN_RUNTIME)
         src/runtime/game_menu.cpp
         src/runtime/screenshot.cpp
         src/runtime/memory_snapshot.cpp
+        src/runtime/memory_watch.cpp
+        src/runtime/mod_sounds.cpp
+        src/runtime/mod_hud.cpp
         tools/automation_protocol.cpp
         vendor/dolphin/Source/Core/DolphinNoGUI/Platform.cpp
         vendor/dolphin/Source/Core/DolphinNoGUI/PlatformHeadless.cpp
@@ -636,6 +642,7 @@ if(MODERNGEKKO_ENABLE_DOLPHIN_RUNTIME)
         tools/frontend_config.cpp
         tools/dol_patch.cpp
         tools/launcher_music.cpp
+        tools/text_paths.cpp
         vendor/dolphin/Externals/imgui/imgui/backends/imgui_impl_sdl3.cpp
         vendor/dolphin/Externals/imgui/imgui/backends/imgui_impl_sdlrenderer3.cpp)
     target_include_directories(moderngekko-run PRIVATE
@@ -780,6 +787,28 @@ if(MODERNGEKKO_ENABLE_DOLPHIN_RUNTIME)
         VERBATIM)
     add_dependencies(moderngekko-run moderngekko_run_shaders)
 
+    # Folders whose names aren't plain ASCII (GitHub issue #5, a Windows user
+    # folder with an accent): tools/text_paths.hpp, SDL and the runner as the
+    # launcher starts it (tests/text_paths_test.cpp). Left out of a plain
+    # build (EXCLUDE_FROM_ALL), so a release build can still make it on its
+    # own, as the release workflow does on Windows and Linux:
+    #   cmake --build <build> --target moderngekko_text_paths_test
+    add_executable(moderngekko_text_paths_test EXCLUDE_FROM_ALL
+        tests/text_paths_test.cpp
+        tools/text_paths.cpp)
+    target_include_directories(moderngekko_text_paths_test PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/tools")
+    target_compile_features(moderngekko_text_paths_test PRIVATE cxx_std_23)
+    target_link_libraries(moderngekko_text_paths_test PRIVATE ${_moderngekko_sdl_target})
+    if(MSVC)
+        target_compile_options(moderngekko_text_paths_test PRIVATE /utf-8)
+    endif()
+    if(BUILD_TESTING)
+        set_target_properties(moderngekko_text_paths_test PROPERTIES EXCLUDE_FROM_ALL OFF)
+        add_test(NAME moderngekko.text_paths
+                 COMMAND moderngekko_text_paths_test --runner $<TARGET_FILE:moderngekko-run>)
+    endif()
+
     add_executable(moderngekko-launcher
         tools/moderngekko_launcher.cpp
         tools/frontend_config.cpp
@@ -789,6 +818,7 @@ if(MODERNGEKKO_ENABLE_DOLPHIN_RUNTIME)
         tools/launcher_process.cpp
         tools/launcher_update.cpp
         tools/windows_firewall.cpp
+        tools/text_paths.cpp
         vendor/dolphin/Externals/imgui/imgui/backends/imgui_impl_sdl3.cpp
         vendor/dolphin/Externals/imgui/imgui/backends/imgui_impl_sdlrenderer3.cpp)
     target_include_directories(moderngekko-launcher PRIVATE
@@ -1141,6 +1171,27 @@ if(BUILD_TESTING)
     target_compile_features(moderngekko_cvm_mods_test PRIVATE cxx_std_23)
     add_test(NAME moderngekko.cvm_mods COMMAND moderngekko_cvm_mods_test)
 
+    add_executable(moderngekko_memory_watch_test
+        tests/memory_watch_test.cpp)
+    target_include_directories(moderngekko_memory_watch_test PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/runtime")
+    target_compile_features(moderngekko_memory_watch_test PRIVATE cxx_std_23)
+    add_test(NAME moderngekko.memory_watch COMMAND moderngekko_memory_watch_test)
+
+    add_executable(moderngekko_mod_sounds_test
+        tests/mod_sounds_test.cpp)
+    target_include_directories(moderngekko_mod_sounds_test PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/runtime")
+    target_compile_features(moderngekko_mod_sounds_test PRIVATE cxx_std_23)
+    add_test(NAME moderngekko.mod_sounds COMMAND moderngekko_mod_sounds_test)
+
+    add_executable(moderngekko_mod_hud_test
+        tests/mod_hud_test.cpp)
+    target_include_directories(moderngekko_mod_hud_test PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/runtime")
+    target_compile_features(moderngekko_mod_hud_test PRIVATE cxx_std_23)
+    add_test(NAME moderngekko.mod_hud COMMAND moderngekko_mod_hud_test)
+
     add_executable(moderngekko_launcher_games_test
         tests/launcher_games_test.cpp)
     target_include_directories(moderngekko_launcher_games_test PRIVATE
@@ -1334,7 +1385,8 @@ if(BUILD_TESTING)
     add_executable(moderngekko_screenshot_steps_test
         tests/screenshot_steps_test.cpp)
     target_include_directories(moderngekko_screenshot_steps_test PRIVATE
-        "${CMAKE_CURRENT_SOURCE_DIR}/src")
+        "${CMAKE_CURRENT_SOURCE_DIR}/src"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tools")
     target_compile_features(moderngekko_screenshot_steps_test PRIVATE cxx_std_23)
     add_test(NAME moderngekko.screenshot_steps
              COMMAND moderngekko_screenshot_steps_test)

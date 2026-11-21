@@ -53,6 +53,8 @@
 #include <utility>
 #include <vector>
 
+#include "text_paths.hpp"
+
 namespace fs = std::filesystem;
 
 namespace moderngekko::frontend {
@@ -764,7 +766,7 @@ bool RunLobbyWindow(RuntimeConfig &runtime_config,
     }
 
     if (ui.TakeStartRequest()) {
-      client.StartGame(runtime_config.game_root.string() + "/sys/main.dol");
+      client.StartGame(text::PathText(runtime_config.game_root) + "/sys/main.dol");
       // StartGame turns on an emulated Wii Remote for every seat. The seats
       // play on GameCube ports here, so the Wii Remotes go back off on every
       // machine alike (the current-run layer outranks netplay's settings).
@@ -874,7 +876,7 @@ int RunNetplayLobby(RuntimeConfig runtime_config, ConfigResult frontend_config,
     return static_cast<int>(NetplayExitCode::InvalidConfiguration);
 
   std::cerr << "netplay: initializing Dolphin services\n";
-  UICommon::SetUserDirectory(runtime_config.user_directory.string());
+  UICommon::SetUserDirectory(text::PathText(runtime_config.user_directory));
   UICommon::Init();
   detail::SetExternalUICommon(true);
   // The lobby speaks the launcher's language (config.ini, or the system's).
@@ -898,7 +900,7 @@ int RunNetplayLobby(RuntimeConfig runtime_config, ConfigResult frontend_config,
                            runtime_config.graphics.custom_aspect_height);
 
   auto game = std::make_shared<UICommon::GameFile>(
-      (runtime_config.game_root / "sys/main.dol").string());
+      text::PathText(runtime_config.game_root / "sys/main.dol"));
   if (!game->IsValid()) {
     detail::SetExternalUICommon(false);
     UICommon::Shutdown();

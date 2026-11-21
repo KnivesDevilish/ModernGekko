@@ -114,37 +114,28 @@ Bytes FakeRel()
 
 int main()
 {
-  // SHA-1 against the standard's own example.
-  const std::string abc = "abc";
-  if (dp::detail::Sha1(Bytes(abc.begin(), abc.end())) != "a9993e364706816aba3e25717850c26c9cd0d89d" ||
-      dp::detail::Sha1({}) != "da39a3ee5e6b4b0d3255bfef95601890afd80709")
-    return 1;
-
-  // gear.* keys: the place in _Main.rel, the type, km/h, capitals anywhere.
+  // Keys: the place in the file, the type, km/h, comments and sections.
   std::vector<dp::Problem> problems;
-  auto patches = dp::Parse("# comment\n[Gears]\n"
-                           "gear.Default.level1.boostSpeed = 216 km/h\r\n"
-                           "GEAR.highbooster.ACCELERATION = 0.5\n"
-                           "gear.Cannonball.level3.maxAir = 250000\n"
-                           "gear.AirTank.costInGearShop = 0x10\n"
-                           "gear.Default.weightStat = -2\n",
+  auto patches = dp::Parse("# comment\n[Values]\n"
+                           "_Main.rel@0x1018:f32 = 216 km/h\r\n"
+                           "_MAIN.REL@0X100C:F32 = 0.5\n"
+                           "_Main.rel@0x1020:s32 = 250000\n"
+                           "_Main.rel@0x1006:u16 = 0x10\n"
+                           "_Main.rel@0x10BF:s8 = -2\n",
                            "GXEE8P", &problems);
   if (!problems.empty() || patches.size() != 5)
     return 2;
-  // Default, level 1, boost speed: 0x1EA240 + 0x68 + 0x18; 216 km/h is 1.0f.
-  if (patches[0].file != "_Main.rel" || patches[0].offset != 0x1EA240 + 0x68 + 0x18 ||
-      patches[0].bytes != Bytes{0x3F, 0x80, 0x00, 0x00} ||
-      patches[0].sha1 != dp::SONIC_RIDERS_MAIN_REL_SHA1)
+  // 216 km/h is 1.0f.
+  if (patches[0].file != "_Main.rel" || patches[0].offset != 0x1018 ||
+      patches[0].bytes != Bytes{0x3F, 0x80, 0x00, 0x00})
     return 3;
-  // HighBooster (gear 1), acceleration at 0xC: 0.5f.
-  if (patches[1].offset != 0x1EA240 + 0x1D0 + 0xC || patches[1].bytes != Bytes{0x3F, 0x00, 0x00, 0x00})
+  if (patches[1].offset != 0x100C || patches[1].bytes != Bytes{0x3F, 0x00, 0x00, 0x00})
     return 4;
-  // Cannonball (gear 40), level 3, max air: 250000 = 0x0003D090.
-  if (patches[2].offset != 0x1EA240 + 0x1D0 * 40 + 0x68 + 28 * 2 ||
-      patches[2].bytes != Bytes{0x00, 0x03, 0xD0, 0x90})
+  // 250000 = 0x0003D090.
+  if (patches[2].offset != 0x1020 || patches[2].bytes != Bytes{0x00, 0x03, 0xD0, 0x90})
     return 5;
-  if (patches[3].offset != 0x1EA240 + 0x1D0 * 26 + 0x6 || patches[3].bytes != Bytes{0x00, 0x10} ||
-      patches[4].offset != 0x1EA240 + 0xBF || patches[4].bytes != Bytes{0xFE})
+  if (patches[3].offset != 0x1006 || patches[3].bytes != Bytes{0x00, 0x10} ||
+      patches[4].offset != 0x10BF || patches[4].bytes != Bytes{0xFE})
     return 6;
 
   // Raw keys, and lines that can't be used.
@@ -154,9 +145,9 @@ int main()
                       "_Main.rel@0x20:s16 = -1\n"
                       "_Main.rel@0x30:f32 = 1.5\n"
                       "no equals sign\n"
-                      "gear.Nobody.topSpeed = 1\n"
-                      "gear.Default.wings = 1\n"
-                      "gear.Default.level4.maxAir = 1\n"
+                      "gear.Default.topSpeed = 1\n"
+                      "_Main.rel:f32 = 1\n"
+                      "_Main.rel@0x10 = 1\n"
                       "../secret@0:u8 = 1\n"
                       "_Main.rel@zz:u8 = 1\n"
                       "_Main.rel@0:u64 = 1\n"
@@ -168,12 +159,12 @@ int main()
   if (patches.size() != 4 || patches[0].bytes != Bytes{0xDE, 0xAD, 0xBE, 0xEF} ||
       patches[1].file != "sound/x.bin" || patches[1].offset != 16 ||
       patches[1].bytes != Bytes{0x3F, 0x80, 0x00, 0x00} || patches[2].bytes != Bytes{0xFF, 0xFF} ||
-      patches[3].bytes != Bytes{0x3F, 0xC0, 0x00, 0x00} || !patches[0].sha1.empty())
+      patches[3].bytes != Bytes{0x3F, 0xC0, 0x00, 0x00})
     return 7;
   if (problems.size() != 11 || !HasProblem(problems, "patches.ini line 5", "=") ||
-      !HasProblem(problems, "patches.ini line 6", "Nobody") ||
-      !HasProblem(problems, "patches.ini line 7", "README") ||
-      !HasProblem(problems, "patches.ini line 8", "README") ||
+      !HasProblem(problems, "patches.ini line 6", "<file>@<offset>:<type>") ||
+      !HasProblem(problems, "patches.ini line 7", "<file>@<offset>:<type>") ||
+      !HasProblem(problems, "patches.ini line 8", "<file>@<offset>:<type>") ||
       !HasProblem(problems, "patches.ini line 9", "path under files/") ||
       !HasProblem(problems, "patches.ini line 10", "number") ||
       !HasProblem(problems, "patches.ini line 11", "type") ||
@@ -182,32 +173,26 @@ int main()
       !HasProblem(problems, "patches.ini line 14", "number") ||
       !HasProblem(problems, "patches.ini line 15", "no value"))
     return 8;
-  // gear.* is only for Sonic Riders.
-  problems.clear();
-  if (!dp::Parse("gear.Default.topSpeed = 1\n", "RS9E8P", &problems).empty() ||
-      !HasProblem(problems, "patches.ini line 1", "GXEE8P"))
-    return 9;
 
-  // "+=", "*=" and every gear at once.
+  // "+=" and "*=".
   problems.clear();
-  patches = dp::Parse("gear.*.topSpeed += 80 km/h\n"
-                      "gear.Default.level1.maxAir *= 1.5\n"
+  patches = dp::Parse("_Main.rel@0x1010:f32 += 80 km/h\n"
+                      "_Main.rel@0x1068:s32 *= 1.5\n"
                       "_Main.rel@0x10:s16 += -3\n"
                       "_Main.rel@0x10:bytes += 1\n"
-                      "gear.Default.topSpeed *= 2 km/h\n"
-                      "gear.*.wings += 1\n",
+                      "_Main.rel@0x1010:f32 *= 2 km/h\n"
+                      "gear.*.topSpeed += 1\n",
                       "GXEE8P", &problems);
-  if (patches.size() != 43 || problems.size() != 3 ||
+  if (patches.size() != 3 || problems.size() != 3 ||
       !HasProblem(problems, "patches.ini line 4", "number type") ||
       !HasProblem(problems, "patches.ini line 5", "number") ||
-      !HasProblem(problems, "patches.ini line 6", "README"))
+      !HasProblem(problems, "patches.ini line 6", "<file>@<offset>:<type>"))
     return 17;
-  for (std::size_t g = 0; g < 41; ++g)
-    if (patches[g].op != dp::Op::Add || patches[g].offset != 0x1EA240 + 0x1D0 * g + 0x10 ||
-        patches[g].bytes.size() != 4 || patches[g].operand != 80.0 / 216.0)
-      return 18;
-  if (patches[41].op != dp::Op::Multiply || patches[41].offset != 0x1EA240 + 0x68 ||
-      patches[41].operand != 1.5 || patches[42].bytes.size() != 2 || patches[42].operand != -3)
+  if (patches[0].op != dp::Op::Add || patches[0].offset != 0x1010 || patches[0].bytes.size() != 4 ||
+      patches[0].operand != 80.0 / 216.0)
+    return 18;
+  if (patches[1].op != dp::Op::Multiply || patches[1].offset != 0x1068 ||
+      patches[1].operand != 1.5 || patches[2].bytes.size() != 2 || patches[2].operand != -3)
     return 19;
 
   // Making the copies.
@@ -233,12 +218,6 @@ int main()
                             "Gone.bin@0:u8 = 1\n",       // no such file
                             "GXEE8P", &problems);
   second.patches = dp::Parse("_Main.rel@0x220:u8 = 2\nsound/voice.bin@2:u8 = 0x33\n", "GXEE8P", &problems);
-  // Values made for another _Main.rel (the gear table's check) aren't used.
-  dp::Patch gear{"_Main.rel", 0x300, {9}, std::string(dp::SONIC_RIDERS_MAIN_REL_SHA1), "patches.ini line 9"};
-  second.patches.push_back(gear);
-  // ...and are used when the file is the one they were made for.
-  dp::Patch matching{"_Main.rel", 0x301, {8}, dp::detail::Sha1(rel), "patches.ini line 10"};
-  second.patches.push_back(matching);
   if (!problems.empty())
     return 10;
 
@@ -247,14 +226,12 @@ int main()
   expected[0x210] = 1;
   expected[0x220] = 2;
   expected[0x120] = 7;
-  expected[0x301] = 8;
   Bytes voice(8, 0x22);
   voice[2] = 0x33;
-  if (built.applied != 6 || built.applied_by_mod != std::vector<std::size_t>{3, 0, 3} || built.files != std::vector<std::string>{"_Main.rel", "Sound/Voice.bin"} ||
+  if (built.applied != 5 || built.applied_by_mod != std::vector<std::size_t>{3, 0, 2} || built.files != std::vector<std::string>{"_Main.rel", "Sound/Voice.bin"} ||
       Read(out / "_Main.rel") != expected || Read(out / "Sound" / "Voice.bin") != voice ||
-      built.problems.size() != 3 || !HasProblem(built.problems, "first: patches.ini line 4", "past the end") ||
-      !HasProblem(built.problems, "first: patches.ini line 5", "no file") ||
-      !HasProblem(built.problems, "second: patches.ini line 9", "isn't the one"))
+      built.problems.size() != 2 || !HasProblem(built.problems, "first: patches.ini line 4", "past the end") ||
+      !HasProblem(built.problems, "first: patches.ini line 5", "no file"))
     return 11;
 
   // Under StaticRecomp a module's code isn't changed, and a mod's copy of a
@@ -265,11 +242,9 @@ int main()
   if (Read(out / "_Main.rel") != expected ||
       !HasProblem(built.problems, "first: patches.ini line 3", "StaticRecomp"))
     return 12;
-  // Without StaticRecomp, the mod's module is the starting point (and then
-  // the gear check, made for the game's own, fails).
+  // Without StaticRecomp, the mod's module is the starting point.
   built = dp::BuildPatchedFiles({first, voices, second}, game, out, false);
-  if (Read(out / "_Main.rel")[0x10] != 0x55 ||
-      !HasProblem(built.problems, "second: patches.ini line 10", "isn't the one"))
+  if (Read(out / "_Main.rel")[0x10] != 0x55 || Read(out / "_Main.rel")[0x220] != 2)
     return 13;
 
   // "+=" and "*=" on what the file has, after the changes before them.

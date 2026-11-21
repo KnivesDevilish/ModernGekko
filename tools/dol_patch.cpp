@@ -1,4 +1,5 @@
 #include "dol_patch.hpp"
+#include "text_paths.hpp"
 
 #include <array>
 #include <charconv>
@@ -51,7 +52,7 @@ bool LoadManifest(const fs::path &path, std::vector<Patch> *patches,
                   std::string *error) {
   std::ifstream input(path);
   if (!input) {
-    *error = "can't open DOL patch manifest " + path.string();
+    *error = "can't open DOL patch manifest " + text::PathText(path);
     return false;
   }
   std::string line;
@@ -108,18 +109,18 @@ bool ReadFile(const fs::path &path, std::vector<std::uint8_t> *bytes,
               std::string *error) {
   std::ifstream input(path, std::ios::binary | std::ios::ate);
   if (!input) {
-    *error = "can't open " + path.string();
+    *error = "can't open " + text::PathText(path);
     return false;
   }
   const std::streamoff size = input.tellg();
   if (size < 0) {
-    *error = "can't read " + path.string();
+    *error = "can't read " + text::PathText(path);
     return false;
   }
   bytes->resize(static_cast<std::size_t>(size));
   input.seekg(0);
   if (!input.read(reinterpret_cast<char *>(bytes->data()), size)) {
-    *error = "can't read " + path.string();
+    *error = "can't read " + text::PathText(path);
     return false;
   }
   return true;
@@ -136,7 +137,7 @@ bool ReplaceFile(const fs::path &path, const std::vector<std::uint8_t> &bytes,
     if (!output || !output.write(reinterpret_cast<const char *>(bytes.data()),
                                  static_cast<std::streamsize>(bytes.size()))) {
       fs::remove(temporary, ec);
-      *error = "can't write " + temporary.string();
+      *error = "can't write " + text::PathText(temporary);
       return false;
     }
   }
@@ -145,14 +146,14 @@ bool ReplaceFile(const fs::path &path, const std::vector<std::uint8_t> &bytes,
   if (!MoveFileExW(temporary.c_str(), path.c_str(),
                    MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
     fs::remove(temporary, ec);
-    *error = "can't publish patched " + path.string();
+    *error = "can't publish patched " + text::PathText(path);
     return false;
   }
 #else
   fs::rename(temporary, path, ec);
   if (ec) {
     fs::remove(temporary, ec);
-    *error = "can't publish patched " + path.string();
+    *error = "can't publish patched " + text::PathText(path);
     return false;
   }
 #endif

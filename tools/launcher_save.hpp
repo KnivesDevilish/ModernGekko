@@ -27,6 +27,8 @@
 #include <utility>
 #include <vector>
 
+#include "text_paths.hpp"
+
 namespace moderngekko::frontend
 {
 namespace save_files
@@ -57,7 +59,7 @@ inline bool WriteBytes(const fs::path& to, const std::vector<unsigned char>& byt
                        std::string* error)
 {
   std::error_code ec;
-  const fs::path temporary = to.parent_path() / (to.filename().string() + ".part");
+  const fs::path temporary = fs::path(to) += ".part";
   {
     std::ofstream out(temporary, std::ios::binary | std::ios::trunc);
     out.write(reinterpret_cast<const char*>(bytes.data()),
@@ -71,7 +73,7 @@ inline bool WriteBytes(const fs::path& to, const std::vector<unsigned char>& byt
   {
     fs::remove(temporary, ec);
     if (error)
-      *error = to.filename().string() + ": " + ec.message();
+      *error = text::PathText(to.filename()) + ": " + ec.message();
     return false;
   }
   return true;
@@ -96,7 +98,7 @@ inline std::vector<fs::path> FilesIn(const fs::path& folder)
 inline bool CopyOver(const fs::path& from, const fs::path& to, std::string* error)
 {
   std::error_code ec;
-  const fs::path temporary = to.parent_path() / (to.filename().string() + ".part");
+  const fs::path temporary = fs::path(to) += ".part";
   fs::copy_file(from, temporary, fs::copy_options::overwrite_existing, ec);
   if (!ec)
     fs::rename(temporary, to, ec);
@@ -104,7 +106,7 @@ inline bool CopyOver(const fs::path& from, const fs::path& to, std::string* erro
   {
     fs::remove(temporary, ec);
     if (error)
-      *error = to.filename().string() + ": " + ec.message();
+      *error = text::PathText(to.filename()) + ": " + ec.message();
     return false;
   }
   return true;
@@ -221,7 +223,7 @@ CompleteSaveFiles(const std::filesystem::path& complete_folder)
 {
   std::vector<std::filesystem::path> files = save_files::FilesIn(complete_folder);
   std::erase_if(files, [](const std::filesystem::path& file) {
-    const std::string name = file.filename().string();
+    const std::string name = text::PathText(file.filename());
     return name == save_files::BANNER || name.starts_with('.');
   });
   return files;
@@ -306,7 +308,7 @@ inline SaveResult InstallCompleteSave(const std::filesystem::path& complete_fold
     backup = backups / (std::string(stamp) + "_" + std::to_string(i));
   fs::create_directories(backup, ec);
   if (ec)
-    return SaveOutcome(SaveError::Backup, {}, backup.string() + ": " + ec.message());
+    return SaveOutcome(SaveError::Backup, {}, text::PathText(backup) + ": " + ec.message());
   for (const fs::path& file : save_files::FilesIn(save_folder))
   {
     std::string error;
@@ -401,7 +403,7 @@ inline SaveResult InstallCompleteGameCubeSave(const std::filesystem::path& compl
     const auto own_range = own_bytes ? GciImageBytes(*own_bytes) : std::nullopt;
     if (!range || !own_range || range->count != own_range->count)
       return SaveOutcome(SaveError::Copy, {},
-                         file.filename().string() + ": not the same game's save");
+                         text::PathText(file.filename()) + ": not the same game's save");
     std::copy_n(own_bytes->begin() + static_cast<std::ptrdiff_t>(own_range->first),
                 own_range->count, bytes->begin() + static_cast<std::ptrdiff_t>(range->first));
     merged.push_back(std::move(*bytes));
@@ -412,7 +414,7 @@ inline SaveResult InstallCompleteGameCubeSave(const std::filesystem::path& compl
     backup = backups / (std::string(stamp) + "_" + std::to_string(i));
   fs::create_directories(backup, ec);
   if (ec)
-    return SaveOutcome(SaveError::Backup, {}, backup.string() + ": " + ec.message());
+    return SaveOutcome(SaveError::Backup, {}, text::PathText(backup) + ": " + ec.message());
   for (const fs::path& file : complete)
   {
     std::string error;

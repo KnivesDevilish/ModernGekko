@@ -20,6 +20,8 @@
 #include <system_error>
 #include <vector>
 
+#include "text_paths.hpp"
+
 namespace moderngekko::frontend
 {
 struct ScreenshotFile
@@ -41,7 +43,7 @@ inline std::vector<ScreenshotFile> ListScreenshots(const std::filesystem::path& 
     std::error_code entry_ec;
     if (!entry.is_regular_file(entry_ec))
       return;
-    std::string extension = entry.path().extension().string();
+    std::string extension = text::PathText(entry.path().extension());
     std::transform(extension.begin(), extension.end(), extension.begin(),
                    [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
     if (extension != ".png")

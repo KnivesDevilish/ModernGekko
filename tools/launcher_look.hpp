@@ -16,6 +16,8 @@
 #include <system_error>
 #include <vector>
 
+#include "text_paths.hpp"
+
 namespace moderngekko::frontend::ui
 {
 namespace fs = std::filesystem;
@@ -52,10 +54,10 @@ inline std::vector<InterfaceFontFiles> InterfaceFontCandidates(const fs::path& r
 {
   std::vector<InterfaceFontFiles> candidates;
 #if defined(_WIN32)
-  if (const char* windows = std::getenv("WINDIR"))
+  if (const auto windows = text::EnvironmentPath("WINDIR"))
   {
-    candidates.push_back({fs::path(windows) / "Fonts" / "segoeui.ttf",
-                          fs::path(windows) / "Fonts" / "segoeuib.ttf"});
+    candidates.push_back({*windows / "Fonts" / "segoeui.ttf",
+                          *windows / "Fonts" / "segoeuib.ttf"});
   }
 #endif
   for (const char* directory : {"/usr/share/fonts/google-noto", "/usr/local/share/fonts/google-noto",

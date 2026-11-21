@@ -24,6 +24,8 @@
 #include <string_view>
 #include <system_error>
 
+#include "text_paths.hpp"
+
 namespace moderngekko::detail
 {
 // The internal resolution scale a screenshot is taken at: the one asked for,
@@ -119,7 +121,7 @@ inline std::string NextScreenshotName(const std::filesystem::path& folder, std::
   std::error_code ec;
   for (std::filesystem::directory_iterator it(folder, ec), end; !ec && it != end; it.increment(ec))
   {
-    const std::string file = it->path().filename().string();
+    const std::string file = moderngekko::text::PathText(it->path().filename());
     if (file.size() <= prefix.size() + 5 || !file.starts_with(prefix + "_") ||
         !file.ends_with(".png"))
       continue;

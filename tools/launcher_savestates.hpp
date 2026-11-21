@@ -7,6 +7,7 @@
 // which is a confusing bug and an easy one to introduce by editing one side.
 
 #include "Core/SavestateLayout.h"
+#include "text_paths.hpp"
 
 #include <filesystem>
 #include <string>
@@ -27,8 +28,7 @@ inline std::vector<fs::path> ListLauncherSavestates(const fs::path& directory)
 
 inline std::string PathText(const fs::path& path)
 {
-  const std::u8string encoded = path.u8string();
-  return {encoded.begin(), encoded.end()};
+  return text::PathText(path);
 }
 
 // The newest entry is worth calling out so the label explains why it is first.

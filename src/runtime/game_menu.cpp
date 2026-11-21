@@ -18,6 +18,7 @@
 #include "VideoCommon/AsyncRequests.h"
 #include "VideoCommon/Present.h"
 #include "VideoCommon/VideoConfig.h"
+#include "text_paths.hpp"
 #include "dolphin_runtime_internal.hpp"
 #include "game_menu_controls.hpp"
 #include "game_menu_draw.hpp"
@@ -663,15 +664,16 @@ struct GameMenu::Impl
     for (const frontend::ui::InterfaceFontFiles& candidate :
          frontend::ui::InterfaceFontCandidates(settings.release_directory))
     {
-      fonts.regular = io.Fonts->AddFontFromFileTTF(candidate.regular.string().c_str(), SIZE);
+      fonts.regular =
+          io.Fonts->AddFontFromFileTTF(text::PathText(candidate.regular).c_str(), SIZE);
       if (!fonts.regular)
         continue;
       frontend::ui::MergeJapaneseFont(false, SIZE);
       if (!candidate.bold.empty())
-        fonts.bold = io.Fonts->AddFontFromFileTTF(candidate.bold.string().c_str(), SIZE);
+        fonts.bold = io.Fonts->AddFontFromFileTTF(text::PathText(candidate.bold).c_str(), SIZE);
       if (fonts.bold)
         frontend::ui::MergeJapaneseFont(true, SIZE);
-      std::fprintf(stderr, "game menu font: %s\n", candidate.regular.string().c_str());
+      std::fprintf(stderr, "game menu font: %s\n", text::PathText(candidate.regular).c_str());
       return;
     }
     fonts.regular = io.Fonts->AddFontDefault();

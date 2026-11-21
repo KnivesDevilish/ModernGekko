@@ -17,6 +17,7 @@
 #include "Core/Core.h"
 #include "Core/HW/Memmap.h"
 #include "Core/System.h"
+#include "text_paths.hpp"
 
 #include <cstdint>
 #include <cstdio>
@@ -91,7 +92,7 @@ void TakeMemorySnapshot()
     if (exram_size != 0)
       data->insert(data->end(), exram, exram + exram_size);
     std::thread([data, path] {
-      std::ofstream file(path, std::ios::binary | std::ios::trunc);
+      std::ofstream file(text::TextPath(path), std::ios::binary | std::ios::trunc);
       file.write(reinterpret_cast<const char*>(data->data()),
                  static_cast<std::streamsize>(data->size()));
       std::fprintf(stderr, file ? "memory snapshot: %s\n" : "memory snapshot: can't write %s\n",

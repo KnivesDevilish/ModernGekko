@@ -27,6 +27,8 @@
 #include <optional>
 #include <vector>
 
+#include "text_paths.hpp"
+
 namespace moderngekko::frontend::ui
 {
 class LayeredBanner
@@ -49,7 +51,7 @@ public:
     const std::optional<BannerLayout> layout = ParseBannerLayout(file);
     if (!layout)
     {
-      std::cout << "banner: nothing to draw in " << (folder / "layout.txt").string() << '\n';
+      std::cout << "banner: nothing to draw in " << text::PathText(folder / "layout.txt") << '\n';
       return false;
     }
     m_layout = *layout;
@@ -57,11 +59,11 @@ public:
     {
       Picture picture;
       picture.layer = layer;
-      const std::filesystem::path path = folder / layer.picture;
-      SDL_Surface* surface = SDL_LoadPNG(path.string().c_str());
+      const std::filesystem::path path = folder / text::TextPath(layer.picture);
+      SDL_Surface* surface = SDL_LoadPNG(text::PathText(path).c_str());
       if (!surface)
       {
-        std::cout << "banner: can't load " << path.string() << ": " << SDL_GetError() << '\n';
+        std::cout << "banner: can't load " << text::PathText(path) << ": " << SDL_GetError() << '\n';
         continue;
       }
       // The first picture sets the banner's size; the rest must match it.
@@ -72,7 +74,7 @@ public:
       }
       if (surface->w != m_width || surface->h != m_height)
       {
-        std::cout << "banner: " << path.string() << " isn't " << m_width << "x" << m_height
+        std::cout << "banner: " << text::PathText(path) << " isn't " << m_width << "x" << m_height
                   << ", left out\n";
         SDL_DestroySurface(surface);
         continue;
@@ -95,7 +97,7 @@ public:
       Unload();
       return false;
     }
-    std::cout << "banner: " << m_pictures.size() << " layers from " << folder.string() << '\n';
+    std::cout << "banner: " << m_pictures.size() << " layers from " << text::PathText(folder) << '\n';
     return true;
   }
 

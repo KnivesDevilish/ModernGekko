@@ -1,5 +1,7 @@
 #include "automation_protocol.hpp"
 
+#include "text_paths.hpp"
+
 #include <algorithm>
 #include <charconv>
 #include <cmath>
@@ -336,7 +338,7 @@ bool ParseReadMemoryCommand(const std::map<std::string, std::string>& values, Co
 
   command->address = *address;
   command->size = *size;
-  command->path = Trim(path_it->second);
+  command->path = text::TextPath(Trim(path_it->second));
   return true;
 }
 
@@ -446,7 +448,7 @@ bool ParseCommandFile(const std::filesystem::path& path, Command* command, std::
 
   Command parsed{};
   parsed.type = *type;
-  parsed.source_name = path.filename().string();
+  parsed.source_name = text::PathText(path.filename());
 
   switch (*type)
   {
@@ -488,7 +490,7 @@ bool ParseCommandFile(const std::filesystem::path& path, Command* command, std::
         *error = "path=<file> is required";
       return false;
     }
-    parsed.path = Trim(path_it->second);
+    parsed.path = text::TextPath(Trim(path_it->second));
     break;
   }
   case CommandType::ReadMemory:

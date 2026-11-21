@@ -26,6 +26,8 @@
 #include <system_error>
 #include <vector>
 
+#include "text_paths.hpp"
+
 namespace moderngekko::frontend::ui
 {
 namespace fs = std::filesystem;
@@ -120,18 +122,18 @@ inline LauncherFonts LoadInterfaceFont(const fs::path& release_directory, float 
   for (const InterfaceFontFiles& candidate : InterfaceFontCandidates(release_directory))
   {
     LauncherFonts fonts;
-    fonts.regular = io.Fonts->AddFontFromFileTTF(candidate.regular.string().c_str(), size);
+    fonts.regular = io.Fonts->AddFontFromFileTTF(text::PathText(candidate.regular).c_str(), size);
     if (!fonts.regular)
       continue;
     MergeJapaneseFont(false, size);
     ImGui::GetStyle().FontSizeBase = size;
     if (!candidate.bold.empty())
-      fonts.bold = io.Fonts->AddFontFromFileTTF(candidate.bold.string().c_str(), size);
+      fonts.bold = io.Fonts->AddFontFromFileTTF(text::PathText(candidate.bold).c_str(), size);
     if (fonts.bold)
       MergeJapaneseFont(true, size);
-    std::cout << "launcher font: " << candidate.regular.string() << '\n';
+    std::cout << "launcher font: " << text::PathText(candidate.regular) << '\n';
     if (fonts.bold)
-      std::cout << "launcher bold font: " << candidate.bold.string() << '\n';
+      std::cout << "launcher bold font: " << text::PathText(candidate.bold) << '\n';
     else
       fonts.bold = fonts.regular;
     return fonts;
@@ -189,7 +191,7 @@ inline void SetWindowIcon(SDL_Window* window, const fs::path& release_directory)
   std::error_code ec;
   if (!window || !fs::is_regular_file(path, ec))
     return;
-  if (SDL_Surface* icon = SDL_LoadPNG(path.string().c_str()))
+  if (SDL_Surface* icon = SDL_LoadPNG(text::PathText(path).c_str()))
   {
     SDL_SetWindowIcon(window, icon);
     SDL_DestroySurface(icon);
@@ -222,14 +224,14 @@ inline LauncherImage LoadLauncherImage(SDL_Renderer* renderer, const fs::path& r
                                        bool find_floor = false, float largest_width = 0.0f)
 {
   LauncherImage image;
-  const fs::path path = release_directory / "Resources" / file_name;
+  const fs::path path = release_directory / "Resources" / text::TextPath(file_name);
   std::error_code ec;
   if (!fs::is_regular_file(path, ec))
     return image;
-  SDL_Surface* surface = SDL_LoadPNG(path.string().c_str());
+  SDL_Surface* surface = SDL_LoadPNG(text::PathText(path).c_str());
   if (!surface)
   {
-    std::cout << log_label << ": can't load " << path.string() << ": " << SDL_GetError()
+    std::cout << log_label << ": can't load " << text::PathText(path) << ": " << SDL_GetError()
               << '\n';
     return image;
   }
@@ -240,7 +242,7 @@ inline LauncherImage LoadLauncherImage(SDL_Renderer* renderer, const fs::path& r
     if (image.texture)
     {
       image.aspect = static_cast<float>(surface->h) / static_cast<float>(surface->w);
-      std::cout << log_label << ": " << path.string() << '\n';
+      std::cout << log_label << ": " << text::PathText(path) << '\n';
     }
   }
   if (image.texture && find_floor)
@@ -519,7 +521,7 @@ inline void OpenFolder(const fs::path& folder)
   std::error_code ec;
   fs::create_directories(folder, ec);
   std::string url = "file://";
-  const std::string text = folder.generic_string();
+  const std::string text = text::GenericPathText(folder);
   if (!text.starts_with('/'))
     url += '/';
   SDL_OpenURL((url + text).c_str());

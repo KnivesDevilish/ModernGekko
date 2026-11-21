@@ -23,6 +23,8 @@
 #include <optional>
 #include <string>
 
+#include "text_paths.hpp"
+
 namespace moderngekko::frontend::ui
 {
 // When each part comes in and when it all goes, as times and amounts.
@@ -126,7 +128,7 @@ inline SplashArt LoadSplashArt(SDL_Renderer* renderer, const fs::path& release_d
   std::error_code ec;
   if (!fs::is_regular_file(path, ec))
     return art;
-  SDL_Surface* surface = SDL_LoadPNG(path.string().c_str());
+  SDL_Surface* surface = SDL_LoadPNG(text::PathText(path).c_str());
   if (!surface)
     return art;
   Uint8 r = 0, g = 0, b = 0, a = 0;

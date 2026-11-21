@@ -62,6 +62,8 @@
 #include <utility>
 #include <vector>
 
+#include "text_paths.hpp"
+
 namespace moderngekko::frontend
 {
 // A rectangle: in a picture's pixels, or in the window's.
@@ -483,7 +485,7 @@ inline GameBorderList LoadGameBorders(const std::filesystem::path& folder)
       for (const std::string* picture : {&side->picture, &side->backdrop})
       {
         std::error_code ec;
-        if (!picture->empty() && !std::filesystem::is_regular_file(folder / *picture, ec))
+        if (!picture->empty() && !std::filesystem::is_regular_file(folder / text::TextPath(*picture), ec))
         {
           list.problems.push_back("[" + border.id + "] " + *picture + " is missing");
           return true;

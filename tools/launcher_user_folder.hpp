@@ -16,6 +16,8 @@
 #include <system_error>
 #include <vector>
 
+#include "text_paths.hpp"
+
 namespace moderngekko::frontend
 {
 // "sr-zgs|old" as {"sr-zgs", "old"}; empty names left out.
@@ -49,7 +51,7 @@ inline void PointDefaultGameAt(const std::filesystem::path& folder,
   }
   if (!line.empty() && line.back() == '\r')
     line.pop_back();
-  const std::filesystem::path game(line);
+  const std::filesystem::path game = text::TextPath(line);
   const auto [in_earlier, rest] =
       std::mismatch(earlier.begin(), earlier.end(), game.begin(), game.end());
   if (in_earlier != earlier.end())
@@ -57,7 +59,7 @@ inline void PointDefaultGameAt(const std::filesystem::path& folder,
   std::filesystem::path moved = folder;
   for (auto part = rest; part != game.end(); ++part)
     moved /= *part;
-  std::ofstream(file, std::ios::trunc) << moved.string() << '\n';
+  std::ofstream(file, std::ios::trunc) << text::PathText(moved) << '\n';
 }
 
 struct SettledUserFolder
@@ -79,7 +81,7 @@ inline SettledUserFolder SettleUserFolder(const std::filesystem::path& folder,
     return settled;
   for (const std::string& name : earlier_names)
   {
-    const std::filesystem::path earlier = folder.parent_path() / name;
+    const std::filesystem::path earlier = folder.parent_path() / text::TextPath(name);
     if (earlier == folder || !std::filesystem::is_directory(earlier, error))
       continue;
     std::filesystem::rename(earlier, folder, error);

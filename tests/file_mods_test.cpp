@@ -70,7 +70,7 @@ int main()
 
   // Data patches only.
   Write(user / "turbo" / "mod.ini", "game=GXEE8P\n");
-  Write(user / "turbo" / "patches.ini", "gear.Default.level1.boostSpeed = 300 km/h\n");
+  Write(user / "turbo" / "patches.ini", "_Main.rel@0x1000:f32 = 300 km/h\n");
   const auto turbo = ReadFileMod(user / "turbo");
   if (!turbo || !turbo->has_patches || turbo->has_files || turbo->has_textures ||
       voices->has_patches)

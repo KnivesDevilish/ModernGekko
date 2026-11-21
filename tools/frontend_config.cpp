@@ -1,5 +1,6 @@
 #include "frontend_config.hpp"
 #include "game_borders.hpp"
+#include "text_paths.hpp"
 #include "ui_text.hpp"
 
 #include <algorithm>
@@ -336,7 +337,8 @@ const std::vector<ScreenshotResolutionOption> &SupportedScreenshotResolutions() 
 
 const ScreenshotResolutionOption &FindScreenshotResolution(std::string_view value) {
   const auto &resolutions = SupportedScreenshotResolutions();
-  const std::string_view fallback = ConfigResult{}.screenshot_resolution;
+  // A copy: the ConfigResult is gone after this line, and its text with it.
+  const std::string fallback = ConfigResult{}.screenshot_resolution;
   const ScreenshotResolutionOption *found = nullptr;
   for (const ScreenshotResolutionOption &option : resolutions) {
     if (value == option.value)
@@ -403,7 +405,7 @@ ConfigResult LoadConfig(const fs::path &user_directory,
 
   std::ifstream file(path);
   if (!file)
-    return {.error = "can't open " + path.string()};
+    return {.error = "can't open " + text::PathText(path)};
 
   ConfigResult config;
   std::string line;
@@ -692,7 +694,7 @@ bool SaveConfig(const fs::path &user_directory, const ConfigResult &config,
   std::ofstream file(user_directory / "config.ini", std::ios::trunc);
   if (!file) {
     if (error)
-      *error = "can't write " + (user_directory / "config.ini").string();
+      *error = "can't write " + text::PathText(user_directory / "config.ini");
     return false;
   }
   file << "# ModernGekko frontend settings\n"
@@ -853,7 +855,7 @@ bool GenerateControllerConfig(const fs::path &user_directory,
   std::ofstream output(destination, std::ios::trunc);
   if (!output) {
     if (message)
-      *message = "can't write " + destination.string();
+      *message = "can't write " + text::PathText(destination);
     return false;
   }
   for (std::size_t i = 0; i < 4; ++i) {
@@ -965,7 +967,7 @@ bool GenerateControllerConfig(const fs::path &user_directory,
 #endif
   if (!output) {
     if (message)
-      *message = "can't write " + destination.string();
+      *message = "can't write " + text::PathText(destination);
     return false;
   }
 #ifdef MODERNGEKKO_GAMECUBE_CONTROLLERS

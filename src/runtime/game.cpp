@@ -1,6 +1,7 @@
 #include "moderngekko/game.hpp"
 
 #include "moderngekko/sha256.hpp"
+#include "text_paths.hpp"
 
 #include <algorithm>
 #include <array>
@@ -44,13 +45,13 @@ std::optional<std::string> HashDirectorySha256(const std::filesystem::path& root
   if (ec)
     return std::nullopt;
   std::ranges::sort(files, [&](const auto& left, const auto& right) {
-    return std::filesystem::relative(left, root).generic_string() <
-           std::filesystem::relative(right, root).generic_string();
+    return text::GenericPathText(std::filesystem::relative(left, root)) <
+           text::GenericPathText(std::filesystem::relative(right, root));
   });
   std::vector<std::uint8_t> manifest;
   for (const auto& path : files)
   {
-    const std::string relative = std::filesystem::relative(path, root, ec).generic_string();
+    const std::string relative = text::GenericPathText(std::filesystem::relative(path, root, ec));
     if (ec)
       return std::nullopt;
     const auto size = std::filesystem::file_size(path, ec);

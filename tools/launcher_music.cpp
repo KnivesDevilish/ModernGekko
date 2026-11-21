@@ -1,4 +1,5 @@
 #include "launcher_music.hpp"
+#include "text_paths.hpp"
 
 #define DR_MP3_IMPLEMENTATION
 #include "third_party/dr_mp3.h"
@@ -269,7 +270,7 @@ bool MusicPlayer::Play(const std::filesystem::path& path, int volume)
   std::error_code ec;
   if (!std::filesystem::is_regular_file(path, ec))
   {
-    std::cerr << "music: no " << path.string() << '\n';
+    std::cerr << "music: no " << text::PathText(path) << '\n';
     return false;
   }
 #if !defined(MODERNGEKKO_HAS_CUBEB) && !defined(MODERNGEKKO_HAS_PULSE_SIMPLE)
