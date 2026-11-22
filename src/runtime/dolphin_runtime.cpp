@@ -1111,6 +1111,8 @@ RuntimeCreateResult Runtime::Create(RuntimeConfig config) {
   else if (impl->config.window_system != WindowSystem::X11) impl->platform =
       Platform::CreateWaylandPlatform();
 #endif
+  if (impl->platform && !impl->config.headless && impl->config.window_opening)
+    impl->config.window_opening();
   if (!impl->platform || !impl->platform->Init()) {
     if (impl->ui_initialized)
       UICommon::Shutdown();
@@ -1211,6 +1213,10 @@ RuntimeCreateResult Runtime::Create(RuntimeConfig config) {
       }
     }
     Config::SetBase(Config::GFX_HIRES_TEXTURES, custom_textures);
+    // Load the mods' textures before the game starts (Dolphin's "Prefetch
+    // Custom Textures"). Loaded as the game asks for them, each one shows
+    // the game's own texture for a frame or so the first time it appears.
+    Config::SetBase(Config::GFX_CACHE_HIRES_TEXTURES, custom_textures);
   }
 
   auto &jit = Core::System::GetInstance().GetJitInterface();
