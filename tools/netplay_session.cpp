@@ -544,6 +544,7 @@ public:
       width = std::min(width, usable.w * 9 / 10);
       height = std::min(height, usable.h * 9 / 10);
     }
+    TellLauncherWindowOpening();
     m_window = SDL_CreateWindow(LOBBY_WINDOW_TITLE, width, height,
                                 SDL_WINDOW_HIGH_PIXEL_DENSITY);
     if (!m_window)

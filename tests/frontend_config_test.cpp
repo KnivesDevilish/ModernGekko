@@ -487,12 +487,17 @@ int main() {
     const fs::path shots = directory / "screenshots";
     auto shot_config = netplay_config;
     const auto defaults = moderngekko::frontend::LoadConfig(shots, true);
-    if (!defaults || defaults.screenshot_resolution != "3840x2160" ||
+    if (!defaults || defaults.screenshot_resolution != "1920x1080" ||
         moderngekko::frontend::FindScreenshotResolution(defaults.screenshot_resolution)
-                .dolphin_scale != 6 ||
+                .dolphin_scale != 3 ||
         moderngekko::frontend::FindScreenshotResolution("game").dolphin_scale != 0 ||
-        moderngekko::frontend::FindScreenshotResolution("9999x9999").dolphin_scale != 6)
+        moderngekko::frontend::FindScreenshotResolution("9999x9999").dolphin_scale != 3)
       return 75;
+    // A new config.ini starts at the lightest: the games' own resolution (1x)
+    // and no visual effect.
+    if (defaults.resolution != "640x528" || defaults.dolphin_scale != 1 ||
+        defaults.effect != "none")
+      return 81;
     shot_config.screenshot_resolution = "5120x2880";
     if (!moderngekko::frontend::SaveConfig(shots, shot_config, &error))
       return 76;

@@ -507,7 +507,10 @@ int RunMain(int argc, char **argv) {
   config.show_fps_in_title = frontend_config.show_fps_in_title;
   // The launcher waits with its loading screen until the game can be seen.
   if (!moderngekko::frontend::LauncherReadyFile().empty())
+  {
     config.first_picture_shown = moderngekko::frontend::TellLauncherGameShown;
+    config.window_opening = moderngekko::frontend::TellLauncherWindowOpening;
+  }
 #if defined(__linux__)
   // Inside gamescope (the Steam Deck's Game Mode, Steam's Big Picture
   // sessions) the game's window may never be told it has the focus, and

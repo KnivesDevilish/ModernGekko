@@ -3409,6 +3409,9 @@ int main(int argc, char** argv)
     // The player stopped the loading (Esc, B, or closing the window): the
     // launcher comes back without a message.
     bool cancelled = false;
+    // Over other windows (over the game's while it opens), and since when.
+    bool on_top = false;
+    double on_top_since = 0.0;
   };
   GameSession session;
   // The loading screen's line about the game files, read from the runner's
@@ -3592,8 +3595,9 @@ int main(int argc, char** argv)
     if (ready_file.empty())
       transition.GameShown(now);
     // Over the game's window, which opens behind it, until that has its
-    // first picture.
-    SDL_SetWindowAlwaysOnTop(window, true);
+    // first picture: from when the runner says it opens it (below), not
+    // before, so a long loading doesn't keep the launcher over every other
+    // window.
     return true;
   };
   // The game has closed, or can't be followed: the launcher comes back from
@@ -3797,6 +3801,15 @@ int main(int argc, char** argv)
     while (SDL_PollEvent(&event))
     {
       ImGui_ImplSDL3_ProcessEvent(&event);
+      // While a game loads, a player who turns to another window gets it:
+      // the launcher stops going over other windows. Not in the moment the
+      // game's window opens, which may take the focus itself.
+      if (event.type == SDL_EVENT_WINDOW_FOCUS_LOST && session.on_top &&
+          static_cast<double>(SDL_GetTicksNS()) / 1e9 - session.on_top_since > 1.0)
+      {
+        SDL_SetWindowAlwaysOnTop(window, false);
+        session.on_top = false;
+      }
       // While a game runs the launcher waits for it, as it always has.
       const bool close = event.type == SDL_EVENT_QUIT || event.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED;
       if (close && !session.process)
@@ -3845,6 +3858,17 @@ int main(int argc, char** argv)
       std::error_code ignored;
       if (!ended && !transition.IsGameShown() && fs::exists(session.ready_file, ignored))
         transition.GameShown(now);
+      // The runner opens its window (launcher_handoff.hpp): the launcher goes
+      // over it, while the player is looking at the launcher, until its first
+      // picture.
+      if (!ended && !session.on_top && !transition.IsGameShown() &&
+          (SDL_GetWindowFlags(window) & SDL_WINDOW_INPUT_FOCUS) &&
+          moderngekko::frontend::ReadWindowOpening(session.progress_file))
+      {
+        SDL_SetWindowAlwaysOnTop(window, true);
+        session.on_top = true;
+        session.on_top_since = now;
+      }
       if (!ended && transition.TimeToHide(now))
       {
         music.Stop();
@@ -5223,6 +5247,13 @@ int main(int argc, char** argv)
     }
     ImGui::SetItemTooltip("%s", Tr("Drawn over the game's picture. Light enough for integrated "
                                    "graphics."));
+    // New players start at the lightest (FIRST_RUN_RESOLUTION, no effect):
+    // what raising them costs, and how to tell.
+    ImGui::Spacing();
+    DimWrappedText(Tr("SR-Source starts with its lightest settings, so it runs well on any PC. A "
+                      "higher internal resolution or a visual effect looks better and asks more "
+                      "of the graphics card: raise them while the game keeps 60 FPS (the "
+                      "window's title shows them)."));
     EndSection();
     BeginSection("##settings_audio", Tr("AUDIO"));
     // The game's own volume (also in the in-game menu's Quick settings),

@@ -89,8 +89,10 @@ struct ConfigResult {
   // SupportedWindowSizes()' values, or another "<width>x<height>".
   std::string window_size = "auto";
   // What screenshots are taken at: one of SupportedScreenshotResolutions()'
-  // values. Never below the game's own resolution.
-  std::string screenshot_resolution = "3840x2160";
+  // values. Never below the game's own resolution. The game is drawn at it
+  // only for the picture's few frames, so it doesn't slow the game down;
+  // 1920x1080 is light for any graphics card and still sharp to share.
+  std::string screenshot_resolution = "1920x1080";
   // The launcher's language: "auto" (the system's), "en", "es" or "ja".
   std::string language = "auto";
   // Volume of the launcher's and the Netplay lobby's music, 0 (off) to 100.
@@ -150,6 +152,10 @@ WindowDimensions WindowSizeOf(std::string_view value);
 const std::vector<ScreenshotResolutionOption> &SupportedScreenshotResolutions();
 // The option of config.ini's value; the default's for one that isn't listed.
 const ScreenshotResolutionOption &FindScreenshotResolution(std::string_view value);
+// The internal resolution a new config.ini starts with: the games' own (1x),
+// the lightest, so SR-Source runs well on any PC the first time it opens.
+// Settings raises it.
+inline constexpr std::string_view FIRST_RUN_RESOLUTION = "640x528";
 ConfigResult LoadConfig(const std::filesystem::path &user_directory,
                         bool create_if_missing);
 bool SaveConfig(const std::filesystem::path &user_directory,

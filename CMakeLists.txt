@@ -1242,6 +1242,15 @@ if(BUILD_TESTING)
     add_test(NAME moderngekko.launcher_transition
              COMMAND moderngekko_launcher_transition_test)
 
+    # Header-only: what the runner tells the launcher while a game loads.
+    add_executable(moderngekko_launcher_handoff_test
+        tests/launcher_handoff_test.cpp)
+    target_include_directories(moderngekko_launcher_handoff_test PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/tools")
+    target_compile_features(moderngekko_launcher_handoff_test PRIVATE cxx_std_23)
+    add_test(NAME moderngekko.launcher_handoff
+             COMMAND moderngekko_launcher_handoff_test)
+
     add_executable(moderngekko_launcher_sound_test
         tests/launcher_sound_test.cpp)
     target_include_directories(moderngekko_launcher_sound_test PRIVATE

@@ -10,7 +10,10 @@
 // Meanwhile the runner can say what it is doing, for the loading screen to
 // show: the Netplay lobby's first check of the game files can take minutes.
 // That goes in a second file beside the first (LauncherProgressFile), one
-// line "files <percent>", rewritten as the percentage grows.
+// line "files <percent>", rewritten as the percentage grows. And "window"
+// once it is about to open its window: only then does the launcher go over
+// other windows (over the game's, until that has its first picture), so a
+// long loading doesn't keep it over everything the player turns to.
 
 #include <algorithm>
 #include <filesystem>
@@ -49,9 +52,9 @@ inline std::filesystem::path LauncherProgressFile(const std::filesystem::path& r
   return progress;
 }
 
-// The game files are being checked: percent of them read. Written through a
-// temporary file, so the launcher never reads half a line.
-inline void TellLauncherFilesChecked(int percent)
+// The progress file's line. Written through a temporary file, so the
+// launcher never reads half a line.
+inline void TellLauncherProgress(const std::string& line)
 {
   const std::filesystem::path file = LauncherProgressFile(LauncherReadyFile());
   if (file.empty())
@@ -60,12 +63,33 @@ inline void TellLauncherFilesChecked(int percent)
   temporary += ".tmp";
   {
     std::ofstream output(temporary, std::ios::trunc);
-    output << "files " << std::clamp(percent, 0, 100) << '\n';
+    output << line << '\n';
     if (!output)
       return;
   }
   std::error_code ignored;
   std::filesystem::rename(temporary, file, ignored);
+}
+
+// The game files are being checked: percent of them read.
+inline void TellLauncherFilesChecked(int percent)
+{
+  TellLauncherProgress("files " + std::to_string(std::clamp(percent, 0, 100)));
+}
+
+// The runner is about to open its window (the game's, or the Netplay
+// lobby's).
+inline void TellLauncherWindowOpening()
+{
+  TellLauncherProgress("window");
+}
+
+// For the launcher: whether the runner is opening its window.
+inline bool ReadWindowOpening(const std::filesystem::path& progress_file)
+{
+  std::ifstream input(progress_file);
+  std::string word;
+  return static_cast<bool>(input >> word) && word == "window";
 }
 
 // For the launcher: the percentage of the game files checked so far, if the

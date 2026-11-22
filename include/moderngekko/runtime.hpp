@@ -211,6 +211,9 @@ struct RuntimeConfig
   // Called once, from the video thread, when the game window shows its
   // first picture: the launcher waits for it before stepping aside.
   std::function<void()> first_picture_shown;
+  // Called just before the game window opens: the launcher goes over it
+  // until its first picture, and only from then.
+  std::function<void()> window_opening;
   bool allow_interpreter = false;
   bool show_fps_in_title = true;
   std::optional<std::string> window_title;
