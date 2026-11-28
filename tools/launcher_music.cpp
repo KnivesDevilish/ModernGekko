@@ -3,6 +3,12 @@
 
 #define DR_MP3_IMPLEMENTATION
 #include "third_party/dr_mp3.h"
+// stb_vorbis.c is built on its own (as C); here only its declarations.
+#define STB_VORBIS_HEADER_ONLY
+#include "third_party/stb_vorbis.c"
+#undef STB_VORBIS_HEADER_ONLY
+
+#include <cstdio>
 
 #if defined(MODERNGEKKO_HAS_CUBEB)
 #include "AudioCommon/CubebUtils.h"
@@ -18,6 +24,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cctype>
 #include <cstdint>
 #include <iostream>
 #include <mutex>
@@ -30,9 +37,17 @@ namespace moderngekko::frontend
 // output reads them.
 struct MusicPlayer::Decoder
 {
+  // The music file, by its extension: .ogg (Ogg Vorbis, stb_vorbis), which
+  // loops without a gap, or .mp3 (dr_mp3).
+  stb_vorbis* vorbis = nullptr;
   drmp3 mp3{};
+  bool mp3_open = false;
+  std::uint32_t channels = 0;
+  std::uint32_t rate = 0;
   std::atomic<float> gain{1.0f};          // the music's
   std::atomic<float> effects_gain{1.0f};  // the sounds'
+  // Held: the music waits where it is, silent; the sounds are still heard.
+  std::atomic<bool> held{false};
   struct Voice
   {
     std::vector<drmp3_int16> samples;  // at the music's rate and channels
@@ -78,6 +93,78 @@ struct MusicPlayer::Output
 
 namespace
 {
+// Opens path into decoder (Ogg Vorbis or MP3, by the extension). False when
+// it can't be opened or decoded, or isn't mono or stereo.
+bool OpenMusic(MusicPlayer::Decoder& decoder, const std::filesystem::path& path)
+{
+  std::string extension = text::PathText(path.extension());
+  std::transform(extension.begin(), extension.end(), extension.begin(),
+                 [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+  if (extension == ".ogg")
+  {
+#ifdef _WIN32
+    std::FILE* file = _wfopen(path.c_str(), L"rb");
+#else
+    std::FILE* file = std::fopen(path.c_str(), "rb");
+#endif
+    if (!file)
+      return false;
+    int error = 0;
+    // stb_vorbis closes the file when it is done with it, also on failure.
+    decoder.vorbis = stb_vorbis_open_file(file, 1, &error, nullptr);
+    if (!decoder.vorbis)
+      return false;
+    const stb_vorbis_info info = stb_vorbis_get_info(decoder.vorbis);
+    decoder.channels = info.channels > 0 ? static_cast<std::uint32_t>(info.channels) : 0;
+    decoder.rate = info.sample_rate;
+  }
+  else
+  {
+#ifdef _WIN32
+    decoder.mp3_open = drmp3_init_file_w(&decoder.mp3, path.c_str(), nullptr);
+#else
+    decoder.mp3_open = drmp3_init_file(&decoder.mp3, path.c_str(), nullptr);
+#endif
+    if (!decoder.mp3_open)
+      return false;
+    decoder.channels = decoder.mp3.channels;
+    decoder.rate = decoder.mp3.sampleRate;
+  }
+  return decoder.channels >= 1 && decoder.channels <= 2 && decoder.rate != 0;
+}
+
+void CloseMusic(MusicPlayer::Decoder& decoder)
+{
+  if (decoder.vorbis)
+    stb_vorbis_close(decoder.vorbis);
+  decoder.vorbis = nullptr;
+  if (decoder.mp3_open)
+    drmp3_uninit(&decoder.mp3);
+  decoder.mp3_open = false;
+}
+
+// Up to `frames` frames of 16-bit samples from where the music is; 0 at
+// its end.
+long DecodeMusic(MusicPlayer::Decoder& decoder, drmp3_int16* samples, long frames)
+{
+  if (decoder.vorbis)
+  {
+    return stb_vorbis_get_samples_short_interleaved(
+        decoder.vorbis, static_cast<int>(decoder.channels), samples,
+        static_cast<int>(frames * static_cast<long>(decoder.channels)));
+  }
+  return static_cast<long>(
+      drmp3_read_pcm_frames_s16(&decoder.mp3, static_cast<drmp3_uint64>(frames), samples));
+}
+
+// Back to the music's first frame. False when the file won't seek.
+bool RewindMusic(MusicPlayer::Decoder& decoder)
+{
+  if (decoder.vorbis)
+    return stb_vorbis_seek_start(decoder.vorbis) != 0;
+  return drmp3_seek_to_pcm_frame(&decoder.mp3, 0);
+}
+
 #if defined(MODERNGEKKO_HAS_CUBEB) || defined(MODERNGEKKO_HAS_PULSE_SIMPLE)
 // The slider's 0 to 100 as a gain: squared, so the low half of the slider is
 // as useful as the top half to the ear.
@@ -102,18 +189,17 @@ void MixMusic(MusicPlayer::Decoder& decoder, drmp3_int16* samples, long frames);
 // loops. A file that can't be decoded any further gives silence.
 void ReadMusic(MusicPlayer::Decoder& decoder, drmp3_int16* samples, long frames)
 {
-  const long channels = static_cast<long>(decoder.mp3.channels);
+  const long channels = static_cast<long>(decoder.channels);
   long written = 0;
   bool restarted = false;
   while (written < frames)
   {
-    const drmp3_uint64 read = drmp3_read_pcm_frames_s16(
-        &decoder.mp3, static_cast<drmp3_uint64>(frames - written), samples + written * channels);
-    if (read == 0)
+    const long read = DecodeMusic(decoder, samples + written * channels, frames - written);
+    if (read <= 0)
     {
       // The end: back to the start once. Nothing again right after means
       // the file can't be decoded; the rest is silence.
-      if (restarted || !drmp3_seek_to_pcm_frame(&decoder.mp3, 0))
+      if (restarted || !RewindMusic(decoder))
       {
         std::fill(samples + written * channels, samples + frames * channels, drmp3_int16{0});
         return;
@@ -122,14 +208,17 @@ void ReadMusic(MusicPlayer::Decoder& decoder, drmp3_int16* samples, long frames)
       continue;
     }
     restarted = false;
-    written += static_cast<long>(read);
+    written += read;
   }
 }
 
 void MixMusic(MusicPlayer::Decoder& decoder, drmp3_int16* samples, long frames)
 {
-  ReadMusic(decoder, samples, frames);
-  const std::size_t count = static_cast<std::size_t>(frames) * decoder.mp3.channels;
+  const std::size_t count = static_cast<std::size_t>(frames) * decoder.channels;
+  if (decoder.held.load())
+    std::fill(samples, samples + count, drmp3_int16{0});
+  else
+    ReadMusic(decoder, samples, frames);
   const float gain = decoder.gain.load();
   if (gain < 1.0f)
   {
@@ -201,7 +290,7 @@ void Disconnect(pa_simple*& connection)
 // The music thread. connection is open when it starts.
 void PlayMusic(MusicPlayer::Output& output, MusicPlayer::Decoder& decoder, pa_simple* connection)
 {
-  const std::size_t channels = decoder.mp3.channels;
+  const std::size_t channels = decoder.channels;
   std::vector<drmp3_int16> block(static_cast<std::size_t>(BLOCK_FRAMES) * channels);
   // While paused: until the player resumes or stops.
   const auto wait_while_paused = [&] {
@@ -264,7 +353,7 @@ MusicPlayer::~MusicPlayer()
   Stop();
 }
 
-bool MusicPlayer::Play(const std::filesystem::path& path, int volume)
+bool MusicPlayer::Play(const std::filesystem::path& path, int volume, bool held)
 {
   Stop();
   std::error_code ec;
@@ -275,23 +364,18 @@ bool MusicPlayer::Play(const std::filesystem::path& path, int volume)
   }
 #if !defined(MODERNGEKKO_HAS_CUBEB) && !defined(MODERNGEKKO_HAS_PULSE_SIMPLE)
   (void)volume;
+  (void)held;
   std::cerr << "music: this build has no audio output\n";
   return false;
 #else
   m_decoder = std::make_unique<Decoder>();
   m_decoder->gain = Gain(volume);
   m_decoder->effects_gain = EffectsGain(volume);
-#ifdef _WIN32
-  const bool opened = drmp3_init_file_w(&m_decoder->mp3, path.c_str(), nullptr);
-#else
-  const bool opened = drmp3_init_file(&m_decoder->mp3, path.c_str(), nullptr);
-#endif
-  if (!opened || m_decoder->mp3.channels == 0 || m_decoder->mp3.channels > 2 ||
-      m_decoder->mp3.sampleRate == 0)
+  m_decoder->held = held;
+  if (!OpenMusic(*m_decoder, path))
   {
-    std::cerr << "music: can't decode " << path.string() << '\n';
-    if (opened)
-      drmp3_uninit(&m_decoder->mp3);
+    std::cerr << "music: can't decode " << text::PathText(path) << '\n';
+    CloseMusic(*m_decoder);
     m_decoder.reset();
     return false;
   }
@@ -311,9 +395,9 @@ bool MusicPlayer::Play(const std::filesystem::path& path, int volume)
     }
     cubeb_stream_params params{};
     params.format = CUBEB_SAMPLE_S16NE;
-    params.rate = decoder.mp3.sampleRate;
-    params.channels = decoder.mp3.channels;
-    params.layout = decoder.mp3.channels == 1 ? CUBEB_LAYOUT_MONO : CUBEB_LAYOUT_STEREO;
+    params.rate = decoder.rate;
+    params.channels = decoder.channels;
+    params.layout = decoder.channels == 1 ? CUBEB_LAYOUT_MONO : CUBEB_LAYOUT_STEREO;
     params.prefs = CUBEB_STREAM_PREF_NONE;
     // 60 ms of buffering: a sound is heard about that soon, and it is still
     // light on the CPU.
@@ -335,8 +419,8 @@ bool MusicPlayer::Play(const std::filesystem::path& path, int volume)
 #else
   m_output->name = m_name;
   m_output->format.format = PA_SAMPLE_S16NE;
-  m_output->format.rate = m_decoder->mp3.sampleRate;
-  m_output->format.channels = static_cast<std::uint8_t>(m_decoder->mp3.channels);
+  m_output->format.rate = m_decoder->rate;
+  m_output->format.channels = static_cast<std::uint8_t>(m_decoder->channels);
   // The first connection here, so Play can tell at once whether there is a
   // sound server at all.
   if (pa_simple* connection = ConnectMusic(*m_output))
@@ -369,13 +453,23 @@ void MusicPlayer::SetVolume(int volume)
 #endif
 }
 
+void MusicPlayer::Hold(bool held)
+{
+#if defined(MODERNGEKKO_HAS_CUBEB) || defined(MODERNGEKKO_HAS_PULSE_SIMPLE)
+  if (m_decoder)
+    m_decoder->held = held;
+#else
+  (void)held;
+#endif
+}
+
 void MusicPlayer::PlayEffect(const SoundEffect& sound)
 {
   if (!m_decoder || !m_output)
     return;
   Decoder::Voice voice;
-  voice.samples = ConvertSound(sound, static_cast<int>(m_decoder->mp3.sampleRate),
-                               static_cast<int>(m_decoder->mp3.channels));
+  voice.samples = ConvertSound(sound, static_cast<int>(m_decoder->rate),
+                               static_cast<int>(m_decoder->channels));
   if (voice.samples.empty())
     return;
   std::lock_guard lock(m_decoder->voices_mutex);
@@ -456,7 +550,7 @@ void MusicPlayer::Stop()
 #endif
   if (m_decoder)
   {
-    drmp3_uninit(&m_decoder->mp3);
+    CloseMusic(*m_decoder);
     m_decoder.reset();
   }
 }

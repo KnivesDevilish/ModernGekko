@@ -101,6 +101,13 @@ set(MODERNGEKKO_LAUNCHER_BANNER "" CACHE FILEPATH
 # stays as the banner when the layers can't be drawn.
 set(MODERNGEKKO_LAUNCHER_BANNER_LAYERS "" CACHE PATH
     "Optional folder with the Play page's banner in layers (layout.txt and its PNGs)")
+# A folder with the launcher's title screen and the scene behind its pages:
+# layout.txt, its pictures and its sound (tools/launcher_title_layout.hpp),
+# copied to Resources/title. With it the launcher opens on the title screen
+# instead of its splash, and the scene takes MODERNGEKKO_LAUNCHER_BACKGROUND's
+# place.
+set(MODERNGEKKO_LAUNCHER_TITLE_SCREEN "" CACHE PATH
+    "Optional folder with the launcher's title screen (layout.txt, its PNGs and sound)")
 set(MODERNGEKKO_LAUNCHER_CONTROLLER_ART "" CACHE FILEPATH
     "Optional PNG of the SR-Source controller drawing for the Controls page tester")
 set(MODERNGEKKO_LAUNCHER_KEYBOARD_ART "" CACHE FILEPATH
@@ -116,9 +123,9 @@ set(MODERNGEKKO_APP_ICON_ICO "" CACHE FILEPATH
 set(MODERNGEKKO_LAUNCHER_BACKGROUND "" CACHE FILEPATH
     "Optional picture behind the launcher's pages")
 set(MODERNGEKKO_LAUNCHER_MUSIC "" CACHE FILEPATH
-    "Optional MP3 that loops while the launcher is open")
+    "Optional Ogg Vorbis (.ogg) or MP3 that loops while the launcher is open")
 set(MODERNGEKKO_LOBBY_MUSIC "" CACHE FILEPATH
-    "Optional MP3 that loops while the Netplay lobby is open")
+    "Optional Ogg Vorbis (.ogg) or MP3 that loops while the Netplay lobby is open")
 set(MODERNGEKKO_LOBBY_BACKGROUND "" CACHE FILEPATH
     "Optional picture behind the Netplay lobby")
 # A folder with the lobby's background in layers, that move: layout.txt and its
@@ -190,6 +197,18 @@ function(moderngekko_add_resource_folder target source name)
         COMMENT "Copying ${name}/ into Resources/"
         VERBATIM)
     add_dependencies(${target} ${_copy_target})
+endfunction()
+
+# The name a music file gets in Resources/: <base>.ogg for an Ogg Vorbis
+# file, <base>.mp3 otherwise (tools/launcher_music.cpp reads both).
+function(moderngekko_music_name out source base)
+    get_filename_component(_extension "${source}" LAST_EXT)
+    string(TOLOWER "${_extension}" _extension)
+    if(_extension STREQUAL ".ogg")
+        set(${out} "${base}.ogg" PARENT_SCOPE)
+    else()
+        set(${out} "${base}.mp3" PARENT_SCOPE)
+    endif()
 endfunction()
 
 # The launcher's and the lobby's music (tools/launcher_music.cpp). The SDL
@@ -642,6 +661,7 @@ if(MODERNGEKKO_ENABLE_DOLPHIN_RUNTIME)
         tools/frontend_config.cpp
         tools/dol_patch.cpp
         tools/launcher_music.cpp
+        tools/third_party/stb_vorbis.c
         tools/text_paths.cpp
         vendor/dolphin/Externals/imgui/imgui/backends/imgui_impl_sdl3.cpp
         vendor/dolphin/Externals/imgui/imgui/backends/imgui_impl_sdlrenderer3.cpp)
@@ -768,9 +788,11 @@ if(MODERNGEKKO_ENABLE_DOLPHIN_RUNTIME)
     # (tools/launcher_banner.hpp); shown instead when it is there.
     moderngekko_add_resource_folder(moderngekko-run "${MODERNGEKKO_LOBBY_BACKGROUND_LAYERS}"
                                     lobby-background)
-    # And plays Resources/lobby-music.mp3 (decoded by tools/third_party/dr_mp3.h,
-    # see moderngekko_use_music_output for where the sound goes).
-    moderngekko_add_resource(moderngekko-run "${MODERNGEKKO_LOBBY_MUSIC}" lobby-music.mp3)
+    # And plays Resources/lobby-music.ogg or .mp3 (decoded by
+    # tools/third_party/stb_vorbis.c or dr_mp3.h, see moderngekko_use_music_output
+    # for where the sound goes).
+    moderngekko_music_name(_lobby_music_name "${MODERNGEKKO_LOBBY_MUSIC}" lobby-music)
+    moderngekko_add_resource(moderngekko-run "${MODERNGEKKO_LOBBY_MUSIC}" ${_lobby_music_name})
     moderngekko_use_music_output(moderngekko-run)
     # Resources/borders: the pictures beside a 4:3 game. The runner draws the
     # one config.ini names; the launcher, next to it, lists them in Settings.
@@ -814,6 +836,7 @@ if(MODERNGEKKO_ENABLE_DOLPHIN_RUNTIME)
         tools/frontend_config.cpp
         tools/dol_patch.cpp
         tools/launcher_music.cpp
+        tools/third_party/stb_vorbis.c
         tools/launcher_preview_video.cpp
         tools/launcher_process.cpp
         tools/launcher_update.cpp
@@ -925,6 +948,10 @@ if(MODERNGEKKO_ENABLE_DOLPHIN_RUNTIME)
     # (tools/launcher_banner.hpp); shown instead when it is there.
     moderngekko_add_resource_folder(moderngekko-launcher "${MODERNGEKKO_LAUNCHER_BANNER_LAYERS}"
                                     banner)
+    # Resources/title: the title screen and the scene behind the pages
+    # (tools/launcher_title.hpp).
+    moderngekko_add_resource_folder(moderngekko-launcher "${MODERNGEKKO_LAUNCHER_TITLE_SCREEN}"
+                                    title)
     # The Controls page tester draws Resources/launcher-controller.png and lights
     # up its buttons; the button positions in the launcher match that drawing.
     # Without it the tester shows the button list alone.
@@ -942,11 +969,12 @@ if(MODERNGEKKO_ENABLE_DOLPHIN_RUNTIME)
     moderngekko_add_resource(moderngekko-launcher "${MODERNGEKKO_APP_ICON}" app-icon.png)
     # Resources/launcher-background.png fills the window behind the pages (a
     # grid floor in it slides, see tools/moving_background.hpp), and
-    # Resources/launcher-music.mp3 loops while the launcher is open.
+    # Resources/launcher-music.ogg (or .mp3) loops while the launcher is open.
     moderngekko_add_resource(moderngekko-launcher "${MODERNGEKKO_LAUNCHER_BACKGROUND}"
                              launcher-background.png)
+    moderngekko_music_name(_launcher_music_name "${MODERNGEKKO_LAUNCHER_MUSIC}" launcher-music)
     moderngekko_add_resource(moderngekko-launcher "${MODERNGEKKO_LAUNCHER_MUSIC}"
-                             launcher-music.mp3)
+                             ${_launcher_music_name})
     moderngekko_use_music_output(moderngekko-launcher)
     # Resources/patch-notes.txt fills the PLAY page's PATCH NOTES panel
     # (format in tools/launcher_patch_notes.hpp).
@@ -1233,6 +1261,14 @@ if(BUILD_TESTING)
     target_compile_features(moderngekko_launcher_banner_test PRIVATE cxx_std_23)
     add_test(NAME moderngekko.launcher_banner
              COMMAND moderngekko_launcher_banner_test)
+
+    add_executable(moderngekko_launcher_title_test
+        tests/launcher_title_test.cpp)
+    target_include_directories(moderngekko_launcher_title_test PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/tools")
+    target_compile_features(moderngekko_launcher_title_test PRIVATE cxx_std_23)
+    add_test(NAME moderngekko.launcher_title
+             COMMAND moderngekko_launcher_title_test)
 
     add_executable(moderngekko_launcher_transition_test
         tests/launcher_transition_test.cpp)

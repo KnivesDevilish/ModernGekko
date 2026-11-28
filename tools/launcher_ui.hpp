@@ -185,6 +185,37 @@ struct LauncherImage
 };
 // Gives the window the program's icon, Resources/app-icon.png beside it
 // (MODERNGEKKO_APP_ICON); without it the system's default icon stays.
+// The renderer for the launcher's and the lobby's windows. On Windows,
+// Direct3D 11 first: with SDL's Vulkan renderer, on some NVIDIA cards, a
+// picture (the controller in Controls) could show the font's letters for a
+// moment while the mouse moved fast over the menu (SR-Source issue #6).
+// Elsewhere Vulkan first, as before. Then whatever SDL has.
+inline SDL_Renderer* CreateLauncherRenderer(SDL_Window* window)
+{
+#ifdef _WIN32
+  static constexpr const char* PREFERRED[] = {"direct3d11", "vulkan"};
+#else
+  static constexpr const char* PREFERRED[] = {"vulkan"};
+#endif
+  for (const char* name : PREFERRED)
+  {
+    if (SDL_Renderer* renderer = SDL_CreateRenderer(window, name))
+      return renderer;
+  }
+  return SDL_CreateRenderer(window, nullptr);
+}
+
+// The music file named base in folder: base.ogg, or base.mp3 when there is
+// no .ogg (tools/launcher_music.cpp plays both).
+inline fs::path MusicFile(const fs::path& folder, std::string_view base)
+{
+  std::error_code ec;
+  const fs::path ogg = folder / text::TextPath(std::string(base) + ".ogg");
+  if (fs::is_regular_file(ogg, ec))
+    return ogg;
+  return folder / text::TextPath(std::string(base) + ".mp3");
+}
+
 inline void SetWindowIcon(SDL_Window* window, const fs::path& release_directory)
 {
   const fs::path path = release_directory / "Resources" / "app-icon.png";

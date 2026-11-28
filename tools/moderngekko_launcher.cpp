@@ -20,6 +20,7 @@
 #include "file_mods.hpp"
 #include "launcher_save.hpp"
 #include "launcher_splash.hpp"
+#include "launcher_title.hpp"
 #include "launcher_ui.hpp"
 #include "launcher_update.hpp"
 #include "moderngekko/game.hpp"
@@ -1261,7 +1262,7 @@ void DrawCreditsPage(ImFont* bold, const std::function<void()>& version_section 
       {"ModernGekko", "GNU GPL v3"},
       {"Dolphin", MODERNGEKKO_UI_TEXT("GNU GPL v2 or later")},
       {"SDL 3", MODERNGEKKO_UI_TEXT("zlib License")},
-      {"Dear ImGui, pl_mpeg", MODERNGEKKO_UI_TEXT("MIT License")},
+      {"Dear ImGui, pl_mpeg, stb_vorbis", MODERNGEKKO_UI_TEXT("MIT License")},
       {"Noto Sans CJK, Teko", "SIL Open Font License 1.1"},
   }};
   if (bottom_columns)
@@ -2779,9 +2780,7 @@ int main(int argc, char** argv)
     return 1;
   }
   SetWindowIcon(window, release_directory);
-  SDL_Renderer* renderer = SDL_CreateRenderer(window, "vulkan");
-  if (!renderer)
-    renderer = SDL_CreateRenderer(window, nullptr);
+  SDL_Renderer* renderer = CreateLauncherRenderer(window);
   if (!renderer)
   {
     SDL_Log("SDL_CreateRenderer failed: %s", SDL_GetError());
@@ -2793,7 +2792,20 @@ int main(int argc, char** argv)
   // The launcher's opening (launcher_splash.hpp): the window shows its colour
   // at once, and the rest from the launcher's first frame.
   const SplashArt splash_art = LoadSplashArt(renderer, release_directory);
-  ClearToSplash(renderer, splash_art);
+  // With a title screen (Resources/title, launcher_title.hpp) it opens from
+  // black instead.
+  std::error_code title_error;
+  if (std::filesystem::is_regular_file(
+          release_directory / "Resources" / "title" / "layout.txt", title_error))
+  {
+    SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
+    SDL_RenderClear(renderer);
+    SDL_RenderPresent(renderer);
+  }
+  else
+  {
+    ClearToSplash(renderer, splash_art);
+  }
   LauncherSplash splash;
 #if defined(MODERNGEKKO_PUBLISHER)
   const std::string splash_credit = Format(Tr("Developed by %s"), MODERNGEKKO_PUBLISHER);
@@ -2861,18 +2873,30 @@ int main(int argc, char** argv)
   // The background's floor slides (RenderBackground in launcher_ui.hpp).
   const LauncherImage background = LoadLauncherImage(
       renderer, release_directory, "launcher-background.png", "launcher background", true);
+  // The title screen and the scene behind the pages (Resources/title): with
+  // it, the launcher opens on it instead of the splash, and the scene takes
+  // the background's place. Its pictures are kept up to twice the window's
+  // width, as the camera starts close.
+  TitleScene title_scene;
+  const bool has_title =
+      title_scene.Load(renderer, release_directory, window_pixels_wide * 2.0f);
+  TitleIntro title_intro;
   // The PLAY page's PATCH NOTES (MODERNGEKKO_LAUNCHER_PATCH_NOTES), read in
   // the interface's language again when it changes.
   const std::string patch_notes_text =
       ReadPatchNotes(release_directory / "Resources" / "patch-notes.txt");
   std::vector<moderngekko::frontend::PatchNoteLine> patch_notes;
   std::string patch_notes_language;
-  // Resources/launcher-music.mp3 loops while the launcher is open, stops
-  // while the game runs and starts over after. Without the file there is no
-  // music and no slider for it in Settings → Audio.
+  // Resources/launcher-music.ogg (or .mp3) loops while the launcher is open,
+  // stops while the game runs and starts over after. Without the file there
+  // is no music and no slider for it in Settings → Audio.
   moderngekko::frontend::MusicPlayer music(MODERNGEKKO_FRONTEND_NAME);
-  const fs::path music_path = release_directory / "Resources" / "launcher-music.mp3";
-  const bool has_music = music.Play(music_path, config.music_volume);
+  const fs::path music_path =
+      MusicFile(release_directory / "Resources", "launcher-music");
+  // With a title screen the music waits for its press: it starts as the
+  // scene shows (TitleIntro::Music).
+  const bool has_music = music.Play(music_path, config.music_volume, has_title);
+  bool music_held = has_title && has_music;
 #if defined(MODERNGEKKO_FRONTEND_VERSION) && defined(MODERNGEKKO_UPDATE_REPOSITORY)
   // Check for updates (launcher_update.hpp): GitHub is asked when the
   // launcher opens, unless turned off on the Credits page, and with that
@@ -3792,7 +3816,10 @@ int main(int argc, char** argv)
     SDL_FlushEvents(SDL_EVENT_FIRST, SDL_EVENT_LAST);
     refresh_controllers();
   };
-  splash.Start(static_cast<double>(SDL_GetTicksNS()) / 1e9);
+  if (has_title)
+    title_intro.Start(static_cast<double>(SDL_GetTicksNS()) / 1e9, title_scene.MoveSeconds());
+  else
+    splash.Start(static_cast<double>(SDL_GetTicksNS()) / 1e9);
   while (!done)
   {
     bool controllers_changed = false;
@@ -3833,6 +3860,22 @@ int main(int argc, char** argv)
           event.type == SDL_EVENT_GAMEPAD_REMAPPED)
       {
         controllers_changed = true;
+      }
+      // On the title screen any key, click or button goes on (with its
+      // sound); another one during the camera's move ends it. A gamepad's
+      // then moves nothing until it is let go.
+      {
+        const double now = static_cast<double>(SDL_GetTicksNS()) / 1e9;
+        const bool key = event.type == SDL_EVENT_KEY_DOWN && !event.key.repeat;
+        const bool click = event.type == SDL_EVENT_MOUSE_BUTTON_DOWN;
+        const bool button = event.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN;
+        if (title_intro.Active(now) && (key || click || button))
+        {
+          if (title_intro.Waiting() && title_scene.Sound())
+            music.PlayEffect(*title_scene.Sound());
+          title_intro.Press(now);
+          pad_waits_for_release = pad_waits_for_release || button;
+        }
       }
     }
     if (cancel_loading && session.process && !session.cancelled)
@@ -3919,6 +3962,36 @@ int main(int argc, char** argv)
         continue;
       }
     }
+    // The title screen and the camera's move (launcher_title.hpp): the pages
+    // aren't drawn.
+    {
+      const double now = static_cast<double>(SDL_GetTicksNS()) / 1e9;
+      if (music_held && title_intro.Music(now))
+      {
+        music.Hold(false);
+        music_held = false;
+      }
+      if (title_intro.Active(now))
+      {
+        ImGui_ImplSDLRenderer3_NewFrame();
+        ImGui_ImplSDL3_NewFrame();
+        ImGui::NewFrame();
+        title_scene.TrackMouse(io.MousePos, io.DisplaySize, io.DeltaTime);
+        const ImGuiViewport* viewport = ImGui::GetMainViewport();
+        DrawTitleScreen(ImGui::GetForegroundDrawList(), viewport->Pos, viewport->Size,
+                        title_intro, now, title_scene, fonts.bold, Tr("PRESS ANY BUTTON"));
+        ImGui::Render();
+        SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
+        SDL_RenderClear(renderer);
+        // Under the white it doesn't show.
+        if (title_intro.White(now) < 0.999f)
+          title_scene.Render(renderer, now, title_intro.Move(now));
+        SDL_SetRenderScale(renderer, io.DisplayFramebufferScale.x, io.DisplayFramebufferScale.y);
+        ImGui_ImplSDLRenderer3_RenderDrawData(ImGui::GetDrawData(), renderer);
+        SDL_RenderPresent(renderer);
+        continue;
+      }
+    }
     UpdateControllerTester(controller_tester, current_page == LauncherPage::Controls,
                            controller_profile, controllers);
     // Opening the Controls page starts testing the controller, unless LB or
@@ -3936,7 +4009,8 @@ int main(int argc, char** argv)
     // While the launcher goes to black or comes back from it, or opens,
     // nothing in it answers.
     const bool fading = transition.Active(static_cast<double>(SDL_GetTicksNS()) / 1e9) ||
-                        splash.Active(static_cast<double>(SDL_GetTicksNS()) / 1e9);
+                        splash.Active(static_cast<double>(SDL_GetTicksNS()) / 1e9) ||
+                        title_intro.Pages(static_cast<double>(SDL_GetTicksNS()) / 1e9) < 1.0f;
     if (fading)
       io.ConfigFlags |= ImGuiConfigFlags_NoMouse;
     else
@@ -3980,6 +4054,14 @@ int main(int argc, char** argv)
     ImGui_ImplSDLRenderer3_NewFrame();
     ImGui_ImplSDL3_NewFrame();
     ImGui::NewFrame();
+    // After the title screen the pages come in over its scene, which leans
+    // with the mouse.
+    if (has_title)
+    {
+      title_scene.TrackMouse(io.MousePos, io.DisplaySize, io.DeltaTime);
+      ImGui::GetStyle().Alpha =
+          std::max(title_intro.Pages(static_cast<double>(SDL_GetTicksNS()) / 1e9), 0.01f);
+    }
     // An error stays on screen until the next thing the user does. Cleared
     // before the widgets run, so an action that fails again this frame shows
     // its fresh message instead of an outdated one.
@@ -4112,7 +4194,7 @@ int main(int argc, char** argv)
     // With a background picture the window itself is see-through (the
     // picture is drawn under it, see RenderBackground); the panels keep
     // their own color, so text stays readable.
-    if (background.texture)
+    if (background.texture || has_title)
       ImGui::SetNextWindowBgAlpha(0.0f);
     ImGui::Begin(MODERNGEKKO_FRONTEND_NAME " Launcher", nullptr,
                  ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove |
@@ -6158,7 +6240,10 @@ int main(int argc, char** argv)
     SDL_SetRenderScale(renderer, io.DisplayFramebufferScale.x, io.DisplayFramebufferScale.y);
     SDL_SetRenderDrawColor(renderer, 8, 8, 9, 255);  // ImGuiCol_WindowBg of the theme
     SDL_RenderClear(renderer);
-    RenderBackground(renderer, background, static_cast<double>(SDL_GetTicksNS()) / 1e9);
+    if (has_title)
+      title_scene.Render(renderer, static_cast<double>(SDL_GetTicksNS()) / 1e9, 1.0f);
+    else
+      RenderBackground(renderer, background, static_cast<double>(SDL_GetTicksNS()) / 1e9);
     ImGui_ImplSDLRenderer3_RenderDrawData(ImGui::GetDrawData(), renderer);
     SDL_RenderPresent(renderer);
 
@@ -6203,6 +6288,7 @@ int main(int argc, char** argv)
   if (banner.texture)
     SDL_DestroyTexture(banner.texture);
   layered_banner.Unload();
+  title_scene.Unload();
   if (background.texture)
     SDL_DestroyTexture(background.texture);
   // Its thread stops and its pictures go before the renderer.

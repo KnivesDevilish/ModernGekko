@@ -1,8 +1,10 @@
 #pragma once
 
-// Background music for the launcher and the Netplay lobby: an MP3 file that
-// loops, decoded a little at a time (dr_mp3) as the sound goes out, so a few
-// minutes of music never sits whole in memory. The SDL that Dolphin builds
+// Background music for the launcher and the Netplay lobby: an Ogg Vorbis
+// (.ogg, stb_vorbis) or MP3 (dr_mp3) file that loops, decoded a little at a
+// time as the sound goes out, so a few minutes of music never sits whole in
+// memory. Ogg Vorbis loops without a gap; MP3 adds a little silence at its
+// ends. The SDL that Dolphin builds
 // has no audio, so the sound goes out through cubeb, Dolphin's own audio
 // library, where the build has it (Windows, macOS), and on Linux, where
 // ModernGekko builds Dolphin without cubeb, straight to the sound server
@@ -28,10 +30,14 @@ public:
 
   // Starts path looping at volume, 0 (silent) to 100, as config.ini's
   // music_volume. Returns false, and stays silent, when the file is missing
-  // or unreadable or no audio device opens: music is optional.
-  bool Play(const std::filesystem::path& path, int volume);
+  // or unreadable or no audio device opens: music is optional. held: it
+  // waits silent at its start until Hold(false), sounds playing meanwhile.
+  bool Play(const std::filesystem::path& path, int volume, bool held = false);
   // The music's volume also sets the sounds': at 0 neither is heard.
   void SetVolume(int volume);
+  // Held, the music waits where it is, silent, while sounds still play;
+  // let go, it goes on from there.
+  void Hold(bool held);
   // Plays a short sound over the music, once, from now. Nothing while the
   // music isn't playing (no file, no audio device, paused for the game).
   void PlayEffect(const SoundEffect& sound);

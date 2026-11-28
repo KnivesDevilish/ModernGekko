@@ -550,9 +550,7 @@ public:
     if (!m_window)
       return false;
     ui::SetWindowIcon(m_window, ExecutableDirectory());
-    m_renderer = SDL_CreateRenderer(m_window, "vulkan");
-    if (!m_renderer)
-      m_renderer = SDL_CreateRenderer(m_window, nullptr);
+    m_renderer = ui::CreateLauncherRenderer(m_window);
     if (!m_renderer)
       return false;
     SDL_SetRenderVSync(m_renderer, 1);
@@ -584,9 +582,9 @@ public:
       m_background = ui::LoadLauncherImage(m_renderer, release_directory,
                                            "lobby-background.png",
                                            "lobby background", true);
-    // Resources/lobby-music.mp3 loops while the lobby is open; the game
-    // has its own sound.
-    m_music.Play(release_directory / "Resources" / "lobby-music.mp3",
+    // Resources/lobby-music.ogg (or .mp3) loops while the lobby is open; the
+    // game has its own sound.
+    m_music.Play(ui::MusicFile(release_directory / "Resources", "lobby-music"),
                  music_volume);
     m_open = true;
     return true;
