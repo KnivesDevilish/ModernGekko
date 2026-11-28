@@ -7,6 +7,7 @@
 // colour and the font files are in launcher_look.hpp, which the in-game menu
 // uses too.
 
+#include "launcher_arcade.hpp"
 #include "launcher_look.hpp"
 #include "moving_background.hpp"
 
@@ -444,9 +445,9 @@ inline bool DrawPrimaryButton(const char* label, ImFont* bold, float height, flo
 // Title of the Settings, Controls and Game Files pages, with one line of help.
 inline void DrawPageHeader(const char* title, const char* subtitle, ImFont* bold)
 {
-  ImGui::PushFont(bold, ImGui::GetStyle().FontSizeBase * 1.35f);
-  ImGui::TextUnformatted(title);
-  ImGui::PopFont();
+  // The arcade badge (launcher_arcade.hpp): the title in capitals on lime.
+  arcade::TitleBadge(title, bold, ImGui::GetFontSize() * 1.4f, ImGui::GetStyle().FontScaleDpi);
+  ImGui::Spacing();
   ImGui::PushTextWrapPos(0.0f);
   ImGui::TextDisabled("%s", subtitle);
   ImGui::PopTextWrapPos();

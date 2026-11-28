@@ -93,6 +93,19 @@ public:
   }
 
   bool Loaded() const { return !m_layers.empty(); }
+  // The pictures' height over their width (the PLAY page places its pill
+  // under the scene's tagline with it).
+  float PictureAspect() const
+  {
+    if (m_layout.picture_width > 0.0f && m_layout.picture_height > 0.0f)
+      return m_layout.picture_height / m_layout.picture_width;
+    float width = 0.0f;
+    float height = 0.0f;
+    if (m_layers.empty() || !m_layers.front() ||
+        !SDL_GetTextureSize(m_layers.front(), &width, &height) || width <= 0.0f)
+      return 0.5625f;
+    return height / width;
+  }
   // How long the camera's move takes (0: TitleIntro's own).
   double MoveSeconds() const { return m_layout.move_seconds; }
   const LauncherImage& Logo() const { return m_logo; }

@@ -9,6 +9,7 @@
 #include "launcher_patch_notes.hpp"
 #include "launcher_gallery.hpp"
 #include "launcher_game_select.hpp"
+#include "launcher_arcade.hpp"
 #include "launcher_banner.hpp"
 #include "launcher_games.hpp"
 #include "launcher_line_break.hpp"
@@ -655,7 +656,7 @@ enum class LauncherPage
   Credits,
 };
 
-// The sidebar's pages in its order, which LB and RB also go through.
+// The pages in the bar's order, which LB and RB also go through.
 constexpr std::array<std::pair<LauncherPage, const char*>, 7> LAUNCHER_PAGES = {{
     {LauncherPage::Play, MODERNGEKKO_UI_TEXT("PLAY")},
     {LauncherPage::Settings, MODERNGEKKO_UI_TEXT("Settings")},
@@ -798,38 +799,6 @@ float DrawFooterHints(std::span<const FooterHint> all_hints, PadStyle style, boo
   return width;
 }
 
-// One entry of the sidebar. The current page is drawn in bold with a lime bar
-// on its left edge, the others in the dimmed text colour.
-bool DrawNavigationItem(const char* label, bool selected, ImFont* bold, float scale)
-{
-  const ImGuiStyle& style = ImGui::GetStyle();
-  ImGui::PushStyleColor(ImGuiCol_Text, selected ? style.Colors[ImGuiCol_Text]
-                                                : style.Colors[ImGuiCol_TextDisabled]);
-  ImGui::PushStyleColor(ImGuiCol_Header, ImVec4(1.0f, 1.0f, 1.0f, 0.05f));
-  ImGui::PushStyleColor(ImGuiCol_HeaderHovered, ImVec4(1.0f, 1.0f, 1.0f, 0.07f));
-  ImGui::PushStyleColor(ImGuiCol_HeaderActive, ImVec4(1.0f, 1.0f, 1.0f, 0.10f));
-  if (selected)
-    ImGui::PushFont(bold, 0.0f);
-  ImGui::PushStyleVar(ImGuiStyleVar_SelectableTextAlign, ImVec2(0.0f, 0.5f));
-  const ImVec2 position = ImGui::GetCursorScreenPos();
-  const float height = ImGui::GetFrameHeight() + 6.0f * scale;
-  ImGui::Indent(12.0f * scale);
-  const bool clicked = ImGui::Selectable(label, selected, ImGuiSelectableFlags_None,
-                                         ImVec2(0.0f, height));
-  ImGui::Unindent(12.0f * scale);
-  if (selected)
-  {
-    ImGui::GetWindowDrawList()->AddRectFilled(
-        position, ImVec2(position.x + 3.0f * scale, position.y + height),
-        ImGui::GetColorU32(LAUNCHER_ACCENT), 2.0f * scale);
-  }
-  ImGui::PopStyleVar();
-  if (selected)
-    ImGui::PopFont();
-  ImGui::PopStyleColor(4);
-  return clicked;
-}
-
 using LauncherBanner = LauncherImage;
 
 // largest_width: the most pixels wide it is drawn (LoadLauncherImage).
@@ -864,17 +833,23 @@ std::string SystemLanguageCode()
   return language;
 }
 
-// The language menu at the bottom of the sidebar. setting is config.ini's
-// "language" value; returns true when the player picks another one.
-bool DrawLanguageMenu(std::string& setting, std::string_view system_language, float scale)
+// The language menu: with compact, the small one in the bar of pages (the
+// launcher's own); otherwise under a LANGUAGE label at the bottom of a
+// column. setting is config.ini's "language" value; returns true when the
+// player picks another one.
+bool DrawLanguageMenu(std::string& setting, std::string_view system_language, float scale,
+                      bool compact = false)
 {
   using moderngekko::frontend::Language;
   using moderngekko::frontend::LanguageName;
-  const float height = ImGui::GetTextLineHeightWithSpacing() + ImGui::GetFrameHeight();
-  ImGui::SetCursorPosY(std::max(ImGui::GetCursorPosY(), ImGui::GetWindowHeight() - height));
-  ImGui::Indent(12.0f * scale);
-  // White, so it reads well over the background.
-  ImGui::TextColored(ImVec4(1.0f, 1.0f, 1.0f, 1.0f), "%s", Tr("LANGUAGE"));
+  if (!compact)
+  {
+    const float height = ImGui::GetTextLineHeightWithSpacing() + ImGui::GetFrameHeight();
+    ImGui::SetCursorPosY(std::max(ImGui::GetCursorPosY(), ImGui::GetWindowHeight() - height));
+    ImGui::Indent(12.0f * scale);
+    // White, so it reads well over the background.
+    ImGui::TextColored(ImVec4(1.0f, 1.0f, 1.0f, 1.0f), "%s", Tr("LANGUAGE"));
+  }
   const std::string automatic = Format(
       Tr("System (%s)"),
       LanguageName(moderngekko::frontend::ResolveLanguage("auto", system_language)));
@@ -887,7 +862,8 @@ bool DrawLanguageMenu(std::string& setting, std::string_view system_language, fl
   const auto current = std::ranges::find_if(
       choices, [&](const auto& choice) { return setting == choice.first; });
   bool changed = false;
-  ImGui::SetNextItemWidth(-1.0f);
+  // Compact, in the bar of pages: a small menu, its tooltip says what it is.
+  ImGui::SetNextItemWidth(compact ? 140.0f * scale : -1.0f);
   if (ImGui::BeginCombo("##language",
                         current != choices.end() ? current->second.c_str() : automatic.c_str()))
   {
@@ -904,7 +880,10 @@ bool DrawLanguageMenu(std::string& setting, std::string_view system_language, fl
     }
     ImGui::EndCombo();
   }
-  ImGui::Unindent(12.0f * scale);
+  if (compact)
+    ImGui::SetItemTooltip("%s", Tr("LANGUAGE"));
+  else
+    ImGui::Unindent(12.0f * scale);
   return changed;
 }
 
@@ -2818,7 +2797,7 @@ int main(int argc, char** argv)
   ImGuiIO& io = ImGui::GetIO();
   // The keyboard and any gamepad move through the launcher: the arrows, the
   // D-pad or the left stick move, Enter or A chooses, and Escape or B goes back
-  // to the sidebar; LB and RB change the page (see the main loop).
+  // to the bar of pages; LB and RB change the page (see the main loop).
   io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard | ImGuiConfigFlags_NavEnableGamepad;
   io.IniFilename = nullptr;
   ImGui::StyleColorsDark();
@@ -3352,7 +3331,7 @@ int main(int argc, char** argv)
   // doesn't start the test.
   bool page_by_shoulder = false;
   LauncherPage shown_page = current_page;
-  // Next frame, the sidebar's item for the page shown takes the focus (after
+  // Next frame, the bar's tab for the page shown takes the focus (after
   // B, LB or RB).
   bool focus_sidebar = false;
   // At the start and after the game, a gamepad moves nothing until all its
@@ -3376,11 +3355,11 @@ int main(int argc, char** argv)
   };
   read_pad_style();
   // Last frame's popups, active item and screenshot viewer: B closes them
-  // before it goes back to the sidebar.
+  // before it goes back to the bar of pages.
   bool popup_was_open = false;
   bool item_was_active = false;
   bool viewer_was_open = false;
-  // The focus was on the sidebar last frame: right goes into the page.
+  // The focus was on the bar of pages last frame: up goes into the page.
   bool sidebar_was_focused = false;
   bool enter_page = false;
   // Which session the Netplay window is about to start (Host or Join).
@@ -3741,7 +3720,7 @@ int main(int argc, char** argv)
     session_error_log = ended.log_written ? ended.log_path : fs::path();
     result = 1;
   };
-  // Shows a page the way its sidebar item does, with what opening it reads
+  // Shows a page the way its tab in the bar does, with what opening it reads
   // again.
   const auto go_to_page = [&](LauncherPage page) {
     switch (page)
@@ -4130,7 +4109,7 @@ int main(int argc, char** argv)
              !ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel))
     {
       // LB and RB, or Q and E on the keyboard: the page before or after this
-      // one in the sidebar.
+      // one in the bar of pages.
       int step = pad_moves ? static_cast<int>(ImGui::IsKeyPressed(ImGuiKey_GamepadR1, false)) -
                                  static_cast<int>(ImGui::IsKeyPressed(ImGuiKey_GamepadL1, false)) :
                              0;
@@ -4153,15 +4132,15 @@ int main(int argc, char** argv)
       if (pad_moves && step == 0 && current_page == LauncherPage::Controls &&
           controller_profile_exists && ImGui::IsKeyPressed(ImGuiKey_GamepadFaceUp, false))
         controls_testing = true;
-      // B or Escape: back to the sidebar, on the page shown.
+      // B or Escape: back to the bar of pages, on the page shown.
       if (ImGui::IsKeyPressed(ImGuiKey_Escape, false) ||
           (pad_moves && ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight, false)))
         focus_sidebar = true;
-      // Right from the sidebar, or the first move with nothing focused yet:
-      // into the page, on its first control.
-      const bool right = ImGui::IsKeyPressed(ImGuiKey_RightArrow) ||
-                         (pad_moves && (ImGui::IsKeyPressed(ImGuiKey_GamepadDpadRight) ||
-                                        ImGui::IsKeyPressed(ImGuiKey_GamepadLStickRight)));
+      // Up from the bar of pages, or the first move with nothing focused
+      // yet: into the page, on its first control.
+      const bool up = ImGui::IsKeyPressed(ImGuiKey_UpArrow) ||
+                      (pad_moves && (ImGui::IsKeyPressed(ImGuiKey_GamepadDpadUp) ||
+                                     ImGui::IsKeyPressed(ImGuiKey_GamepadLStickUp)));
       bool first_move = false;
       if (GImGui->NavId == 0)
       {
@@ -4175,7 +4154,7 @@ int main(int argc, char** argv)
                 ImGuiKey_GamepadLStickLeft, ImGuiKey_GamepadLStickRight})
             first_move = first_move || ImGui::IsKeyPressed(key, false);
       }
-      if ((sidebar_was_focused && right) || first_move)
+      if ((sidebar_was_focused && up) || first_move)
       {
         ImGui::NavMoveRequestCancel();
         enter_page = true;
@@ -4192,109 +4171,62 @@ int main(int argc, char** argv)
     ImGui::SetNextWindowPos(viewport->WorkPos);
     ImGui::SetNextWindowSize(viewport->WorkSize);
     // With a background picture the window itself is see-through (the
-    // picture is drawn under it, see RenderBackground); the panels keep
-    // their own color, so text stays readable.
+    // picture is drawn under it, see RenderBackground); the pages' cards keep
+    // their own colour, so text stays readable.
     if (background.texture || has_title)
       ImGui::SetNextWindowBgAlpha(0.0f);
+    // The window has no padding of its own: the bar of pages goes from edge
+    // to edge, and the page's card keeps the usual margin.
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
     ImGui::Begin(MODERNGEKKO_FRONTEND_NAME " Launcher", nullptr,
                  ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove |
-                     ImGuiWindowFlags_NoSavedSettings);
-    // Top bar: the launcher's name on the left ("Launcher" without one; the
-    // game's name is already in the banner), the CPU core PLAY will use on
-    // the right (MODERNGEKKO_STATICRECOMP wins over config.ini, as in the
-    // runner).
-    ImGui::PushFont(fonts.bold, 0.0f);
-    ImGui::AlignTextToFramePadding();
-    ImGui::TextUnformatted(MODERNGEKKO_LAUNCHER_HEADING);
-    ImGui::PopFont();
-    ImGui::SameLine();
-#if defined(MODERNGEKKO_FRONTEND_VERSION) && defined(MODERNGEKKO_UPDATE_REPOSITORY)
-    {
-      const moderngekko::frontend::UpdateCheck::Status update = update_check.Get();
-      if (update.state == moderngekko::frontend::UpdateCheck::State::Available)
-      {
-        DrawNewVersionNotice(update.latest, scale);
-        ImGui::SameLine();
-      }
-    }
-#endif
-    {
-      const bool static_recomp = cpu_core_override.empty() ?
-                                     config.cpu_core == "staticrecomp" :
-                                     cpu_core_override.front() != '0';
-      DrawStatusPill(static_recomp ? "StaticRecomp" : "JIT64",
-                     static_recomp ? ImVec4(1.0f, 0.75f, 0.3f, 1.0f) : LAUNCHER_ACCENT, scale,
-                     true);
-    }
-    ImGui::Separator();
-    ImGui::Spacing();
-
-    // Body: sidebar on the left and the selected page on the right, leaving
-    // room under both for the footer (error line and controller status).
-    bool has_dialog_error = false;
+                     ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoScrollWithMouse);
+    ImGui::PopStyleVar();
+    const ImVec2 window_origin = ImGui::GetWindowPos();
+    const ImVec2 window_size = ImGui::GetWindowSize();
+    const float margin = ImGui::GetStyle().WindowPadding.x;
+    // The bar along the bottom (launcher_arcade.hpp): a line with the
+    // language, the controller's state, what its buttons do and the CPU
+    // core; under it the pages, between LB and RB.
+    const float bar_line = std::max(2.0f, std::round(3.0f * scale));
+    const float status_height = ImGui::GetFrameHeight();
+    const float tabs_height = std::round(38.0f * scale);
+    const float bar_height = bar_line + 6.0f * scale + status_height + tabs_height + 2.0f * scale;
+    const float bar_top = window_size.y - bar_height;
+    std::string footer_error;
     {
       std::lock_guard lock(dialog.mutex);
-      has_dialog_error = !dialog.error.empty();
+      footer_error = dialog.error;
     }
-    const float footer_height =
-        ImGui::GetTextLineHeightWithSpacing() * (has_dialog_error ? 2.0f : 1.0f) +
-        ImGui::GetStyle().ItemSpacing.y * 2.0f + 1.0f;
-    const float body_height = std::max(1.0f, ImGui::GetContentRegionAvail().y - footer_height);
-    // The two columns show the window background; only panels inside a page
-    // (such as GAME STATUS) use the theme's panel colour.
-    ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
-    // The sidebar and the page each keep the D-pad to themselves: Dear
-    // ImGui's up and down would otherwise jump between them. Right goes into
-    // the page, B back to the sidebar (both above).
-    ImGui::BeginChild("##navigation", ImVec2(170.0f * scale, body_height));
-    ImGui::PopStyleColor();
-    bool sidebar_focused = false;
-    for (const auto& [page, label] : LAUNCHER_PAGES)
+    // An error sits just above the bar, on a dark pill so it reads over the
+    // scene too.
+    const float error_height =
+        footer_error.empty() ? 0.0f : ImGui::GetTextLineHeight() + 12.0f * scale;
+    // The PLAY page over the title scene has no card: the scene shows whole,
+    // with PLAY under its logo.
+    const bool scene_play = has_title && current_page == LauncherPage::Play && current_metadata;
+    if (scene_play)
     {
-      if (DrawNavigationItem(Tr(label), current_page == page, fonts.bold, scale))
-      {
-        go_to_page(page);
-        // Choosing Controls tests the controller, even when the page is
-        // already shown (reached with LB or RB).
-        if (page == LauncherPage::Controls)
-          controls_testing = true;
-      }
-      sidebar_focused = sidebar_focused || ImGui::IsItemFocused();
-      if (focus_sidebar && current_page == page)
-      {
-        ImGui::FocusItem();
-        ImGui::SetNavCursorVisible(true);
-        focus_sidebar = false;
-      }
+      ImGui::SetCursorPos(ImVec2(0.0f, 0.0f));
+      ImGui::BeginChild("##page", ImVec2(window_size.x, std::max(1.0f, bar_top - error_height)),
+                        ImGuiChildFlags_None,
+                        ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_NoScrollbar |
+                            ImGuiWindowFlags_NoScrollWithMouse);
     }
+    else
     {
-      const std::string previous = config.language;
-      if (DrawLanguageMenu(config.language, system_language, scale))
-      {
-        config.resolution = resolutions[resolution_index].text;
-        config.show_fps_in_title = show_fps_in_title;
-        config.controller = selected_controller;
-        std::string error;
-        if (moderngekko::frontend::SaveConfig(user_directory, config, &error))
-        {
-          moderngekko::frontend::ActiveLanguage() =
-              moderngekko::frontend::ResolveLanguage(config.language, system_language);
-        }
-        else
-        {
-          config.language = previous;
-          std::lock_guard lock(dialog.mutex);
-          dialog.error = std::move(error);
-        }
-      }
+      ImGui::SetCursorPos(ImVec2(margin, margin));
+      ImGui::PushStyleColor(ImGuiCol_ChildBg, arcade::GLASS);
+      ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(arcade::LIME.x, arcade::LIME.y,
+                                                    arcade::LIME.z, 0.22f));
+      ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 14.0f * scale);
+      ImGui::BeginChild("##page",
+                        ImVec2(window_size.x - margin * 2.0f,
+                               std::max(1.0f, bar_top - error_height - margin * 1.6f)),
+                        ImGuiChildFlags_Borders | ImGuiChildFlags_AlwaysUseWindowPadding);
+      ImGui::PopStyleVar();
+      ImGui::PopStyleColor(2);
     }
-    sidebar_focused = sidebar_focused || ImGui::IsItemFocused();
-    sidebar_was_focused = sidebar_focused;
-    ImGui::EndChild();
-    ImGui::SameLine();
-    ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
-    ImGui::BeginChild("##page", ImVec2(0.0f, body_height));
-    ImGui::PopStyleColor();
     if (enter_page)
     {
       // The focus goes to the page's first control (PLAY on the PLAY page).
@@ -4337,6 +4269,21 @@ int main(int argc, char** argv)
                                          row_width - notes_width - ImGui::GetStyle().ItemSpacing.x :
                                          row_width;
 
+          // What PLAY does: with more than one game, ask which one first.
+          const auto press_play = [&] {
+            if (moderngekko::frontend::PlaysSeveralGames())
+            {
+              if (!open_game_select())
+                ImGui::OpenPopup("##choose_game");
+            }
+            else if (ensure_controller())
+            {
+              launch_mode = LaunchMode::Solo;
+              done = true;
+            }
+          };
+          if (!has_title)
+          {
           // The banner already shows the game's name, so no text title
           // follows it.
           if (draw_banner(column_width))
@@ -4383,17 +4330,198 @@ int main(int argc, char** argv)
           if (DrawPrimaryButton(moderngekko::frontend::PlaysSeveralGames() ? Tr("LAUNCH") :
                                                                             Tr("PLAY"),
                                 fonts.bold, 42 * scale, column_width))
+            press_play();
+          }
+          else
           {
-            // With more than one game, PLAY asks which one first.
+            // Over the title scene: PLAY under its tagline, the hints under
+            // it (what A, Y and X do), and what isn't ready yet. Each part
+            // stands on its own dark pill, so it reads over the scene.
+            const ImVec2 spot = arcade::ScenePoint(ImVec2(0.515f, 0.405f), window_size,
+                                                   title_scene.PictureAspect());
+            const float centre_x = window_origin.x + spot.x;
+            float row_y = window_origin.y + spot.y;
+            const bool glyph_keys = last_input == LastInput::Keyboard ||
+                                    (io.BackendFlags & ImGuiBackendFlags_HasGamepad) == 0;
+            const float pill_height = std::round(36.0f * scale);
+            const float pill_width =
+                arcade::PlayPillWidth(fonts.bold, pill_height, Tr("PLAY"), glyph_keys);
+            ImGui::SetCursorScreenPos(ImVec2(centre_x - pill_width * 0.5f, row_y));
+            if (arcade::PlayPill("##play", Tr("PLAY"), fonts.bold, pill_height, pad_style,
+                                 glyph_keys))
+              press_play();
+            row_y += pill_height + 10.0f * scale;
+
+            enum class HintAction
+            {
+              Play,
+              Notes,
+              Netplay,
+            };
+            std::vector<arcade::Hint> hints;
+            std::vector<HintAction> actions;
             if (moderngekko::frontend::PlaysSeveralGames())
             {
-              if (!open_game_select())
-                ImGui::OpenPopup("##choose_game");
+              hints.push_back({PadButton::South, "Enter", Tr("Choose a game")});
+              actions.push_back(HintAction::Play);
             }
-            else if (ensure_controller())
+            if (!patch_notes.empty())
             {
-              launch_mode = LaunchMode::Solo;
-              done = true;
+              hints.push_back({PadButton::North, nullptr, Tr("What's new")});
+              actions.push_back(HintAction::Notes);
+            }
+            hints.push_back({PadButton::West, nullptr, Tr("Netplay")});
+            actions.push_back(HintAction::Netplay);
+            const float hint_height = std::round(19.0f * scale);
+            const int hint = arcade::HintRow(hints, fonts.bold, centre_x, row_y, hint_height,
+                                             pad_style, glyph_keys);
+            row_y += hint_height + 12.0f * scale;
+            const auto chosen = [&](HintAction action) {
+              return hint >= 0 && actions[static_cast<std::size_t>(hint)] == action;
+            };
+            if (chosen(HintAction::Play))
+              press_play();
+            // Y and X on a gamepad do what their hints say.
+            const bool no_popup = !ImGui::IsPopupOpen(
+                "", ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel);
+            const bool pad_free = no_popup && pad_moves && !fading && !game_select.IsOpen();
+            if (chosen(HintAction::Notes) ||
+                (pad_free && !patch_notes.empty() &&
+                 ImGui::IsKeyPressed(ImGuiKey_GamepadFaceUp, false)))
+              ImGui::OpenPopup("##whats_new");
+            if (chosen(HintAction::Netplay) ||
+                (pad_free && ImGui::IsKeyPressed(ImGuiKey_GamepadFaceLeft, false)))
+              ImGui::OpenPopup("##netplay_choice");
+
+            // A game that isn't installed yet: a note that leads to Game Files.
+            if (moderngekko::frontend::PlaysSeveralGames())
+            {
+              for (const GameSlot& slot : game_slots)
+              {
+                if (slot.metadata)
+                  continue;
+                const std::string text =
+                    Format(Tr("NOT INSTALLED \xC2\xB7 %s"), slot.game.disc_id.c_str());
+                const ImVec2 text_size = ImGui::CalcTextSize(text.c_str());
+                const ImVec2 box(text_size.x + 20.0f * scale, text_size.y + 8.0f * scale);
+                const ImVec2 min(centre_x - box.x * 0.5f, row_y);
+                ImGui::SetCursorScreenPos(min);
+                ImGui::PushID(slot.game.disc_id.c_str());
+                if (ImGui::InvisibleButton("##not_installed", box, ImGuiButtonFlags_EnableNav))
+                  go_to_page(LauncherPage::GameFiles);
+                ImGui::PopID();
+                const bool hovered = ImGui::IsItemHovered() || ImGui::IsItemFocused();
+                ImGui::SetItemTooltip("%s", Tr("Not installed: extract it in Game Files."));
+                ImDrawList* list = ImGui::GetWindowDrawList();
+                list->AddRectFilled(min, ImVec2(min.x + box.x, min.y + box.y),
+                                    arcade::Colour(arcade::GLASS, hovered ? 1.0f : 0.85f),
+                                    box.y * 0.5f);
+                list->AddText(ImVec2(min.x + 10.0f * scale, min.y + 4.0f * scale),
+                              ImGui::GetColorU32(ImVec4(1.0f, 0.75f, 0.3f, 1.0f)), text.c_str());
+                row_y += box.y + 6.0f * scale;
+              }
+            }
+
+            // Which savestate the next PLAY starts from, when there are any.
+            if (!launcher_savestates.empty())
+            {
+              const char* label = Tr("Start from savestate");
+              const std::string preview =
+                  selected_savestate >= 0 ?
+                      SavestateLabel(
+                          launcher_savestates[static_cast<std::size_t>(selected_savestate)],
+                          selected_savestate == 0) :
+                      std::string(Tr("Normal boot"));
+              const float combo_width = 240.0f * scale;
+              const float padding = 10.0f * scale;
+              const float total = padding * 2.0f + ImGui::CalcTextSize(label).x +
+                                  ImGui::GetStyle().ItemSpacing.x + combo_width;
+              const ImVec2 min(centre_x - total * 0.5f, row_y);
+              ImGui::GetWindowDrawList()->AddRectFilled(
+                  min, ImVec2(min.x + total, min.y + ImGui::GetFrameHeight() + 8.0f * scale),
+                  arcade::Colour(arcade::GLASS), 8.0f * scale);
+              ImGui::SetCursorScreenPos(ImVec2(min.x + padding, min.y + 4.0f * scale));
+              ImGui::AlignTextToFramePadding();
+              ImGui::TextUnformatted(label);
+              ImGui::SameLine();
+              ImGui::SetNextItemWidth(combo_width);
+              if (ImGui::BeginCombo("##launch_savestate", preview.c_str()))
+              {
+                const bool normal_boot_selected = selected_savestate < 0;
+                if (ImGui::Selectable(Tr("Normal boot"), normal_boot_selected))
+                  selected_savestate = -1;
+                if (normal_boot_selected)
+                  ImGui::SetItemDefaultFocus();
+                for (std::size_t i = 0; i < launcher_savestates.size(); ++i)
+                {
+                  const std::string state = SavestateLabel(launcher_savestates[i], i == 0);
+                  const bool selected = selected_savestate == static_cast<int>(i);
+                  if (ImGui::Selectable(state.c_str(), selected))
+                    selected_savestate = static_cast<int>(i);
+                  if (selected)
+                    ImGui::SetItemDefaultFocus();
+                }
+                ImGui::EndCombo();
+              }
+              if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("%s", Tr("Savestates are available for solo play only."));
+            }
+
+            // X: host or join a Netplay session (the Netplay window below).
+            bool open_session = false;
+            ImGui::SetNextWindowPos(ImGui::GetMainViewport()->GetCenter(), ImGuiCond_Always,
+                                    ImVec2(0.5f, 0.5f));
+            ImGui::SetNextWindowSize(ImVec2(380.0f * scale, 0.0f));
+            if (ImGui::BeginPopupModal("##netplay_choice", nullptr,
+                                       ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoTitleBar))
+            {
+              arcade::TitleBadge(Tr("Netplay"), fonts.bold, ImGui::GetFontSize() * 1.3f, scale);
+              ImGui::Spacing();
+              const float width = ImGui::GetContentRegionAvail().x;
+              if (ImGui::Button(Tr("Host Netplay"), ImVec2(width, 40.0f * scale)))
+              {
+                netplay_dialog_mode = LaunchMode::Host;
+                open_session = true;
+                ImGui::CloseCurrentPopup();
+              }
+              if (ImGui::Button(Tr("Join Netplay"), ImVec2(width, 40.0f * scale)))
+              {
+                netplay_dialog_mode = LaunchMode::Join;
+                open_session = true;
+                ImGui::CloseCurrentPopup();
+              }
+              ImGui::Spacing();
+              if (ImGui::Button(Tr("Cancel"), ImVec2(width, 32.0f * scale)) || popup_cancel)
+                ImGui::CloseCurrentPopup();
+              ImGui::EndPopup();
+            }
+            if (open_session)
+              ImGui::OpenPopup("Netplay##session");
+
+            // Y: the patch notes, over the scene.
+            ImGui::SetNextWindowPos(ImGui::GetMainViewport()->GetCenter(), ImGuiCond_Always,
+                                    ImVec2(0.5f, 0.5f));
+            ImGui::SetNextWindowSize(
+                ImVec2(std::min(window_size.x * 0.8f, 720.0f * scale), window_size.y * 0.78f));
+            if (ImGui::BeginPopupModal("##whats_new", nullptr,
+                                       ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoTitleBar))
+            {
+              arcade::TitleBadge(Tr("What's new"), fonts.bold, ImGui::GetFontSize() * 1.3f,
+                                 scale);
+              ImGui::Spacing();
+              const float close_height = 34.0f * scale;
+              const ImVec2 room = ImGui::GetContentRegionAvail();
+              DrawPatchNotes(patch_notes, fonts.bold,
+                             ImVec2(room.x, std::max(1.0f, room.y - close_height -
+                                                               ImGui::GetStyle().ItemSpacing.y *
+                                                                   2.0f)),
+                             pad_scroll);
+              ImGui::Spacing();
+              if (ImGui::Button(Tr("Close"), ImVec2(ImGui::GetContentRegionAvail().x,
+                                                    close_height)) ||
+                  popup_cancel)
+                ImGui::CloseCurrentPopup();
+              ImGui::EndPopup();
             }
           }
           // Which game PLAY starts: one button each, the ones not extracted
@@ -4446,6 +4574,8 @@ int main(int argc, char** argv)
 
           // Under PLAY, the Netplay links: side by side when they fit the
           // column, one under the other when a language's names are too long.
+          if (!has_title)
+          {
           ImGui::Spacing();
           const float link_padding = ImGui::GetStyle().FramePadding.x * 2.0f;
           const float links_width = ImGui::CalcTextSize(Tr("Host Netplay")).x +
@@ -4509,6 +4639,7 @@ int main(int argc, char** argv)
             // says so under the pointer.
             if (ImGui::IsItemHovered())
               ImGui::SetTooltip("%s", Tr("Savestates are available for solo play only."));
+          }
           }
 
           // Kept in the middle of the window as it grows or shrinks with the
@@ -4745,6 +4876,8 @@ int main(int argc, char** argv)
             ImGui::EndPopup();
           }
 
+          if (!has_title)
+          {
           if (show_patch_notes)
           {
             // The cards go under whichever column ends lower.
@@ -4818,6 +4951,7 @@ int main(int argc, char** argv)
             break;
           default:
             break;
+          }
           }
         }
         else
@@ -6007,17 +6141,103 @@ int main(int argc, char** argv)
       }
     }
     ImGui::EndChild();
+    ImDrawList* window_list = ImGui::GetWindowDrawList();
+    if (!footer_error.empty())
     {
-      std::lock_guard lock(dialog.mutex);
-      if (!dialog.error.empty())
-        ImGui::TextColored(ImVec4(1.0f, 0.35f, 0.3f, 1.0f), "%s", dialog.error.c_str());
+      const float width = window_size.x - margin * 2.0f;
+      const std::string shown = FitTextToWidth(ImGui::GetFont(), ImGui::GetFontSize(), footer_error,
+                                               width - 20.0f * scale);
+      const ImVec2 min(window_origin.x + margin, window_origin.y + bar_top - error_height);
+      const ImVec2 box(ImGui::CalcTextSize(shown.c_str()).x + 20.0f * scale,
+                       error_height - 4.0f * scale);
+      window_list->AddRectFilled(min, ImVec2(min.x + box.x, min.y + box.y),
+                                 arcade::Colour(arcade::GLASS), box.y * 0.5f);
+      window_list->AddText(ImVec2(min.x + 10.0f * scale,
+                                  min.y + (box.y - ImGui::GetTextLineHeight()) * 0.5f),
+                           ImGui::GetColorU32(ImVec4(1.0f, 0.35f, 0.3f, 1.0f)), shown.c_str());
+      ImGui::SetCursorScreenPos(min);
+      ImGui::Dummy(box);
+      if (shown != footer_error)
+        ImGui::SetItemTooltip("%s", footer_error.c_str());
     }
-    ImGui::Spacing();
-    ImGui::Separator();
-    // The controller's state, after a picture of what the game reads (a
-    // gamepad of its kind, or the keyboard); on the right, while a gamepad or
-    // the keyboard is in use, what its buttons or keys do here.
+
+    // The bar of pages.
+    arcade::DrawBar(window_list, ImVec2(window_origin.x, window_origin.y + bar_top),
+                    ImVec2(window_origin.x + window_size.x, window_origin.y + window_size.y),
+                    scale);
+    const float status_top = window_origin.y + bar_top + bar_line + 4.0f * scale;
+    const float bar_left = window_origin.x + margin;
+    const float bar_right = window_origin.x + window_size.x - margin;
+    // Its first line, from the left: the language; the controller's state,
+    // after a picture of what the game reads (a gamepad of its kind, or the
+    // keyboard); what its buttons or keys do here; and on the right a new
+    // version, when there is one, and the CPU core PLAY will use
+    // (MODERNGEKKO_STATICRECOMP wins over config.ini, as in the runner).
+    ImGui::SetCursorScreenPos(ImVec2(bar_left, status_top));
     {
+      const std::string previous = config.language;
+      if (DrawLanguageMenu(config.language, system_language, scale, true))
+      {
+        config.resolution = resolutions[resolution_index].text;
+        config.show_fps_in_title = show_fps_in_title;
+        config.controller = selected_controller;
+        std::string error;
+        if (moderngekko::frontend::SaveConfig(user_directory, config, &error))
+        {
+          moderngekko::frontend::ActiveLanguage() =
+              moderngekko::frontend::ResolveLanguage(config.language, system_language);
+        }
+        else
+        {
+          config.language = previous;
+          std::lock_guard lock(dialog.mutex);
+          dialog.error = std::move(error);
+        }
+      }
+    }
+    float pills_left = bar_right;
+    {
+      const bool static_recomp = cpu_core_override.empty() ?
+                                     config.cpu_core == "staticrecomp" :
+                                     cpu_core_override.front() != '0';
+      const char* core = static_recomp ? "StaticRecomp" : "JIT64";
+      const float core_width = ImGui::CalcTextSize(core).x + 20.0f * scale;
+      float pills_width = core_width;
+#if defined(MODERNGEKKO_FRONTEND_VERSION) && defined(MODERNGEKKO_UPDATE_REPOSITORY)
+      const moderngekko::frontend::UpdateCheck::Status update = update_check.Get();
+      const bool new_version =
+          update.state == moderngekko::frontend::UpdateCheck::State::Available;
+      const float notice_width =
+          new_version ? ImGui::CalcTextSize(
+                            Format(Tr("NEW VERSION \xC2\xB7 %s"), update.latest.c_str()).c_str())
+                                .x +
+                            20.0f * scale :
+                        0.0f;
+      if (new_version)
+        pills_width += notice_width + ImGui::GetStyle().ItemSpacing.x;
+#endif
+      pills_left = bar_right - pills_width;
+      ImGui::SetCursorScreenPos(ImVec2(pills_left, status_top));
+#if defined(MODERNGEKKO_FRONTEND_VERSION) && defined(MODERNGEKKO_UPDATE_REPOSITORY)
+      if (new_version)
+      {
+        DrawNewVersionNotice(update.latest, scale);
+        ImGui::SameLine();
+      }
+#endif
+      ImGui::SetCursorScreenPos(
+          ImVec2(bar_right - core_width,
+                 status_top + std::max(0.0f, (status_height - ImGui::GetTextLineHeight() -
+                                              6.0f * scale) *
+                                                 0.5f)));
+      DrawStatusPill(core, static_recomp ? ImVec4(1.0f, 0.75f, 0.3f, 1.0f) : LAUNCHER_ACCENT,
+                     scale, false);
+    }
+    {
+      const float language_width = 140.0f * scale;
+      const ImVec2 line_min(bar_left + language_width + 14.0f * scale,
+                            status_top + (status_height - ImGui::GetTextLineHeight()) * 0.5f);
+      const float right = pills_left - 14.0f * scale;
       const std::string status = Format(Tr("Controller: %s"), controller_status.Text().c_str());
       std::optional<DeviceIcon> status_icon;
       if (controller_index >= 0 && controller_index < static_cast<int>(controllers.size()))
@@ -6042,9 +6262,7 @@ int main(int argc, char** argv)
                  !popup_was_open)
           hints = {{PadButton::North, std::nullopt, Tr("Test buttons"), {}},
                    {PadButton::South, std::nullopt, Tr("Accept"), {enter}},
-                   {PadButton::East, std::nullopt, Tr("Go back"), {escape}},
-                   {PadButton::LeftShoulder, PadButton::RightShoulder, Tr("Pages"),
-                    {{"Q"}, {"E"}}}};
+                   {PadButton::East, std::nullopt, Tr("Go back"), {escape}}};
         else if (viewer_was_open)
           hints = {{PadButton::LeftShoulder, PadButton::RightShoulder, Tr("Newer / older"),
                     {{"", -1}, {"", 1}}},
@@ -6054,39 +6272,62 @@ int main(int argc, char** argv)
                    {PadButton::East, std::nullopt, Tr("Go back"), {escape}}};
         else
           hints = {{PadButton::South, std::nullopt, Tr("Accept"), {enter}},
-                   {PadButton::East, std::nullopt, Tr("Go back"), {escape}},
-                   {PadButton::LeftShoulder, PadButton::RightShoulder, Tr("Pages"),
-                    {{"Q"}, {"E"}}}};
+                   {PadButton::East, std::nullopt, Tr("Go back"), {escape}}};
       }
+      float x = line_min.x;
       if (status_icon)
       {
         const float icon_height = std::floor(ImGui::GetTextLineHeight() * 0.95f);
-        const ImVec2 at = ImGui::GetCursorScreenPos();
-        const float icon_width = DrawDeviceIcon(
-            ImGui::GetWindowDrawList(),
-            ImVec2(at.x, at.y + std::floor((ImGui::GetTextLineHeight() - icon_height) * 0.5f)),
-            icon_height, *status_icon);
-        ImGui::Dummy(ImVec2(icon_width, ImGui::GetTextLineHeight()));
-        ImGui::SameLine(0.0f, 6.0f * scale);
+        x += DrawDeviceIcon(
+                 window_list,
+                 ImVec2(x, line_min.y + std::floor((ImGui::GetTextLineHeight() - icon_height) *
+                                                   0.5f)),
+                 icon_height, *status_icon) +
+             6.0f * scale;
       }
-      if (hints.empty())
-      {
-        ImGui::TextWrapped("%s", status.c_str());
-      }
-      else
-      {
-        const ImVec2 line_min = ImGui::GetCursorScreenPos();
-        const float right = line_min.x + ImGui::GetContentRegionAvail().x;
-        const float hints_width =
-            DrawFooterHints(hints, pad_style, keys_shown, fonts.bold, line_min, right, false);
-        ImGui::TextUnformatted(FitTextToWidth(ImGui::GetFont(), ImGui::GetFontSize(), status,
-                                              ImGui::GetContentRegionAvail().x - hints_width -
-                                                  ImGui::GetStyle().ItemSpacing.x * 3.0f)
-                                   .c_str());
+      const float hints_width =
+          hints.empty() ? 0.0f :
+                          DrawFooterHints(hints, pad_style, keys_shown, fonts.bold, line_min,
+                                          right, false);
+      const std::string shown = FitTextToWidth(
+          ImGui::GetFont(), ImGui::GetFontSize(), status,
+          std::max(0.0f, right - x - hints_width - ImGui::GetStyle().ItemSpacing.x * 3.0f));
+      window_list->AddText(ImVec2(x, line_min.y), ImGui::GetColorU32(ImGuiCol_Text),
+                           shown.c_str());
+      if (!hints.empty())
         DrawFooterHints(hints, pad_style, keys_shown, fonts.bold, line_min, right, true);
-      }
     }
-    // What B closes next frame, before it goes back to the sidebar.
+    // Its second line: the pages, between LB and RB (Q and E on the
+    // keyboard). B (or Escape) comes back here, on the page shown; up goes
+    // into the page.
+    {
+      std::vector<const char*> tab_labels;
+      int shown_tab = 0;
+      for (std::size_t i = 0; i < LAUNCHER_PAGES.size(); ++i)
+      {
+        tab_labels.push_back(Tr(LAUNCHER_PAGES[i].second));
+        if (LAUNCHER_PAGES[i].first == current_page)
+          shown_tab = static_cast<int>(i);
+      }
+      const bool tab_keys = last_input == LastInput::Keyboard ||
+                            (io.BackendFlags & ImGuiBackendFlags_HasGamepad) == 0;
+      bool tabs_focused = false;
+      const int tab = arcade::Tabs(tab_labels, shown_tab, fonts.bold, bar_left, bar_right,
+                                   status_top + status_height + 2.0f * scale, tabs_height, scale,
+                                   pad_style, tab_keys, focus_sidebar, &tabs_focused);
+      focus_sidebar = false;
+      if (tab >= 0)
+      {
+        const LauncherPage page = LAUNCHER_PAGES[static_cast<std::size_t>(tab)].first;
+        go_to_page(page);
+        // Choosing Controls tests the controller, even when the page is
+        // already shown (reached with LB or RB).
+        if (page == LauncherPage::Controls)
+          controls_testing = true;
+      }
+      sidebar_was_focused = tabs_focused;
+    }
+    // What B closes next frame, before it goes back to the bar of pages.
     popup_was_open =
         ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel);
     item_was_active = ImGui::IsAnyItemActive();

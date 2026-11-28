@@ -44,6 +44,10 @@ struct Translation
 inline constexpr Translation SPANISH_TEXTS[] = {
     // Top bar, sidebar and footer
     {"PLAY", "JUGAR"},
+    {"Choose a game", "Elegir juego"},
+    {"What's new", "Novedades"},
+    {"Netplay", "Netplay"},
+    {"Close", "Cerrar"},
     {"Settings", "Ajustes"},
     {"Controls", "Controles"},
     {"Game Files", "Archivos del juego"},
@@ -627,7 +631,6 @@ inline constexpr Translation SPANISH_TEXTS[] = {
     {"Story campaigns, characters, tracks and more, made by the community, without changing the original game files.", "Campañas de historia, personajes, pistas y más, creados por la comunidad, sin modificar los archivos originales del juego."},
     {"A long-term goal of the project.", "Una meta a largo plazo del proyecto."},
     // Moving through the launcher with a gamepad
-    {"Pages", "Páginas"},
     {"Newer / older", "Más reciente / más antigua"},
     {"Hold to stop testing", "Mantén para dejar de probar"},
     {"Stop testing", "Dejar de probar"},
@@ -640,6 +643,10 @@ inline constexpr Translation SPANISH_TEXTS[] = {
 inline constexpr Translation JAPANESE_TEXTS[] = {
     // Top bar, sidebar and footer
     {"PLAY", "プレイ"},
+    {"Choose a game", "ゲームを選択"},
+    {"What's new", "パッチノート"},
+    {"Netplay", "ネットプレイ"},
+    {"Close", "閉じる"},
     {"Settings", "設定"},
     {"Controls", "操作"},
     {"Game Files", "ゲームファイル"},
@@ -1195,7 +1202,6 @@ inline constexpr Translation JAPANESE_TEXTS[] = {
     {"Story campaigns, characters, tracks and more, made by the community, without changing the original game files.", "ストーリー、キャラクター、コースなど、コミュニティが作るコンテンツ。元のゲームファイルは変更しません。"},
     {"A long-term goal of the project.", "プロジェクトの長期的な目標です。"},
     // Moving through the launcher with a gamepad
-    {"Pages", "ページ"},
     {"Newer / older", "新しい / 古い"},
     {"Hold to stop testing", "長押しでテスト終了"},
     {"Stop testing", "テスト終了"},
