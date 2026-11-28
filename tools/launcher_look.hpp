@@ -22,9 +22,9 @@ namespace moderngekko::frontend::ui
 {
 namespace fs = std::filesystem;
 
-// SR-Source accent: a neon lime green. Shared by the theme and the few texts that
-// pick a colour explicitly (the Play header and the READY status).
-inline constexpr ImVec4 LAUNCHER_ACCENT(0.72f, 1.0f, 0.18f, 1.0f);
+// SR-Source accent: the logo's green-yellow. Shared by the theme and the few
+// texts that pick a colour explicitly (the Play header and the READY status).
+inline constexpr ImVec4 LAUNCHER_ACCENT(0.82f, 0.95f, 0.05f, 1.0f);
 
 // stb_truetype (used by ImGui) reads TrueType outlines only, and a file it cannot
 // parse would trip an assert. Check the header before handing a file over.

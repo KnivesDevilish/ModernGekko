@@ -833,8 +833,8 @@ std::string SystemLanguageCode()
   return language;
 }
 
-// The language menu: with compact, the small one in the bar of pages (the
-// launcher's own); otherwise under a LANGUAGE label at the bottom of a
+// The language menu: with compact, the menu alone (Settings has it in its
+// LANGUAGE section); otherwise under a LANGUAGE label at the bottom of a
 // column. setting is config.ini's "language" value; returns true when the
 // player picks another one.
 bool DrawLanguageMenu(std::string& setting, std::string_view system_language, float scale,
@@ -862,15 +862,15 @@ bool DrawLanguageMenu(std::string& setting, std::string_view system_language, fl
   const auto current = std::ranges::find_if(
       choices, [&](const auto& choice) { return setting == choice.first; });
   bool changed = false;
-  // Compact, in the bar of pages: a small menu, its tooltip says what it is.
-  ImGui::SetNextItemWidth(compact ? 140.0f * scale : -1.0f);
-  if (ImGui::BeginCombo("##language",
+  // Compact (in Settings, under its LANGUAGE heading): only the menu.
+  ImGui::SetNextItemWidth(-1.0f);
+  if (arcade::BeginSelector("##language",
                         current != choices.end() ? current->second.c_str() : automatic.c_str()))
   {
     for (const auto& [value, label] : choices)
     {
       const bool selected = setting == value;
-      if (ImGui::Selectable(label.c_str(), selected) && !selected)
+      if (arcade::SelectorItem(label.c_str(), selected) && !selected)
       {
         setting = value;
         changed = true;
@@ -878,11 +878,9 @@ bool DrawLanguageMenu(std::string& setting, std::string_view system_language, fl
       if (selected)
         ImGui::SetItemDefaultFocus();
     }
-    ImGui::EndCombo();
+    arcade::EndSelector();
   }
-  if (compact)
-    ImGui::SetItemTooltip("%s", Tr("LANGUAGE"));
-  else
+  if (!compact)
     ImGui::Unindent(12.0f * scale);
   return changed;
 }
@@ -1361,7 +1359,7 @@ bool DrawVersionSection(moderngekko::frontend::UpdateCheck& updates, bool& check
     break;
   }
   ImGui::PopTextWrapPos();
-  const bool toggled = ImGui::Checkbox(Tr("Check for updates when the launcher opens"),
+  const bool toggled = arcade::Switch(Tr("Check for updates when the launcher opens"),
                                        &check_on_open);
   EndSection();
   return toggled;
@@ -2860,6 +2858,33 @@ int main(int argc, char** argv)
   const bool has_title =
       title_scene.Load(renderer, release_directory, window_pixels_wide * 2.0f);
   TitleIntro title_intro;
+  // The title screen's corner: the version and the build's name
+  // (MODERNGEKKO_BUILD_ID, the day and the commit), like "v0.3.0 · BUILD
+  // 261128.5b2be4b".
+  std::string title_build;
+#ifdef MODERNGEKKO_TITLE_VERSION
+  title_build = std::string("v") + MODERNGEKKO_TITLE_VERSION;
+#endif
+#ifdef MODERNGEKKO_BUILD_ID
+  if (*MODERNGEKKO_BUILD_ID)
+    title_build += (title_build.empty() ? std::string() : std::string("  \xC2\xB7  ")) +
+                   "BUILD " + MODERNGEKKO_BUILD_ID;
+#endif
+  // A page's glass switches on like an old TV when it opens
+  // (launcher_arcade.hpp).
+  arcade::TvSwitchOn page_switch_on;
+  arcade::TvSwitchOn popup_switch_on;
+  // A window of ours (What's new, Netplay) on glass: drawn under its
+  // contents, and switching on like the pages.
+  const auto draw_popup_glass = [&](double now) {
+    const float scale_now = ImGui::GetStyle().FontScaleDpi;
+    const ImVec2 min = ImGui::GetWindowPos();
+    const ImVec2 max(min.x + ImGui::GetWindowWidth(), min.y + ImGui::GetWindowHeight());
+    // Called first thing in the window, so it is under what the window draws.
+    arcade::Glass(ImGui::GetWindowDrawList(), min, max, 20.0f * scale_now, scale_now, 0.62f);
+    popup_switch_on.Draw(ImGui::GetForegroundDrawList(), min, max, 20.0f * scale_now, now,
+                         scale_now);
+  };
   // The PLAY page's PATCH NOTES (MODERNGEKKO_LAUNCHER_PATCH_NOTES), read in
   // the interface's language again when it changes.
   const std::string patch_notes_text =
@@ -3958,7 +3983,8 @@ int main(int argc, char** argv)
         title_scene.TrackMouse(io.MousePos, io.DisplaySize, io.DeltaTime);
         const ImGuiViewport* viewport = ImGui::GetMainViewport();
         DrawTitleScreen(ImGui::GetForegroundDrawList(), viewport->Pos, viewport->Size,
-                        title_intro, now, title_scene, fonts.bold, Tr("PRESS ANY BUTTON"));
+                        title_intro, now, title_scene, fonts.bold, Tr("PRESS ANY BUTTON"),
+                        title_build.c_str());
         ImGui::Render();
         SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
         SDL_RenderClear(renderer);
@@ -3982,6 +4008,9 @@ int main(int argc, char** argv)
       if (current_page == LauncherPage::Controls)
         controls_testing = !page_by_shoulder;
       shown_page = current_page;
+      page_switch_on.Start(static_cast<double>(SDL_GetTicksNS()) / 1e9);
+      if (title_scene.PageSound())
+        music.PlayEffect(*title_scene.PageSound());
     }
     page_by_shoulder = false;
     const bool testing_controls = current_page == LauncherPage::Controls && controls_testing;
@@ -4171,12 +4200,11 @@ int main(int argc, char** argv)
     ImGui::SetNextWindowPos(viewport->WorkPos);
     ImGui::SetNextWindowSize(viewport->WorkSize);
     // With a background picture the window itself is see-through (the
-    // picture is drawn under it, see RenderBackground); the pages' cards keep
-    // their own colour, so text stays readable.
+    // picture is drawn under it, see RenderBackground); the pages are on
+    // glass over it (launcher_arcade.hpp), the scene blurred through it.
     if (background.texture || has_title)
       ImGui::SetNextWindowBgAlpha(0.0f);
-    // The window has no padding of its own: the bar of pages goes from edge
-    // to edge, and the page's card keeps the usual margin.
+    // The window has no padding of its own: the glass keeps its margins.
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
     ImGui::Begin(MODERNGEKKO_FRONTEND_NAME " Launcher", nullptr,
                  ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove |
@@ -4184,52 +4212,55 @@ int main(int argc, char** argv)
     ImGui::PopStyleVar();
     const ImVec2 window_origin = ImGui::GetWindowPos();
     const ImVec2 window_size = ImGui::GetWindowSize();
+    const double frame_time = static_cast<double>(SDL_GetTicksNS()) / 1e9;
+    {
+      arcade::Backdrop& backdrop = arcade::GlassBackdrop();
+      SDL_Texture* blurred = has_title ? title_scene.Blurred() : nullptr;
+      backdrop.blurred = blurred ? static_cast<ImTextureID>(reinterpret_cast<std::uintptr_t>(blurred))
+                                 : ImTextureID_Invalid;
+      backdrop.origin = window_origin;
+      backdrop.size = window_size;
+    }
     const float margin = ImGui::GetStyle().WindowPadding.x;
-    // The bar along the bottom (launcher_arcade.hpp): a line with the
-    // language, the controller's state, what its buttons do and the CPU
-    // core; under it the pages, between LB and RB.
-    const float bar_line = std::max(2.0f, std::round(3.0f * scale));
-    const float status_height = ImGui::GetFrameHeight();
-    const float tabs_height = std::round(38.0f * scale);
-    const float bar_height = bar_line + 6.0f * scale + status_height + tabs_height + 2.0f * scale;
-    const float bar_top = window_size.y - bar_height;
+    // The carousel of pages along the bottom, over the scene.
+    const float carousel_top = window_size.y - arcade::CarouselHeight(scale) - 10.0f * scale;
     std::string footer_error;
     {
       std::lock_guard lock(dialog.mutex);
       footer_error = dialog.error;
     }
-    // An error sits just above the bar, on a dark pill so it reads over the
-    // scene too.
+    // An error sits just above the carousel, on glass.
     const float error_height =
-        footer_error.empty() ? 0.0f : ImGui::GetTextLineHeight() + 12.0f * scale;
-    // The PLAY page over the title scene has no card: the scene shows whole,
-    // with PLAY under its logo.
+        footer_error.empty() ? 0.0f : ImGui::GetTextLineHeight() + 14.0f * scale;
+    const float page_bottom = carousel_top - error_height - 8.0f * scale;
+    // The PLAY page over the title scene has no glass: the scene shows whole,
+    // with LAUNCH under its logo.
     const bool scene_play = has_title && current_page == LauncherPage::Play && current_metadata;
+    ImVec2 card_min(window_origin.x + margin, window_origin.y + margin);
+    ImVec2 card_max(window_origin.x + window_size.x - margin, window_origin.y + page_bottom);
+    const float card_rounding = 22.0f * scale;
     if (scene_play)
     {
       ImGui::SetCursorPos(ImVec2(0.0f, 0.0f));
-      ImGui::BeginChild("##page", ImVec2(window_size.x, std::max(1.0f, bar_top - error_height)),
+      ImGui::BeginChild("##page", ImVec2(window_size.x, std::max(1.0f, page_bottom)),
                         ImGuiChildFlags_None,
                         ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_NoScrollbar |
                             ImGuiWindowFlags_NoScrollWithMouse);
     }
     else
     {
-      ImGui::SetCursorPos(ImVec2(margin, margin));
-      ImGui::PushStyleColor(ImGuiCol_ChildBg, arcade::GLASS);
-      ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(arcade::LIME.x, arcade::LIME.y,
-                                                    arcade::LIME.z, 0.22f));
-      ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 14.0f * scale);
-      ImGui::BeginChild("##page",
-                        ImVec2(window_size.x - margin * 2.0f,
-                               std::max(1.0f, bar_top - error_height - margin * 1.6f)),
-                        ImGuiChildFlags_Borders | ImGuiChildFlags_AlwaysUseWindowPadding);
+      // The page's glass, drawn on the window under the page.
+      arcade::Glass(ImGui::GetWindowDrawList(), card_min, card_max, card_rounding, scale);
+      ImGui::SetCursorScreenPos(card_min);
+      ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(30.0f * scale, 22.0f * scale));
+      ImGui::BeginChild("##page", ImVec2(card_max.x - card_min.x, card_max.y - card_min.y),
+                        ImGuiChildFlags_AlwaysUseWindowPadding,
+                        ImGuiWindowFlags_NoBackground);
       ImGui::PopStyleVar();
-      ImGui::PopStyleColor(2);
     }
     if (enter_page)
     {
-      // The focus goes to the page's first control (PLAY on the PLAY page).
+      // The focus goes to the page's first control (LAUNCH on the PLAY page).
       ImGuiWindow* page_window = ImGui::GetCurrentWindow();
       ImGui::FocusWindow(page_window);
       ImGui::NavInitWindow(page_window, true);
@@ -4334,64 +4365,66 @@ int main(int argc, char** argv)
           }
           else
           {
-            // Over the title scene: PLAY under its tagline, the hints under
-            // it (what A, Y and X do), and what isn't ready yet. Each part
-            // stands on its own dark pill, so it reads over the scene.
-            const ImVec2 spot = arcade::ScenePoint(ImVec2(0.515f, 0.405f), window_size,
+            // Over the title scene, under its logo: LAUNCH, and beside it two
+            // small round buttons, Y for what's new and X for Netplay (their
+            // names show when pointed at). Nothing else, so the scene stays
+            // clear.
+            const ImVec2 spot = arcade::ScenePoint(ImVec2(0.5f, 0.375f), window_size,
                                                    title_scene.PictureAspect());
             const float centre_x = window_origin.x + spot.x;
             float row_y = window_origin.y + spot.y;
             const bool glyph_keys = last_input == LastInput::Keyboard ||
                                     (io.BackendFlags & ImGuiBackendFlags_HasGamepad) == 0;
-            const float pill_height = std::round(36.0f * scale);
+            const float pill_height = std::round(38.0f * scale);
             const float pill_width =
-                arcade::PlayPillWidth(fonts.bold, pill_height, Tr("PLAY"), glyph_keys);
-            ImGui::SetCursorScreenPos(ImVec2(centre_x - pill_width * 0.5f, row_y));
-            if (arcade::PlayPill("##play", Tr("PLAY"), fonts.bold, pill_height, pad_style,
-                                 glyph_keys))
+                arcade::LaunchPillWidth(fonts.bold, pill_height, Tr("LAUNCH"), glyph_keys);
+            const float round_size = std::round(30.0f * scale);
+            const float round_gap = 12.0f * scale;
+            const bool has_notes = !patch_notes.empty();
+            const float row_width = pill_width + (round_size + round_gap) * (has_notes ? 2.0f : 1.0f);
+            float row_x = centre_x - row_width * 0.5f;
+            ImGui::SetCursorScreenPos(ImVec2(row_x, row_y));
+            if (arcade::LaunchPill("##launch", Tr("LAUNCH"), fonts.bold, pill_height, scale,
+                                   pad_style, glyph_keys))
               press_play();
-            row_y += pill_height + 10.0f * scale;
-
-            enum class HintAction
+            row_x += pill_width + round_gap;
+            bool open_notes = false;
+            if (has_notes)
             {
-              Play,
-              Notes,
-              Netplay,
-            };
-            std::vector<arcade::Hint> hints;
-            std::vector<HintAction> actions;
-            if (moderngekko::frontend::PlaysSeveralGames())
-            {
-              hints.push_back({PadButton::South, "Enter", Tr("Choose a game")});
-              actions.push_back(HintAction::Play);
+              ImGui::SetCursorScreenPos(ImVec2(row_x, row_y + (pill_height - round_size) * 0.5f));
+              open_notes = arcade::RoundButton("##whats_new_button", PadButton::North, "N",
+                                               Tr("What's new"), fonts.bold, round_size, scale,
+                                               pad_style, glyph_keys);
+              row_x += round_size + round_gap;
             }
-            if (!patch_notes.empty())
-            {
-              hints.push_back({PadButton::North, nullptr, Tr("What's new")});
-              actions.push_back(HintAction::Notes);
-            }
-            hints.push_back({PadButton::West, nullptr, Tr("Netplay")});
-            actions.push_back(HintAction::Netplay);
-            const float hint_height = std::round(19.0f * scale);
-            const int hint = arcade::HintRow(hints, fonts.bold, centre_x, row_y, hint_height,
-                                             pad_style, glyph_keys);
-            row_y += hint_height + 12.0f * scale;
-            const auto chosen = [&](HintAction action) {
-              return hint >= 0 && actions[static_cast<std::size_t>(hint)] == action;
-            };
-            if (chosen(HintAction::Play))
-              press_play();
-            // Y and X on a gamepad do what their hints say.
+            ImGui::SetCursorScreenPos(ImVec2(row_x, row_y + (pill_height - round_size) * 0.5f));
+            bool open_netplay =
+                arcade::RoundButton("##netplay_button", PadButton::West, "M", Tr("Netplay"),
+                                    fonts.bold, round_size, scale, pad_style, glyph_keys);
+            row_y += pill_height + 34.0f * scale;
+            // Y and X on a gamepad, N and M on the keyboard, do what the
+            // round buttons do.
             const bool no_popup = !ImGui::IsPopupOpen(
                 "", ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel);
-            const bool pad_free = no_popup && pad_moves && !fading && !game_select.IsOpen();
-            if (chosen(HintAction::Notes) ||
-                (pad_free && !patch_notes.empty() &&
-                 ImGui::IsKeyPressed(ImGuiKey_GamepadFaceUp, false)))
+            const bool keys_free = no_popup && !fading && !game_select.IsOpen() &&
+                                   !io.WantTextInput;
+            if (keys_free && has_notes &&
+                ((pad_moves && ImGui::IsKeyPressed(ImGuiKey_GamepadFaceUp, false)) ||
+                 ImGui::IsKeyPressed(ImGuiKey_N, false)))
+              open_notes = true;
+            if (keys_free && ((pad_moves && ImGui::IsKeyPressed(ImGuiKey_GamepadFaceLeft, false)) ||
+                              ImGui::IsKeyPressed(ImGuiKey_M, false)))
+              open_netplay = true;
+            if (open_notes)
+            {
               ImGui::OpenPopup("##whats_new");
-            if (chosen(HintAction::Netplay) ||
-                (pad_free && ImGui::IsKeyPressed(ImGuiKey_GamepadFaceLeft, false)))
+              popup_switch_on.Start(frame_time);
+            }
+            if (open_netplay)
+            {
               ImGui::OpenPopup("##netplay_choice");
+              popup_switch_on.Start(frame_time);
+            }
 
             // A game that isn't installed yet: a note that leads to Game Files.
             if (moderngekko::frontend::PlaysSeveralGames())
@@ -4413,9 +4446,8 @@ int main(int argc, char** argv)
                 const bool hovered = ImGui::IsItemHovered() || ImGui::IsItemFocused();
                 ImGui::SetItemTooltip("%s", Tr("Not installed: extract it in Game Files."));
                 ImDrawList* list = ImGui::GetWindowDrawList();
-                list->AddRectFilled(min, ImVec2(min.x + box.x, min.y + box.y),
-                                    arcade::Colour(arcade::GLASS, hovered ? 1.0f : 0.85f),
-                                    box.y * 0.5f);
+                arcade::Glass(list, min, ImVec2(min.x + box.x, min.y + box.y), box.y * 0.5f,
+                              scale, hovered ? 0.7f : 0.55f);
                 list->AddText(ImVec2(min.x + 10.0f * scale, min.y + 4.0f * scale),
                               ImGui::GetColorU32(ImVec4(1.0f, 0.75f, 0.3f, 1.0f)), text.c_str());
                 row_y += box.y + 6.0f * scale;
@@ -4437,9 +4469,9 @@ int main(int argc, char** argv)
               const float total = padding * 2.0f + ImGui::CalcTextSize(label).x +
                                   ImGui::GetStyle().ItemSpacing.x + combo_width;
               const ImVec2 min(centre_x - total * 0.5f, row_y);
-              ImGui::GetWindowDrawList()->AddRectFilled(
-                  min, ImVec2(min.x + total, min.y + ImGui::GetFrameHeight() + 8.0f * scale),
-                  arcade::Colour(arcade::GLASS), 8.0f * scale);
+              arcade::Glass(ImGui::GetWindowDrawList(), min,
+                            ImVec2(min.x + total, min.y + ImGui::GetFrameHeight() + 8.0f * scale),
+                            (ImGui::GetFrameHeight() + 8.0f * scale) * 0.5f, scale, 0.55f);
               ImGui::SetCursorScreenPos(ImVec2(min.x + padding, min.y + 4.0f * scale));
               ImGui::AlignTextToFramePadding();
               ImGui::TextUnformatted(label);
@@ -4472,10 +4504,16 @@ int main(int argc, char** argv)
             ImGui::SetNextWindowPos(ImGui::GetMainViewport()->GetCenter(), ImGuiCond_Always,
                                     ImVec2(0.5f, 0.5f));
             ImGui::SetNextWindowSize(ImVec2(380.0f * scale, 0.0f));
-            if (ImGui::BeginPopupModal("##netplay_choice", nullptr,
-                                       ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoTitleBar))
+            ImGui::PushStyleColor(ImGuiCol_PopupBg, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
+            ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
+            const bool netplay_choice = ImGui::BeginPopupModal(
+                "##netplay_choice", nullptr,
+                ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoTitleBar);
+            ImGui::PopStyleColor(2);
+            if (netplay_choice)
             {
-              arcade::TitleBadge(Tr("Netplay"), fonts.bold, ImGui::GetFontSize() * 1.3f, scale);
+              draw_popup_glass(frame_time);
+              arcade::PageTitle(Tr("Netplay"), fonts.bold, scale);
               ImGui::Spacing();
               const float width = ImGui::GetContentRegionAvail().x;
               if (ImGui::Button(Tr("Host Netplay"), ImVec2(width, 40.0f * scale)))
@@ -4503,12 +4541,15 @@ int main(int argc, char** argv)
                                     ImVec2(0.5f, 0.5f));
             ImGui::SetNextWindowSize(
                 ImVec2(std::min(window_size.x * 0.8f, 720.0f * scale), window_size.y * 0.78f));
-            if (ImGui::BeginPopupModal("##whats_new", nullptr,
-                                       ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoTitleBar))
+            ImGui::PushStyleColor(ImGuiCol_PopupBg, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
+            ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
+            const bool whats_new = ImGui::BeginPopupModal(
+                "##whats_new", nullptr, ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoTitleBar);
+            ImGui::PopStyleColor(2);
+            if (whats_new)
             {
-              arcade::TitleBadge(Tr("What's new"), fonts.bold, ImGui::GetFontSize() * 1.3f,
-                                 scale);
-              ImGui::Spacing();
+              draw_popup_glass(frame_time);
+              arcade::PageTitle(Tr("What's new"), fonts.bold, scale);
               const float close_height = 34.0f * scale;
               const ImVec2 room = ImGui::GetContentRegionAvail();
               DrawPatchNotes(patch_notes, fonts.bold,
@@ -4746,11 +4787,11 @@ int main(int argc, char** argv)
               ImGui::InputInt(Tr("UDP port"), &netplay_port);
               netplay_port = std::clamp(netplay_port, 1, 65535);
             }
-            ImGui::Checkbox(Tr("Automatic input buffer"), &automatic_buffer);
+            arcade::Switch(Tr("Automatic input buffer"), &automatic_buffer);
             if (!automatic_buffer)
             {
               ImGui::SetNextItemWidth(-netplay_label_width);
-              ImGui::SliderInt(Tr("Buffer frames"), &manual_buffer, 1, 20);
+              arcade::BlocksSlider(Tr("Buffer frames"), &manual_buffer, 1, 20);
             }
 #if defined(_WIN32)
             // Windows blocks a program that waits for connections until the
@@ -4969,60 +5010,33 @@ int main(int argc, char** argv)
       }
       if (current_page == LauncherPage::Settings)
       {
+    const ImVec2 settings_title_at = ImGui::GetCursorScreenPos();
+    const float settings_tabs_left =
+        settings_title_at.x +
+        arcade::TextSize(fonts.bold, 28.0f * scale, arcade::Capitals(Tr("Settings")).c_str()).x +
+        52.0f * scale;
     DrawPageHeader(Tr("Settings"),
                    Tr("Changes are saved right away and apply the next time you press PLAY."),
                    fonts.bold);
-    // Two columns of about the same height, so the page fits the window: the
-    // CPU core and the game window on the left, the picture and the sound on
-    // the right.
+    // Two sub-pages instead of scrolling (LT and RT, or their names, after
+    // the title; dots at the bottom): the game and its window; the picture
+    // and the sound.
+    bool settings_sub_changed = false;
+    const int settings_sub = arcade::SubPages(
+        "##settings_sub", {Tr("Game"), Tr("Picture & sound")}, fonts.bold, settings_tabs_left,
+        settings_title_at.y, scale, pad_moves && !fading && !popup_was_open,
+        &settings_sub_changed);
+    if (settings_sub_changed && title_scene.PageSound())
+      music.PlayEffect(*title_scene.PageSound());
+    arcade::PageDots(2, settings_sub, fonts.bold,
+                     ImGui::GetWindowPos().x + ImGui::GetWindowWidth() * 0.5f,
+                     ImGui::GetWindowPos().y + ImGui::GetWindowHeight() - 20.0f * scale, scale);
+    // Two columns of about the same height, so the page fits the window:
+    // first the game window on the left, the CPU core and the language on the
+    // right; then the picture on the left and the sound on the right.
     const bool settings_columns = BeginPageColumns("##settings_columns");
-    BeginSection("##settings_cpu", Tr("CPU CORE"));
-    ImGui::SetNextItemWidth(-1.0f);
-    if (ImGui::BeginCombo("##cpu_core", Tr(cpu_cores[cpu_core_index].text)))
+    if (settings_sub == 0)
     {
-      for (std::size_t i = 0; i < cpu_cores.size(); ++i)
-      {
-        const bool selected = cpu_core_index == static_cast<int>(i);
-        if (ImGui::Selectable(Tr(cpu_cores[i].text), selected))
-        {
-          const std::string previous = config.cpu_core;
-          config.cpu_core = cpu_cores[i].value;
-          config.resolution = resolutions[resolution_index].text;
-          config.show_fps_in_title = show_fps_in_title;
-          config.controller = selected_controller;
-          std::string error;
-          if (moderngekko::frontend::SaveConfig(user_directory, config, &error))
-          {
-            cpu_core_index = static_cast<int>(i);
-          }
-          else
-          {
-            config.cpu_core = previous;
-            std::lock_guard lock(dialog.mutex);
-            dialog.error = std::move(error);
-          }
-        }
-        if (selected)
-          ImGui::SetItemDefaultFocus();
-      }
-      ImGui::EndCombo();
-    }
-    // What the cores are, under the pointer, so the page fits the window.
-    ImGui::SetItemTooltip("%s\n%s",
-                          Tr("JIT64 is the validated full-speed mode. StaticRecomp runs the "
-                             "recompiled game code and is still being optimized."),
-                          Tr("Netplay: everyone plays with the host's CPU core."));
-    if (!cpu_core_override.empty())
-    {
-      ImGui::PushTextWrapPos(0.0f);
-      ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.3f, 1.0f), "%s",
-                         Format(Tr("MODERNGEKKO_STATICRECOMP=%s is set in the environment and "
-                                   "overrides this setting."),
-                                cpu_core_override.c_str())
-                             .c_str());
-      ImGui::PopTextWrapPos();
-    }
-    EndSection();
     BeginSection("##settings_display", Tr("DISPLAY"));
     // The section's labels share a column, so the lists next to them line up.
     const float display_label_x = ImGui::GetCursorPosX();
@@ -5032,17 +5046,19 @@ int main(int argc, char** argv)
           std::max(display_label_width, ImGui::CalcTextSize(Tr("4:3 borders")).x);
     display_label_width = std::max(display_label_width, ImGui::CalcTextSize(Tr("Window size")).x);
     display_label_width = std::max(display_label_width, ImGui::CalcTextSize(Tr("Shape")).x);
-    const float display_list_x = display_label_x + display_label_width + 16.0f * scale;
+    const float display_list_x =
+        std::max(display_label_x + display_label_width + 16.0f * scale, arcade::ControlX());
+    arcade::RowLine();
     ImGui::AlignTextToFramePadding();
     ImGui::TextUnformatted(Tr("Aspect ratio"));
     ImGui::SameLine(display_list_x);
     ImGui::SetNextItemWidth(-1.0f);
-    if (ImGui::BeginCombo("##aspect_ratio", Tr(aspect_ratios[aspect_ratio_index].text)))
+    if (arcade::BeginSelector("##aspect_ratio", Tr(aspect_ratios[aspect_ratio_index].text)))
     {
       for (std::size_t i = 0; i < aspect_ratios.size(); ++i)
       {
         const bool selected = aspect_ratio_index == static_cast<int>(i);
-        if (ImGui::Selectable(Tr(aspect_ratios[i].text), selected))
+        if (arcade::SelectorItem(Tr(aspect_ratios[i].text), selected))
         {
           const std::string previous = config.aspect_ratio;
           config.aspect_ratio = aspect_ratios[i].value;
@@ -5069,7 +5085,7 @@ int main(int argc, char** argv)
         DimWrappedText(Tr(aspect_ratios[i].description));
         ImGui::Unindent(12.0f * scale);
       }
-      ImGui::EndCombo();
+      arcade::EndSelector();
     }
     ImGui::SetItemTooltip("%s",
                           Tr("Netplay: the host's 16:9 or 4:3 choice applies to every player."));
@@ -5095,7 +5111,8 @@ int main(int argc, char** argv)
           dialog.error = std::move(error);
         }
       };
-      ImGui::AlignTextToFramePadding();
+      arcade::RowLine();
+    ImGui::AlignTextToFramePadding();
       ImGui::TextUnformatted(Tr("Shape"));
       ImGui::SameLine(display_list_x);
       const float number_width = ImGui::CalcTextSize("0000").x + ImGui::GetStyle().FramePadding.x * 2;
@@ -5190,18 +5207,19 @@ int main(int argc, char** argv)
         ImGui::PopTextWrapPos();
         ImGui::Unindent(12.0f * scale);
       };
-      ImGui::AlignTextToFramePadding();
+      arcade::RowLine();
+    ImGui::AlignTextToFramePadding();
       ImGui::TextUnformatted(Tr("4:3 borders"));
       ImGui::SameLine(display_list_x);
       ImGui::SetNextItemWidth(-1.0f);
-      if (ImGui::BeginCombo("##game_border", border_name(shown_border).c_str()))
+      if (arcade::BeginSelector("##game_border", border_name(shown_border).c_str()))
       {
-        if (ImGui::Selectable(Tr("None"), shown_border == "none"))
+        if (arcade::SelectorItem(Tr("None"), shown_border == "none"))
           choose_border("none");
         if (shown_border == "none")
           ImGui::SetItemDefaultFocus();
         describe_border(Tr("Black bars beside the game."));
-        if (ImGui::Selectable(Tr("Random"), shown_border == "random"))
+        if (arcade::SelectorItem(Tr("Random"), shown_border == "random"))
           choose_border("random");
         if (shown_border == "random")
           ImGui::SetItemDefaultFocus();
@@ -5210,13 +5228,13 @@ int main(int argc, char** argv)
         {
           const bool selected = shown_border == border.id;
           ImGui::PushID(border.id.c_str());
-          if (ImGui::Selectable(border.Name(border_language).c_str(), selected))
+          if (arcade::SelectorItem(border.Name(border_language).c_str(), selected))
             choose_border(border.id);
           ImGui::PopID();
           if (selected)
             ImGui::SetItemDefaultFocus();
         }
-        ImGui::EndCombo();
+        arcade::EndSelector();
       }
       ImGui::SetItemTooltip("%s", Tr("Pictures beside the game when it is shown in 4:3 on a "
                                      "wider screen. In Netplay too, only you see your choice."));
@@ -5236,16 +5254,17 @@ int main(int argc, char** argv)
           moderngekko::frontend::WindowSizeOf(config.window_size).width > 0 ?
                        config.window_size :
                        std::string(Tr("Automatic"));
-      ImGui::AlignTextToFramePadding();
+      arcade::RowLine();
+    ImGui::AlignTextToFramePadding();
       ImGui::TextUnformatted(Tr("Window size"));
       ImGui::SameLine(display_list_x);
       ImGui::SetNextItemWidth(-1.0f);
-      if (ImGui::BeginCombo("##window_size", shown_size_text.c_str()))
+      if (arcade::BeginSelector("##window_size", shown_size_text.c_str()))
       {
         for (const auto& option : window_sizes)
         {
           const bool selected = shown_size == &option;
-          if (ImGui::Selectable(Tr(option.text), selected))
+          if (arcade::SelectorItem(Tr(option.text), selected))
           {
             const std::string previous = config.window_size;
             config.window_size = option.value;
@@ -5269,14 +5288,14 @@ int main(int argc, char** argv)
             ImGui::Unindent(12.0f * scale);
           }
         }
-        ImGui::EndCombo();
+        arcade::EndSelector();
       }
       ImGui::SetItemTooltip("%s", Tr("The game window's size when it isn't fullscreen. How sharp "
                                      "the game looks is the internal resolution, in Graphics."));
     }
     ImGui::Spacing();
     const bool previous_fullscreen = fullscreen;
-    if (ImGui::Checkbox(Tr("Start in fullscreen"), &fullscreen))
+    if (arcade::Switch(Tr("Start in fullscreen"), &fullscreen))
     {
       config.fullscreen = fullscreen;
       config.resolution = resolutions[resolution_index].text;
@@ -5300,7 +5319,7 @@ int main(int argc, char** argv)
         ImGui::NewLine();
     }
     const bool previous_show_fps_in_title = show_fps_in_title;
-    if (ImGui::Checkbox(Tr("Show FPS in window title"), &show_fps_in_title))
+    if (arcade::Switch(Tr("Show FPS in window title"), &show_fps_in_title))
     {
       std::string error;
       if (!moderngekko::frontend::SaveConfig(user_directory, resolutions[resolution_index].text,
@@ -5316,26 +5335,29 @@ int main(int argc, char** argv)
       }
     }
     EndSection();
-    if (settings_columns)
-      NextPageColumn();
+    }
+    if (settings_sub == 1)
+    {
     BeginSection("##settings_graphics", Tr("GRAPHICS"));
     // Each list beside its label, the lists lined up as in DISPLAY.
     float graphics_label_width = 0.0f;
     for (const char* label : {Tr("Graphics backend"), Tr("Internal resolution"),
                               Tr("Screenshot resolution"), Tr("Visual effect")})
       graphics_label_width = std::max(graphics_label_width, ImGui::CalcTextSize(label).x);
-    const float graphics_list_x = ImGui::GetCursorPosX() + graphics_label_width + 16.0f * scale;
+    const float graphics_list_x =
+        std::max(ImGui::GetCursorPosX() + graphics_label_width + 16.0f * scale, arcade::ControlX());
+    arcade::RowLine();
     ImGui::AlignTextToFramePadding();
     ImGui::TextUnformatted(Tr("Graphics backend"));
     ImGui::SameLine(graphics_list_x);
     ImGui::SetNextItemWidth(-1.0f);
-    if (ImGui::BeginCombo("##graphics_backend",
+    if (arcade::BeginSelector("##graphics_backend",
                           graphics_backends[graphics_backend_index].text))
     {
       for (std::size_t i = 0; i < graphics_backends.size(); ++i)
       {
         const bool selected = graphics_backend_index == static_cast<int>(i);
-        if (ImGui::Selectable(graphics_backends[i].text, selected))
+        if (arcade::SelectorItem(graphics_backends[i].text, selected))
         {
           const std::string previous = config.graphics_backend;
           config.graphics_backend = graphics_backends[i].value;
@@ -5357,18 +5379,19 @@ int main(int argc, char** argv)
         if (selected)
           ImGui::SetItemDefaultFocus();
       }
-      ImGui::EndCombo();
+      arcade::EndSelector();
     }
+    arcade::RowLine();
     ImGui::AlignTextToFramePadding();
     ImGui::TextUnformatted(Tr("Internal resolution"));
     ImGui::SameLine(graphics_list_x);
     ImGui::SetNextItemWidth(-1.0f);
-    if (ImGui::BeginCombo("##resolution", resolutions[resolution_index].text))
+    if (arcade::BeginSelector("##resolution", resolutions[resolution_index].text))
     {
       for (std::size_t i = 0; i < resolutions.size(); ++i)
       {
         const bool selected = resolution_index == static_cast<int>(i);
-        if (ImGui::Selectable(resolutions[i].text, selected))
+        if (arcade::SelectorItem(resolutions[i].text, selected))
         {
           std::string error;
           if (moderngekko::frontend::SaveConfig(user_directory, resolutions[i].text,
@@ -5384,22 +5407,23 @@ int main(int argc, char** argv)
           }
         }
       }
-      ImGui::EndCombo();
+      arcade::EndSelector();
     }
     // What screenshots (F9, or the in-game menu's Take screenshot) are
     // taken at: the game is drawn at it just for them.
     const moderngekko::frontend::ScreenshotResolutionOption& shown_shot =
         moderngekko::frontend::FindScreenshotResolution(config.screenshot_resolution);
+    arcade::RowLine();
     ImGui::AlignTextToFramePadding();
     ImGui::TextUnformatted(Tr("Screenshot resolution"));
     ImGui::SameLine(graphics_list_x);
     ImGui::SetNextItemWidth(-1.0f);
-    if (ImGui::BeginCombo("##screenshot_resolution", Tr(shown_shot.text)))
+    if (arcade::BeginSelector("##screenshot_resolution", Tr(shown_shot.text)))
     {
       for (const auto& option : moderngekko::frontend::SupportedScreenshotResolutions())
       {
         const bool selected = &shown_shot == &option;
-        if (ImGui::Selectable(Tr(option.text), selected))
+        if (arcade::SelectorItem(Tr(option.text), selected))
         {
           const std::string previous = config.screenshot_resolution;
           config.screenshot_resolution = option.value;
@@ -5417,7 +5441,7 @@ int main(int argc, char** argv)
         if (selected)
           ImGui::SetItemDefaultFocus();
       }
-      ImGui::EndCombo();
+      arcade::EndSelector();
     }
     ImGui::SetItemTooltip("%s", Tr("F9 or Take screenshot in the in-game menu. The game is drawn "
                                    "at this resolution just for the picture, never below its "
@@ -5429,16 +5453,17 @@ int main(int argc, char** argv)
         moderngekko::frontend::FindEffect(config.effect);
     if (!shown_effect)
       shown_effect = &effects.front();
+    arcade::RowLine();
     ImGui::AlignTextToFramePadding();
     ImGui::TextUnformatted(Tr("Visual effect"));
     ImGui::SameLine(graphics_list_x);
     ImGui::SetNextItemWidth(-1.0f);
-    if (ImGui::BeginCombo("##effect", Tr(shown_effect->text)))
+    if (arcade::BeginSelector("##effect", Tr(shown_effect->text)))
     {
       for (const auto& effect : effects)
       {
         const bool selected = shown_effect == &effect;
-        if (ImGui::Selectable(Tr(effect.text), selected))
+        if (arcade::SelectorItem(Tr(effect.text), selected))
         {
           const std::string previous = config.effect;
           config.effect = effect.value;
@@ -5459,7 +5484,7 @@ int main(int argc, char** argv)
         DimWrappedText(Tr(effect.description));
         ImGui::Unindent(12.0f * scale);
       }
-      ImGui::EndCombo();
+      arcade::EndSelector();
     }
     ImGui::SetItemTooltip("%s", Tr("Drawn over the game's picture. Light enough for integrated "
                                    "graphics."));
@@ -5471,6 +5496,84 @@ int main(int argc, char** argv)
                       "of the graphics card: raise them while the game keeps 60 FPS (the "
                       "window's title shows them)."));
     EndSection();
+    }
+    if (settings_columns)
+      NextPageColumn();
+    if (settings_sub == 0)
+    {
+    BeginSection("##settings_cpu", Tr("CPU CORE"));
+    ImGui::SetNextItemWidth(-1.0f);
+    if (arcade::BeginSelector("##cpu_core", Tr(cpu_cores[cpu_core_index].text)))
+    {
+      for (std::size_t i = 0; i < cpu_cores.size(); ++i)
+      {
+        const bool selected = cpu_core_index == static_cast<int>(i);
+        if (arcade::SelectorItem(Tr(cpu_cores[i].text), selected))
+        {
+          const std::string previous = config.cpu_core;
+          config.cpu_core = cpu_cores[i].value;
+          config.resolution = resolutions[resolution_index].text;
+          config.show_fps_in_title = show_fps_in_title;
+          config.controller = selected_controller;
+          std::string error;
+          if (moderngekko::frontend::SaveConfig(user_directory, config, &error))
+          {
+            cpu_core_index = static_cast<int>(i);
+          }
+          else
+          {
+            config.cpu_core = previous;
+            std::lock_guard lock(dialog.mutex);
+            dialog.error = std::move(error);
+          }
+        }
+        if (selected)
+          ImGui::SetItemDefaultFocus();
+      }
+      arcade::EndSelector();
+    }
+    // What the cores are, under the pointer, so the page fits the window.
+    ImGui::SetItemTooltip("%s\n%s",
+                          Tr("JIT64 is the validated full-speed mode. StaticRecomp runs the "
+                             "recompiled game code and is still being optimized."),
+                          Tr("Netplay: everyone plays with the host's CPU core."));
+    if (!cpu_core_override.empty())
+    {
+      ImGui::PushTextWrapPos(0.0f);
+      ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.3f, 1.0f), "%s",
+                         Format(Tr("MODERNGEKKO_STATICRECOMP=%s is set in the environment and "
+                                   "overrides this setting."),
+                                cpu_core_override.c_str())
+                             .c_str());
+      ImGui::PopTextWrapPos();
+    }
+    EndSection();
+    BeginSection("##settings_language", Tr("LANGUAGE"));
+    {
+      const std::string previous = config.language;
+      if (DrawLanguageMenu(config.language, system_language, scale, true))
+      {
+        config.resolution = resolutions[resolution_index].text;
+        config.show_fps_in_title = show_fps_in_title;
+        config.controller = selected_controller;
+        std::string error;
+        if (moderngekko::frontend::SaveConfig(user_directory, config, &error))
+        {
+          moderngekko::frontend::ActiveLanguage() =
+              moderngekko::frontend::ResolveLanguage(config.language, system_language);
+        }
+        else
+        {
+          config.language = previous;
+          std::lock_guard lock(dialog.mutex);
+          dialog.error = std::move(error);
+        }
+      }
+    }
+    EndSection();
+    }
+    if (settings_sub == 1)
+    {
     BeginSection("##settings_audio", Tr("AUDIO"));
     // The game's own volume (also in the in-game menu's Quick settings),
     // written when the slider is let go. The launcher's music has its own,
@@ -5480,12 +5583,14 @@ int main(int argc, char** argv)
     if (has_music)
       audio_label_width =
           std::max(audio_label_width, ImGui::CalcTextSize(Tr("Launcher and lobby music")).x);
-    const float audio_slider_x = ImGui::GetCursorPosX() + audio_label_width + 16.0f * scale;
+    const float audio_slider_x =
+        std::max(ImGui::GetCursorPosX() + audio_label_width + 16.0f * scale, arcade::ControlX());
+    arcade::RowLine();
     ImGui::AlignTextToFramePadding();
     ImGui::TextUnformatted(Tr("Game volume"));
     ImGui::SameLine(audio_slider_x);
     ImGui::SetNextItemWidth(-1.0f);
-    ImGui::SliderInt("##game_volume", &config.game_volume, 0, 100, "%d %%",
+    arcade::BlocksSlider("##game_volume", &config.game_volume, 0, 100, "%d %%",
                      ImGuiSliderFlags_AlwaysClamp);
     if (ImGui::IsItemDeactivatedAfterEdit())
     {
@@ -5504,11 +5609,12 @@ int main(int argc, char** argv)
     {
       // The music of the launcher and the Netplay lobby: heard as it moves,
       // written when the slider is let go.
-      ImGui::AlignTextToFramePadding();
+      arcade::RowLine();
+    ImGui::AlignTextToFramePadding();
       ImGui::TextUnformatted(Tr("Launcher and lobby music"));
       ImGui::SameLine(audio_slider_x);
       ImGui::SetNextItemWidth(-1.0f);
-      if (ImGui::SliderInt("##music_volume", &config.music_volume, 0, 100,
+      if (arcade::BlocksSlider("##music_volume", &config.music_volume, 0, 100,
                            config.music_volume == 0 ? Tr("Off") : "%d %%",
                            ImGuiSliderFlags_AlwaysClamp))
         music.SetVolume(config.music_volume);
@@ -5526,6 +5632,7 @@ int main(int argc, char** argv)
       }
     }
     EndSection();
+    }
     if (settings_columns)
       EndPageColumns();
     }
@@ -5989,7 +6096,7 @@ int main(int argc, char** argv)
           heading = true;
         }
         bool on = std::ranges::find(config.mods, mod.id) != config.mods.end();
-        if (ImGui::Checkbox((mod.name + "##mod_" + mod.id).c_str(), &on))
+        if (arcade::Switch((mod.name + "##mod_" + mod.id).c_str(), &on))
           set_mod_on(mod.id, on);
         // One line per mod, its switch and name: the rest shows in a card
         // while the mouse, or the controller's selection, is on it.
@@ -6142,110 +6249,57 @@ int main(int argc, char** argv)
     }
     ImGui::EndChild();
     ImDrawList* window_list = ImGui::GetWindowDrawList();
+    // The page's glass switches on like an old TV when it opens.
+    if (!scene_play)
+      page_switch_on.Draw(ImGui::GetForegroundDrawList(), card_min, card_max, card_rounding,
+                          frame_time, scale);
     if (!footer_error.empty())
     {
       const float width = window_size.x - margin * 2.0f;
       const std::string shown = FitTextToWidth(ImGui::GetFont(), ImGui::GetFontSize(), footer_error,
-                                               width - 20.0f * scale);
-      const ImVec2 min(window_origin.x + margin, window_origin.y + bar_top - error_height);
-      const ImVec2 box(ImGui::CalcTextSize(shown.c_str()).x + 20.0f * scale,
+                                               width - 24.0f * scale);
+      const ImVec2 box(ImGui::CalcTextSize(shown.c_str()).x + 24.0f * scale,
                        error_height - 4.0f * scale);
-      window_list->AddRectFilled(min, ImVec2(min.x + box.x, min.y + box.y),
-                                 arcade::Colour(arcade::GLASS), box.y * 0.5f);
-      window_list->AddText(ImVec2(min.x + 10.0f * scale,
+      const ImVec2 min(std::round(window_origin.x + (window_size.x - box.x) * 0.5f),
+                       window_origin.y + carousel_top - error_height);
+      arcade::Glass(window_list, min, ImVec2(min.x + box.x, min.y + box.y), box.y * 0.5f, scale,
+                    0.6f);
+      window_list->AddText(ImVec2(min.x + 12.0f * scale,
                                   min.y + (box.y - ImGui::GetTextLineHeight()) * 0.5f),
-                           ImGui::GetColorU32(ImVec4(1.0f, 0.35f, 0.3f, 1.0f)), shown.c_str());
+                           ImGui::GetColorU32(ImVec4(1.0f, 0.42f, 0.36f, 1.0f)), shown.c_str());
       ImGui::SetCursorScreenPos(min);
       ImGui::Dummy(box);
       if (shown != footer_error)
         ImGui::SetItemTooltip("%s", footer_error.c_str());
     }
 
-    // The bar of pages.
-    arcade::DrawBar(window_list, ImVec2(window_origin.x, window_origin.y + bar_top),
-                    ImVec2(window_origin.x + window_size.x, window_origin.y + window_size.y),
-                    scale);
-    const float status_top = window_origin.y + bar_top + bar_line + 4.0f * scale;
-    const float bar_left = window_origin.x + margin;
-    const float bar_right = window_origin.x + window_size.x - margin;
-    // Its first line, from the left: the language; the controller's state,
-    // after a picture of what the game reads (a gamepad of its kind, or the
-    // keyboard); what its buttons or keys do here; and on the right a new
-    // version, when there is one, and the CPU core PLAY will use
-    // (MODERNGEKKO_STATICRECOMP wins over config.ini, as in the runner).
-    ImGui::SetCursorScreenPos(ImVec2(bar_left, status_top));
-    {
-      const std::string previous = config.language;
-      if (DrawLanguageMenu(config.language, system_language, scale, true))
-      {
-        config.resolution = resolutions[resolution_index].text;
-        config.show_fps_in_title = show_fps_in_title;
-        config.controller = selected_controller;
-        std::string error;
-        if (moderngekko::frontend::SaveConfig(user_directory, config, &error))
-        {
-          moderngekko::frontend::ActiveLanguage() =
-              moderngekko::frontend::ResolveLanguage(config.language, system_language);
-        }
-        else
-        {
-          config.language = previous;
-          std::lock_guard lock(dialog.mutex);
-          dialog.error = std::move(error);
-        }
-      }
-    }
-    float pills_left = bar_right;
-    {
-      const bool static_recomp = cpu_core_override.empty() ?
-                                     config.cpu_core == "staticrecomp" :
-                                     cpu_core_override.front() != '0';
-      const char* core = static_recomp ? "StaticRecomp" : "JIT64";
-      const float core_width = ImGui::CalcTextSize(core).x + 20.0f * scale;
-      float pills_width = core_width;
 #if defined(MODERNGEKKO_FRONTEND_VERSION) && defined(MODERNGEKKO_UPDATE_REPOSITORY)
+    // A new version: a small glass chip in the top right corner.
+    {
       const moderngekko::frontend::UpdateCheck::Status update = update_check.Get();
-      const bool new_version =
-          update.state == moderngekko::frontend::UpdateCheck::State::Available;
-      const float notice_width =
-          new_version ? ImGui::CalcTextSize(
-                            Format(Tr("NEW VERSION \xC2\xB7 %s"), update.latest.c_str()).c_str())
-                                .x +
-                            20.0f * scale :
-                        0.0f;
-      if (new_version)
-        pills_width += notice_width + ImGui::GetStyle().ItemSpacing.x;
-#endif
-      pills_left = bar_right - pills_width;
-      ImGui::SetCursorScreenPos(ImVec2(pills_left, status_top));
-#if defined(MODERNGEKKO_FRONTEND_VERSION) && defined(MODERNGEKKO_UPDATE_REPOSITORY)
-      if (new_version)
+      if (update.state == moderngekko::frontend::UpdateCheck::State::Available)
       {
+        const float notice_width =
+            ImGui::CalcTextSize(
+                Format(Tr("NEW VERSION \xC2\xB7 %s"), update.latest.c_str()).c_str())
+                .x +
+            20.0f * scale;
+        const ImVec2 at(window_origin.x + window_size.x - margin - notice_width - 8.0f * scale,
+                        window_origin.y + margin * 0.6f);
+        arcade::Glass(window_list, ImVec2(at.x - 6.0f * scale, at.y - 4.0f * scale),
+                      ImVec2(at.x + notice_width + 6.0f * scale,
+                             at.y + ImGui::GetFrameHeight() + 4.0f * scale),
+                      (ImGui::GetFrameHeight() + 8.0f * scale) * 0.5f, scale, 0.55f);
+        ImGui::SetCursorScreenPos(at);
         DrawNewVersionNotice(update.latest, scale);
-        ImGui::SameLine();
       }
-#endif
-      ImGui::SetCursorScreenPos(
-          ImVec2(bar_right - core_width,
-                 status_top + std::max(0.0f, (status_height - ImGui::GetTextLineHeight() -
-                                              6.0f * scale) *
-                                                 0.5f)));
-      DrawStatusPill(core, static_recomp ? ImVec4(1.0f, 0.75f, 0.3f, 1.0f) : LAUNCHER_ACCENT,
-                     scale, false);
     }
-    {
-      const float language_width = 140.0f * scale;
-      const ImVec2 line_min(bar_left + language_width + 14.0f * scale,
-                            status_top + (status_height - ImGui::GetTextLineHeight()) * 0.5f);
-      const float right = pills_left - 14.0f * scale;
-      const std::string status = Format(Tr("Controller: %s"), controller_status.Text().c_str());
-      std::optional<DeviceIcon> status_icon;
-      if (controller_index >= 0 && controller_index < static_cast<int>(controllers.size()))
-        status_icon = DeviceIconOf(SDL_GetGamepadTypeForID(controllers[controller_index].joystick_id));
-#ifdef MODERNGEKKO_GAMECUBE_CONTROLLERS
-      else if (controller_profile_exists)
-        status_icon = DeviceIcon::Keyboard;  // the first controller's keys still play
 #endif
+
+    // While testing the controller, or looking at a screenshot, what the
+    // buttons do: a small glass chip in the bottom right corner.
+    if (testing_controls || viewer_was_open)
+    {
       const bool keys_shown = last_input == LastInput::Keyboard;
       std::vector<FooterHint> hints;
       const FooterKey enter{Tr("Enter")};
@@ -6274,32 +6328,23 @@ int main(int argc, char** argv)
           hints = {{PadButton::South, std::nullopt, Tr("Accept"), {enter}},
                    {PadButton::East, std::nullopt, Tr("Go back"), {escape}}};
       }
-      float x = line_min.x;
-      if (status_icon)
-      {
-        const float icon_height = std::floor(ImGui::GetTextLineHeight() * 0.95f);
-        x += DrawDeviceIcon(
-                 window_list,
-                 ImVec2(x, line_min.y + std::floor((ImGui::GetTextLineHeight() - icon_height) *
-                                                   0.5f)),
-                 icon_height, *status_icon) +
-             6.0f * scale;
-      }
-      const float hints_width =
-          hints.empty() ? 0.0f :
-                          DrawFooterHints(hints, pad_style, keys_shown, fonts.bold, line_min,
-                                          right, false);
-      const std::string shown = FitTextToWidth(
-          ImGui::GetFont(), ImGui::GetFontSize(), status,
-          std::max(0.0f, right - x - hints_width - ImGui::GetStyle().ItemSpacing.x * 3.0f));
-      window_list->AddText(ImVec2(x, line_min.y), ImGui::GetColorU32(ImGuiCol_Text),
-                           shown.c_str());
       if (!hints.empty())
+      {
+        const float line_height = ImGui::GetTextLineHeight();
+        const float right = window_origin.x + window_size.x - margin - 12.0f * scale;
+        const float hints_width = DrawFooterHints(hints, pad_style, keys_shown, fonts.bold,
+                                                  ImVec2(0.0f, 0.0f), right, false);
+        const ImVec2 line_min(right - hints_width,
+                              window_origin.y + window_size.y - 24.0f * scale - line_height);
+        arcade::Glass(window_list, ImVec2(line_min.x - 12.0f * scale, line_min.y - 7.0f * scale),
+                      ImVec2(right + 12.0f * scale, line_min.y + line_height + 7.0f * scale),
+                      (line_height + 14.0f * scale) * 0.5f, scale, 0.6f);
         DrawFooterHints(hints, pad_style, keys_shown, fonts.bold, line_min, right, true);
+      }
     }
-    // Its second line: the pages, between LB and RB (Q and E on the
-    // keyboard). B (or Escape) comes back here, on the page shown; up goes
-    // into the page.
+
+    // The carousel of pages. B (or Escape) comes back to it, on the page
+    // shown; up goes into the page.
     {
       std::vector<const char*> tab_labels;
       int shown_tab = 0;
@@ -6312,9 +6357,10 @@ int main(int argc, char** argv)
       const bool tab_keys = last_input == LastInput::Keyboard ||
                             (io.BackendFlags & ImGuiBackendFlags_HasGamepad) == 0;
       bool tabs_focused = false;
-      const int tab = arcade::Tabs(tab_labels, shown_tab, fonts.bold, bar_left, bar_right,
-                                   status_top + status_height + 2.0f * scale, tabs_height, scale,
-                                   pad_style, tab_keys, focus_sidebar, &tabs_focused);
+      const int tab = arcade::Carousel(tab_labels, shown_tab, fonts.bold,
+                                       window_origin.x + window_size.x * 0.5f,
+                                       window_origin.y + window_size.y - 6.0f * scale, scale,
+                                       pad_style, tab_keys, focus_sidebar, &tabs_focused);
       focus_sidebar = false;
       if (tab >= 0)
       {
@@ -6478,8 +6524,11 @@ int main(int argc, char** argv)
     }
 
     ImGui::Render();
+    // The scene blurred for the pages' glass, before drawing to the window.
+    if (has_title)
+      title_scene.UpdateBlur(renderer, static_cast<double>(SDL_GetTicksNS()) / 1e9);
     SDL_SetRenderScale(renderer, io.DisplayFramebufferScale.x, io.DisplayFramebufferScale.y);
-    SDL_SetRenderDrawColor(renderer, 8, 8, 9, 255);  // ImGuiCol_WindowBg of the theme
+    SDL_SetRenderDrawColor(renderer, 4, 9, 5, 255);  // ImGuiCol_WindowBg of the theme
     SDL_RenderClear(renderer);
     if (has_title)
       title_scene.Render(renderer, static_cast<double>(SDL_GetTicksNS()) / 1e9, 1.0f);

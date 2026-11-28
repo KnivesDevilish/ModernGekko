@@ -44,7 +44,7 @@ struct Translation
 inline constexpr Translation SPANISH_TEXTS[] = {
     // Top bar, sidebar and footer
     {"PLAY", "JUGAR"},
-    {"Choose a game", "Elegir juego"},
+    {"Picture & sound", "Imagen y sonido"},
     {"What's new", "Novedades"},
     {"Netplay", "Netplay"},
     {"Close", "Cerrar"},
@@ -643,7 +643,7 @@ inline constexpr Translation SPANISH_TEXTS[] = {
 inline constexpr Translation JAPANESE_TEXTS[] = {
     // Top bar, sidebar and footer
     {"PLAY", "プレイ"},
-    {"Choose a game", "ゲームを選択"},
+    {"Picture & sound", "映像とサウンド"},
     {"What's new", "パッチノート"},
     {"Netplay", "ネットプレイ"},
     {"Close", "閉じる"},

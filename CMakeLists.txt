@@ -161,6 +161,10 @@ set(MODERNGEKKO_COMPLETE_SAVE "" CACHE PATH
 # newer published release (tools/launcher_update.hpp).
 set(MODERNGEKKO_FRONTEND_VERSION "" CACHE STRING
     "Version of the game's launcher, such as 0.1.0")
+# The build's name, shown small in a corner of the launcher's title screen
+# beside the version, such as 261128.5b2be4b (the day and the commit).
+set(MODERNGEKKO_BUILD_ID "" CACHE STRING
+    "Optional name of the build, shown on the launcher's title screen")
 set(MODERNGEKKO_UPDATE_REPOSITORY "" CACHE STRING
     "GitHub repository whose releases the launcher checks, such as Owner/Name")
 
@@ -935,6 +939,14 @@ if(MODERNGEKKO_ENABLE_DOLPHIN_RUNTIME)
     if(MODERNGEKKO_DISC_PREPARER_OUTPUT_NAME)
         target_compile_definitions(moderngekko-launcher PRIVATE
             MODERNGEKKO_DISC_PREPARER_FILENAME="${MODERNGEKKO_DISC_PREPARER_OUTPUT_NAME}")
+    endif()
+    if(MODERNGEKKO_FRONTEND_VERSION)
+        target_compile_definitions(moderngekko-launcher PRIVATE
+            MODERNGEKKO_TITLE_VERSION="${MODERNGEKKO_FRONTEND_VERSION}")
+    endif()
+    if(MODERNGEKKO_BUILD_ID)
+        target_compile_definitions(moderngekko-launcher PRIVATE
+            MODERNGEKKO_BUILD_ID="${MODERNGEKKO_BUILD_ID}")
     endif()
     if(MODERNGEKKO_ACCEPTED_SOURCE_DISC_ID)
         target_compile_definitions(moderngekko-launcher PRIVATE

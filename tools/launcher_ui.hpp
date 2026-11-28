@@ -33,8 +33,9 @@ namespace moderngekko::frontend::ui
 {
 namespace fs = std::filesystem;
 
-// Launcher colours and shapes: near-black neutral background, soft grey panels
-// and the lime accent. Sizes are unscaled; the caller applies ScaleAllSizes()
+// Launcher colours and shapes: the pages are on dark green frosted glass
+// (launcher_arcade.hpp), so panels and fields are see-through over it, with
+// the logo's green-yellow accent. Sizes are unscaled; the caller applies ScaleAllSizes()
 // for the display's DPI afterwards.
 inline void ApplyLauncherTheme(ImGuiStyle& style)
 {
@@ -44,8 +45,8 @@ inline void ApplyLauncherTheme(ImGuiStyle& style)
   style.ItemInnerSpacing = ImVec2(8.0f, 6.0f);
   style.ScrollbarSize = 12.0f;
   style.WindowRounding = 0.0f;
-  style.ChildRounding = 10.0f;
-  style.FrameRounding = 6.0f;
+  style.ChildRounding = 14.0f;
+  style.FrameRounding = 10.0f;
   style.PopupRounding = 8.0f;
   style.ScrollbarRounding = 8.0f;
   style.GrabRounding = 6.0f;
@@ -62,18 +63,18 @@ inline void ApplyLauncherTheme(ImGuiStyle& style)
   };
   ImVec4* colors = style.Colors;
   colors[ImGuiCol_Text] = ImVec4(0.94f, 0.94f, 0.94f, 1.0f);
-  colors[ImGuiCol_TextDisabled] = ImVec4(0.58f, 0.58f, 0.60f, 1.0f);
-  colors[ImGuiCol_WindowBg] = ImVec4(0.031f, 0.031f, 0.035f, 1.0f);
-  colors[ImGuiCol_ChildBg] = ImVec4(0.067f, 0.067f, 0.075f, 1.0f);
-  colors[ImGuiCol_PopupBg] = ImVec4(0.075f, 0.075f, 0.082f, 0.98f);
-  colors[ImGuiCol_Border] = ImVec4(0.157f, 0.157f, 0.169f, 1.0f);
+  colors[ImGuiCol_TextDisabled] = ImVec4(0.70f, 0.80f, 0.72f, 1.0f);
+  colors[ImGuiCol_WindowBg] = ImVec4(0.016f, 0.035f, 0.020f, 1.0f);
+  colors[ImGuiCol_ChildBg] = ImVec4(0.02f, 0.06f, 0.03f, 0.38f);
+  colors[ImGuiCol_PopupBg] = ImVec4(0.03f, 0.07f, 0.04f, 0.97f);
+  colors[ImGuiCol_Border] = ImVec4(1.0f, 1.0f, 1.0f, 0.10f);
   colors[ImGuiCol_BorderShadow] = ImVec4(0.0f, 0.0f, 0.0f, 0.0f);
-  colors[ImGuiCol_FrameBg] = ImVec4(0.098f, 0.098f, 0.110f, 1.0f);
-  colors[ImGuiCol_FrameBgHovered] = ImVec4(0.133f, 0.133f, 0.149f, 1.0f);
-  colors[ImGuiCol_FrameBgActive] = ImVec4(0.165f, 0.165f, 0.184f, 1.0f);
-  colors[ImGuiCol_Button] = ImVec4(0.110f, 0.110f, 0.122f, 1.0f);
-  colors[ImGuiCol_ButtonHovered] = ImVec4(0.153f, 0.153f, 0.169f, 1.0f);
-  colors[ImGuiCol_ButtonActive] = ImVec4(0.196f, 0.196f, 0.216f, 1.0f);
+  colors[ImGuiCol_FrameBg] = ImVec4(1.0f, 1.0f, 1.0f, 0.08f);
+  colors[ImGuiCol_FrameBgHovered] = ImVec4(1.0f, 1.0f, 1.0f, 0.14f);
+  colors[ImGuiCol_FrameBgActive] = ImVec4(1.0f, 1.0f, 1.0f, 0.18f);
+  colors[ImGuiCol_Button] = ImVec4(1.0f, 1.0f, 1.0f, 0.09f);
+  colors[ImGuiCol_ButtonHovered] = with_alpha(accent, 0.24f);
+  colors[ImGuiCol_ButtonActive] = with_alpha(accent, 0.34f);
   colors[ImGuiCol_Header] = with_alpha(accent, 0.18f);
   colors[ImGuiCol_HeaderHovered] = with_alpha(accent, 0.28f);
   colors[ImGuiCol_HeaderActive] = with_alpha(accent, 0.38f);
@@ -90,14 +91,14 @@ inline void ApplyLauncherTheme(ImGuiStyle& style)
   colors[ImGuiCol_TabDimmed] = colors[ImGuiCol_ChildBg];
   colors[ImGuiCol_TabDimmedSelected] = ImVec4(0.11f, 0.14f, 0.06f, 1.0f);
   colors[ImGuiCol_ScrollbarBg] = ImVec4(0.0f, 0.0f, 0.0f, 0.0f);
-  colors[ImGuiCol_ScrollbarGrab] = ImVec4(0.20f, 0.20f, 0.22f, 1.0f);
-  colors[ImGuiCol_ScrollbarGrabHovered] = ImVec4(0.26f, 0.26f, 0.29f, 1.0f);
-  colors[ImGuiCol_ScrollbarGrabActive] = ImVec4(0.32f, 0.32f, 0.35f, 1.0f);
+  colors[ImGuiCol_ScrollbarGrab] = ImVec4(1.0f, 1.0f, 1.0f, 0.18f);
+  colors[ImGuiCol_ScrollbarGrabHovered] = ImVec4(1.0f, 1.0f, 1.0f, 0.26f);
+  colors[ImGuiCol_ScrollbarGrabActive] = with_alpha(accent, 0.6f);
   colors[ImGuiCol_PlotHistogram] = accent;
   colors[ImGuiCol_TextLink] = accent;
   colors[ImGuiCol_NavCursor] = accent;
   colors[ImGuiCol_ResizeGrip] = ImVec4(0.0f, 0.0f, 0.0f, 0.0f);
-  colors[ImGuiCol_ModalWindowDimBg] = ImVec4(0.0f, 0.0f, 0.0f, 0.6f);
+  colors[ImGuiCol_ModalWindowDimBg] = ImVec4(0.0f, 0.04f, 0.01f, 0.55f);
   // StyleColorsDark() defaults that would still show up blue: the title bar of
   // popup windows (Netplay), selected text in input fields, the resize grip.
   colors[ImGuiCol_TitleBg] = colors[ImGuiCol_ChildBg];
@@ -445,9 +446,9 @@ inline bool DrawPrimaryButton(const char* label, ImFont* bold, float height, flo
 // Title of the Settings, Controls and Game Files pages, with one line of help.
 inline void DrawPageHeader(const char* title, const char* subtitle, ImFont* bold)
 {
-  // The arcade badge (launcher_arcade.hpp): the title in capitals on lime.
-  arcade::TitleBadge(title, bold, ImGui::GetFontSize() * 1.4f, ImGui::GetStyle().FontScaleDpi);
-  ImGui::Spacing();
+  // The title big and leaning, a stroke of the logo's green-yellow under it
+  // (launcher_arcade.hpp).
+  arcade::PageTitle(title, bold, ImGui::GetStyle().FontScaleDpi);
   ImGui::PushTextWrapPos(0.0f);
   ImGui::TextDisabled("%s", subtitle);
   ImGui::PopTextWrapPos();
@@ -458,23 +459,34 @@ inline void DrawPageHeader(const char* title, const char* subtitle, ImFont* bold
 // Every BeginSection() needs a matching EndSection().
 inline void BeginSection(const char* id, const char* heading)
 {
-  // A little less vertical padding than other panels, so that a page of
-  // several sections (Settings) needs less scrolling.
-  const ImVec2 padding = ImGui::GetStyle().WindowPadding;
-  ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(padding.x, padding.y * 0.75f));
+  // No panel of its own: on the page's glass, a small heading and its rows
+  // (launcher_arcade.hpp), a line between them, like a game's options.
+  ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
+  ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 2.0f));
   // Flattened: a gamepad's D-pad (or the keyboard's arrows) goes from a
-  // control in one panel to one in the next without entering the panel first.
+  // control in one section to one in the next without entering it first.
   ImGui::BeginChild(id, ImVec2(0.0f, 0.0f),
-                    ImGuiChildFlags_Borders | ImGuiChildFlags_AutoResizeY |
-                        ImGuiChildFlags_NavFlattened);
+                    ImGuiChildFlags_AutoResizeY | ImGuiChildFlags_NavFlattened |
+                        ImGuiChildFlags_AlwaysUseWindowPadding);
   ImGui::PopStyleVar();
-  ImGui::TextDisabled("%s", heading);
+  ImGui::PopStyleColor();
+  // A little more room between rows.
+  ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing,
+                      ImVec2(ImGui::GetStyle().ItemSpacing.x, ImGui::GetStyle().ItemSpacing.y * 1.5f));
+  ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyle().Colors[ImGuiCol_TextDisabled]);
+  ImGui::PushFont(nullptr, ImGui::GetStyle().FontSizeBase * 0.78f);
+  ImGui::TextUnformatted(heading);
+  ImGui::PopFont();
+  ImGui::PopStyleColor();
+  arcade::Rows() = arcade::RowState{true, 0};
 }
 
 inline void EndSection()
 {
+  arcade::Rows() = arcade::RowState{};
+  ImGui::PopStyleVar();
   ImGui::EndChild();
-  ImGui::Spacing();
+  ImGui::Dummy(ImVec2(0.0f, 10.0f * ImGui::GetStyle().FontScaleDpi));
 }
 
 // Two columns of sections side by side, so a page uses the launcher's width

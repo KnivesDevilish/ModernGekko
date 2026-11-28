@@ -75,6 +75,10 @@ public:
     }
     if (!m_layout.sound.empty())
       m_sound = LoadSoundEffect(folder / text::TextPath(m_layout.sound));
+    // page.wav, when there: the launcher plays it as its pages change.
+    std::error_code page_error;
+    if (std::filesystem::is_regular_file(folder / "page.wav", page_error))
+      m_page_sound = LoadSoundEffect(folder / "page.wav");
     return true;
   }
 
@@ -90,6 +94,13 @@ public:
       SDL_DestroyTexture(m_logo.texture);
     m_logo = {};
     m_sound.reset();
+    m_page_sound.reset();
+    for (SDL_Texture*& texture : m_blur)
+    {
+      if (texture)
+        SDL_DestroyTexture(texture);
+      texture = nullptr;
+    }
   }
 
   bool Loaded() const { return !m_layers.empty(); }
@@ -106,10 +117,84 @@ public:
       return 0.5625f;
     return height / width;
   }
+  // The scene blurred, for the glass of the pages (launcher_arcade.hpp);
+  // null before the first UpdateBlur().
+  SDL_Texture* Blurred() const { return m_blur[BLUR_STEPS - 1]; }
+
+  // The scene blurred, like frosted glass, the way games do it ("dual
+  // filter"): drawn small, a quarter of the output's size; halved twice, then
+  // doubled twice, each time as four copies a little apart, averaged. Call it
+  // before drawing to the window; it leaves the render target as it was.
+  void UpdateBlur(SDL_Renderer* renderer, double seconds)
+  {
+    if (m_layers.empty())
+      return;
+    int width = 0;
+    int height = 0;
+    if (!SDL_GetCurrentRenderOutputSize(renderer, &width, &height) || width < 64 || height < 64)
+      return;
+    // Quarter, eighth, sixteenth, then eighth and quarter again.
+    constexpr int DIVISORS[BLUR_STEPS] = {4, 8, 16, 8, 4};
+    SDL_Texture* previous = SDL_GetRenderTarget(renderer);
+    for (int step = 0; step < BLUR_STEPS; ++step)
+    {
+      const int w = std::max(1, width / DIVISORS[step]);
+      const int h = std::max(1, height / DIVISORS[step]);
+      float current_w = 0.0f;
+      float current_h = 0.0f;
+      if (m_blur[step] && (!SDL_GetTextureSize(m_blur[step], &current_w, &current_h) ||
+                           static_cast<int>(current_w) != w || static_cast<int>(current_h) != h))
+      {
+        SDL_DestroyTexture(m_blur[step]);
+        m_blur[step] = nullptr;
+      }
+      if (!m_blur[step])
+      {
+        m_blur[step] = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA8888,
+                                         SDL_TEXTUREACCESS_TARGET, w, h);
+        if (!m_blur[step])
+        {
+          SDL_SetRenderTarget(renderer, previous);
+          return;
+        }
+        SDL_SetTextureScaleMode(m_blur[step], SDL_SCALEMODE_LINEAR);
+      }
+      SDL_SetRenderTarget(renderer, m_blur[step]);
+      SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
+      SDL_RenderClear(renderer);
+      if (step == 0)
+      {
+        Render(renderer, seconds, 1.0f);
+        continue;
+      }
+      // Four copies of the step before, half a pixel (going down) or a
+      // pixel (going up) apart, each a quarter as bright, added up.
+      SDL_Texture* source = m_blur[step - 1];
+      const float offset = DIVISORS[step] > DIVISORS[step - 1] ? 0.5f : 1.0f;
+      SDL_SetTextureBlendMode(source, SDL_BLENDMODE_ADD);
+      SDL_SetTextureColorModFloat(source, 0.25f, 0.25f, 0.25f);
+      for (const float dx : {-offset, offset})
+      {
+        for (const float dy : {-offset, offset})
+        {
+          const SDL_FRect rect{dx - offset, dy - offset, static_cast<float>(w) + offset * 2.0f,
+                               static_cast<float>(h) + offset * 2.0f};
+          SDL_RenderTexture(renderer, source, nullptr, &rect);
+        }
+      }
+      SDL_SetTextureColorModFloat(source, 1.0f, 1.0f, 1.0f);
+      SDL_SetTextureBlendMode(source, SDL_BLENDMODE_BLEND);
+    }
+    SDL_SetTextureBlendMode(m_blur[BLUR_STEPS - 1], SDL_BLENDMODE_BLEND);
+    SDL_SetRenderTarget(renderer, previous);
+  }
+
   // How long the camera's move takes (0: TitleIntro's own).
   double MoveSeconds() const { return m_layout.move_seconds; }
   const LauncherImage& Logo() const { return m_logo; }
   const SoundEffect* Sound() const { return m_sound.get(); }
+  // Resources/title/page.wav, for a change of page; null without it.
+  const SoundEffect* PageSound() const { return m_page_sound.get(); }
 
   // Follows the mouse, smoothly: -1 to 1 across and down the window, 0 when
   // it is outside.
@@ -224,15 +309,20 @@ private:
   std::vector<SDL_Texture*> m_layers;
   LauncherImage m_logo;
   std::shared_ptr<const SoundEffect> m_sound;
+  std::shared_ptr<const SoundEffect> m_page_sound;
   ImVec2 m_mouse{0.0f, 0.0f};
+  static constexpr int BLUR_STEPS = 5;
+  SDL_Texture* m_blur[BLUR_STEPS] = {};
   mutable std::vector<title_motion::Vertex> m_mesh;
   mutable std::vector<SDL_Vertex> m_vertices;
 };
 
 // The title screen over the scene (origin, size: the window): the white, the
-// logo and the prompt, and the black it fades in from.
+// logo and the prompt, the build's name in the bottom right corner (build:
+// "v0.3.0 · BUILD 261128.5b2be4b", or none), and the black it fades in from.
 inline void DrawTitleScreen(ImDrawList* list, ImVec2 origin, ImVec2 size, const TitleIntro& intro,
-                            double now, const TitleScene& scene, ImFont* bold, const char* prompt)
+                            double now, const TitleScene& scene, ImFont* bold, const char* prompt,
+                            const char* build = nullptr)
 {
   const ImVec2 end(origin.x + size.x, origin.y + size.y);
   const float white = intro.White(now);
@@ -261,6 +351,21 @@ inline void DrawTitleScreen(ImDrawList* list, ImVec2 origin, ImVec2 size, const 
     splash_detail::AddLeaningText(list, bold, text_size, position,
                                   splash_detail::WithAlpha(IM_COL32(12, 26, 29, 255), prompt_alpha),
                                   prompt, 0.18f);
+  }
+  // The build's name: small, leaning, after a stroke of the logo's
+  // green-yellow; it goes with the logo.
+  if (bold && build && *build && logo_alpha > 0.0f)
+  {
+    const float text_size = std::max(12.0f, size.y * 0.021f);
+    const ImVec2 text = bold->CalcTextSizeA(text_size, FLT_MAX, 0.0f, build);
+    const float margin = size.y * 0.035f;
+    const ImVec2 at(origin.x + size.x - margin - text.x, origin.y + size.y - margin - text.y);
+    arcade::AddLeaningBand(list, ImVec2(at.x - text_size * 1.6f, at.y + text.y * 0.2f),
+                           ImVec2(at.x - text_size * 0.6f, at.y + text.y * 0.8f),
+                           splash_detail::WithAlpha(arcade::Colour(arcade::CHART), logo_alpha), 0.5f);
+    arcade::AddLeaningText(list, bold, text_size, at,
+                           splash_detail::WithAlpha(IM_COL32(12, 26, 29, 255), 0.62f * logo_alpha),
+                           build, 0.14f);
   }
   const float black = intro.Black(now);
   if (black > 0.0f)
