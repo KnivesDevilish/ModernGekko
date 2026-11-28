@@ -127,6 +127,7 @@ int main()
                                                  "grid 2 2 0 0 1 0 1 1 0 1 blend glow\n"
                                                  "grid 2 2 0 0 1 0 1 1 0 1 sparkle\n"
                                                  "camera 0.5 0.5 0.5 9\n"
+                                                 "camera 0.2 0.5 0.5 0.5\n"
                                                  "camera 2 0.5 0.5 2\n"
                                                  "move-seconds 60\n"
                                                  "title t.png\n"
@@ -242,10 +243,27 @@ int main()
     {
       const TitleCameraKey now = title_motion::CameraAt(*layout, m);
       largest_step = std::max(largest_step, std::abs(now.x - before.x) + std::abs(now.y - before.y));
-      Check(now.zoom >= 1.0f && now.zoom <= 4.0f, "zoom in range");
+      Check(now.zoom >= 1.0f && now.zoom <= 8.0f, "zoom in range");
       before = now;
     }
     Check(largest_step < 0.05f, "no jumps");
+    // One point, straight to the whole picture: close at the feet between
+    // Amy and Eggman, kept at the picture's bottom, zooming out evenly.
+    const std::optional<TitleLayout> straight = Parse("layer a.png\ntitle t.png\n"
+                                                      "camera 0 0.516 0.96 6\n");
+    Check(straight && straight->camera.size() == 1 && Near(straight->camera[0].zoom, 6.0f),
+          "up to 8 times closer");
+    const TitleCameraKey a = title_motion::CameraAt(*straight, 0.0f);
+    const TitleCameraKey halfway = title_motion::CameraAt(*straight, 0.5f);
+    Check(Near(a.zoom, 6.0f) && Near(halfway.zoom, std::sqrt(6.0f), 0.01f) &&
+              Near(halfway.x, (0.516f + 0.5f) * 0.5f, 0.001f),
+          "point A to B: straight, the zoom evenly");
+    TitleLayer flat_layer;
+    const title_motion::Rect at_a = title_motion::LayerRect(*straight, flat_layer, 1280.0f, 720.0f,
+                                                            2560.0f, 1440.0f, 0.0f, 0.0f, 0.0f, 0.0);
+    Check(Near(at_a.w, 1280.0f * 6.0f, 0.5f) && Near(at_a.y + at_a.h, 720.0f, 0.5f) &&
+              Near(at_a.x + 0.516f * at_a.w, 640.0f, 0.5f),
+          "point A: the feet in the middle, at the bottom");
     // Without camera points: from the focus, as before.
     const std::optional<TitleLayout> plain = Parse("layer a.png\ntitle t.png\nfocus 0.3 0.7\n"
                                                    "start-zoom 2.2\n");

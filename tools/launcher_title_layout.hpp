@@ -28,7 +28,7 @@
 //   camera <at> <x> <y> <zoom>
 //       Where the camera is at this point of its move (0 to 1): the point of
 //       the picture in the middle of the window (0 to 1 across and down), and
-//       how close (1 to 4). It goes smoothly through them; it starts at the
+//       how close (1 to 8). It goes smoothly through them; it starts at the
 //       focus (below) unless a point at 0 is given, and always ends on the
 //       whole picture.
 //   size <w> <h>        the pictures' size, that grids are placed in (the
@@ -36,7 +36,7 @@
 //   move-seconds <s>    how long the camera's move takes (1 to 10)
 //   title <picture>     the logo of the white title screen
 //   focus <x> <y>       where the camera starts, 0 to 1 across and down
-//   start-zoom <z>      how close it starts (1 to 4)
+//   start-zoom <z>      how close it starts (1 to 8)
 //   sound <file.wav>    played when a button is pressed on the title screen
 // A line it can't read is left out. Without any layer, or without the title
 // logo, the launcher opens as it did before.
@@ -207,7 +207,7 @@ inline std::optional<TitleLayout> ParseTitleLayout(std::istream& in)
     if (kind == "start-zoom")
     {
       float zoom = 0.0f;
-      if (Number(words, zoom, 1.0f, 4.0f))
+      if (Number(words, zoom, 1.0f, 8.0f))
         layout.start_zoom = zoom;
       continue;
     }
@@ -233,7 +233,7 @@ inline std::optional<TitleLayout> ParseTitleLayout(std::istream& in)
     {
       TitleCameraKey key;
       if (Number(words, key.at, 0.0f, 1.0f) && Number(words, key.x, 0.0f, 1.0f) &&
-          Number(words, key.y, 0.0f, 1.0f) && Number(words, key.zoom, 1.0f, 4.0f))
+          Number(words, key.y, 0.0f, 1.0f) && Number(words, key.zoom, 1.0f, 8.0f))
         layout.camera.push_back(key);
       continue;
     }
@@ -330,8 +330,15 @@ inline TitleCameraKey CameraAt(const TitleLayout& layout, float move)
     ++i;
   const TitleCameraKey& p1 = keys[i];
   const TitleCameraKey& p2 = keys[i + 1];
-  const TitleCameraKey& p0 = i > 0 ? keys[i - 1] : p1;
-  const TitleCameraKey& p3 = i + 2 < keys.size() ? keys[i + 2] : p2;
+  // Past the first and the last point, the curve goes on as it was going:
+  // between two points alone it is a straight line (the move eases in and
+  // out by itself).
+  const auto beyond = [](const TitleCameraKey& from, const TitleCameraKey& to) {
+    return TitleCameraKey{to.at, 2.0f * to.x - from.x, 2.0f * to.y - from.y,
+                          to.zoom * to.zoom / from.zoom};
+  };
+  const TitleCameraKey p0 = i > 0 ? keys[i - 1] : beyond(p2, p1);
+  const TitleCameraKey p3 = i + 2 < keys.size() ? keys[i + 2] : beyond(p1, p2);
   const float span = p2.at - p1.at;
   const float s = span > 0.0f ? Clamp01((move - p1.at) / span) : 1.0f;
   const auto curve = [s](float a, float b, float c, float d) {
@@ -344,7 +351,7 @@ inline TitleCameraKey CameraAt(const TitleLayout& layout, float move)
   camera.y = curve(p0.y, p1.y, p2.y, p3.y);
   camera.zoom = std::exp(curve(std::log(p0.zoom), std::log(p1.zoom), std::log(p2.zoom),
                                std::log(p3.zoom)));
-  camera.zoom = std::clamp(camera.zoom, 1.0f, 4.0f);
+  camera.zoom = std::clamp(camera.zoom, 1.0f, 8.0f);
   return camera;
 }
 
